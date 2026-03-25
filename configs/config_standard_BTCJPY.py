@@ -1,0 +1,22 @@
+# BUILD_ID: 2026-03-21_configs_canonical_btcjpy_preset_v1
+# -*- coding: utf-8 -*-
+
+BUILD_ID = "2026-03-21_configs_canonical_btcjpy_preset_v1"
+
+# BTC/JPY standard preset values mirrored from config.py.
+# Keep this file limited to the names that the symbol preset bridge applies.
+RANGE_ATR_TP_MULT = 0.88423
+RANGE_ATR_SL_MULT = 0.00625
+RANGE_ENTRY_MIN_ATR_BPS = 0.0
+RANGE_RSI_BUY_MAX = 71.0
+RANGE_ENTRY_MAX_EMA21_DIST_BPS = 999.0
+RANGE_TIMEOUT_BARS = 24
+RANGE_TRAIL_START_R = 0.90
+RANGE_TRAIL_BPS_FROM_HIGH = 8.0
+MAX_POSITION_PCT_OF_EQUITY = 0.15
+MAX_POSITION_NOTIONAL_PCT = MAX_POSITION_PCT_OF_EQUITY
+LEGACY_COMPOUND_PROFIT_ONLY_ENABLED = False
+LEGACY_COMPOUND_PROFIT_REINVEST_W = 1.0
+SIZE_CAP_RAMP_ENABLED = True
+SIZE_CAP_RAMP_K = 1.25
+SIZE_CAP_RAMP_MAX_PCT = 0.22

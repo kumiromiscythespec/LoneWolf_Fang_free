@@ -1,0 +1,1980 @@
+# BUILD_ID: 2026-03-25_free_gui_boundary_v1
+# BUILD_ID: 2026-03-19_market_data_root_stage1_patchfix_v2
+# BUILD_ID: 2026-03-12_gui_log_level_dropdown_v1
+from __future__ import annotations
+
+import csv
+import glob
+import io
+import json
+import logging
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import zipfile
+from collections import deque
+from datetime import datetime, timezone
+from typing import Optional
+
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTextEdit,
+    QComboBox,
+    QCheckBox,
+    QMessageBox,
+    QFileDialog,
+    QGroupBox,
+    QStackedWidget,
+)
+
+from app.core.settings_store import AppSettings, load_settings, save_settings
+from app.security.keyring_store import load_creds, save_creds, clear_creds
+from app.core.launch import BacktestSpec, LaunchSpec, ReplaySpec, launch_backtest, launch_runner, launch_replay, terminate_process
+from app.core.log_stream import start_log_threads
+from app.core.paths import ensure_runtime_dirs, get_paths
+from app.core.dataset import (
+    build_missing_dataset_message,
+    infer_prefix_year_from_source,
+    resolve_dataset_layout,
+    symbol_to_prefix,
+)
+from app.gui.exchange_registry import (
+    EXCHANGES,
+    ExchangeOption,
+    all_symbols as all_exchange_symbols,
+    get_exchange_option,
+    normalize_exchange_id,
+    normalize_symbol_for_exchange,
+    symbols_for_exchange,
+)
+from app.gui.logo_loader import LogoAsset, load_logo_asset, load_logo_icon, render_logo_pixmap
+from app.gui.win_titlebar import apply_dark_titlebar
+
+
+BUILD_ID = "2026-03-25_free_gui_boundary_v1"
+logger = logging.getLogger(__name__)
+
+_FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
+_RUNTIME_LOG_LEVEL_VALUES = ("MINIMAL",)
+
+
+def _mask_secret(s: str) -> str:
+    if not s:
+        return ""
+    if len(s) <= 6:
+        return "*" * len(s)
+    return s[:2] + ("*" * (len(s) - 4)) + s[-2:]
+
+
+def _normalize_exchange_id(raw: str) -> str:
+    return normalize_exchange_id(str(raw or "coincheck"), default="coincheck")
+
+
+def _normalize_run_mode(raw: str) -> str:
+    x = str(raw or "PAPER").strip().upper()
+    if x in _FREE_RUN_MODES:
+        return x
+    return "PAPER"
+
+
+def _normalize_runtime_log_level(raw: str) -> str:
+    _ = raw
+    return "MINIMAL"
+
+
+def _default_runtime_log_level() -> str:
+    return "MINIMAL"
+
+
+def _config_symbols() -> list[str]:
+    try:
+        import config as C  # local import to keep GUI module lightweight
+        syms = getattr(C, "SYMBOLS", None) or ["BTC/JPY"]
+        out = [str(x).strip() for x in syms if str(x).strip()]
+        return out or ["BTC/JPY"]
+    except Exception:
+        return ["BTC/JPY"]
+
+
+class MainWindow(QWidget):
+    sig_log = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("LoneWolf Fang Free")
+
+        self._paths = ensure_runtime_dirs()
+
+        self._proc: Optional[subprocess.Popen] = None
+        self._settings: AppSettings = load_settings()
+        self._exchange_id: str = _normalize_exchange_id(getattr(self._settings, "exchange_id", "coincheck"))
+        config_symbols = _config_symbols()
+        saved_symbol = str(getattr(self._settings, "symbol", "") or "").strip()
+        self._symbols: list[str] = symbols_for_exchange(self._exchange_id) or config_symbols
+        self._default_symbol: str = normalize_symbol_for_exchange(
+            self._exchange_id,
+            saved_symbol or (self._symbols[0] if self._symbols else "BTC/JPY"),
+        )
+        self._run_mode: str = self._load_run_mode_from_settings()
+        self._log_level: str = _normalize_runtime_log_level(getattr(self._settings, "log_level", "") or _default_runtime_log_level())
+        self._ip_whitelist_alerted: bool = False
+        self._default_dataset_root: str = os.path.abspath(str(getattr(self._paths, "market_data_dir", "") or self._paths.repo_root or os.getcwd()))
+        self._replay_data_path: str = str(self._settings.dataset_root or self._default_dataset_root)
+        self._replay_dataset_prefix: str = symbol_to_prefix(str(self._settings.dataset_prefix or self._default_symbol))
+        self._replay_dataset_year: int = int(self._settings.dataset_year or 0)
+        self._selected_replay_csv_source: str = ""
+        self._last_auto_range_source: str = ""
+        self._auto_range_enabled: bool = True
+        self._proc_role: str = "runner"
+        self._stderr_ring = deque(maxlen=2000)
+        self._replay_log_fp = None
+        self._replay_log_path: str = ""
+        self._live_log_fp = None
+        self._live_log_path: str = ""
+        self._last_replay_report_path: str = ""
+        self._last_replay_trade_log_path: str = ""
+        self._credential_inputs: dict[str, dict[str, QLineEdit]] = {}
+        self._credential_page_index: dict[str, int] = {}
+        self._titlebar_dark_applied = False
+        self._logo_asset: LogoAsset | None = load_logo_asset(self._paths.repo_root)
+        self._logo_icon = load_logo_icon(self._paths.repo_root)
+        self._last_logo_box: tuple[int, int] = (0, 0)
+        self._logo_label = QLabel()
+        if self._logo_icon is not None:
+            self.setWindowIcon(self._logo_icon)
+        self.resize(1120, 900)
+        self.setMinimumSize(960, 760)
+
+        # --- UI ---
+        root = QVBoxLayout()
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+        self.setLayout(root)
+
+        top_area = QHBoxLayout()
+        top_area.setSpacing(16)
+        top_form = QVBoxLayout()
+        top_form.setSpacing(8)
+        top_area.addLayout(top_form, stretch=1)
+        self._logo_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        self._logo_label.setStyleSheet("background: transparent; border: none;")
+        self._logo_label.setVisible(False)
+        top_area.addWidget(self._logo_label, 0, Qt.AlignRight | Qt.AlignTop)
+        root.addLayout(top_area)
+
+        # Preset row
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(QLabel("Preset"))
+        self.preset = QComboBox()
+        self.preset.addItems(["OFF", "SELL_SAFE"])
+        self.preset.setCurrentText(self._settings.preset if self._settings.preset in ("OFF", "SELL_SAFE") else "OFF")
+        row1.addWidget(self.preset)
+        row1.addStretch(1)
+        top_form.addLayout(row1)
+
+        # Exchange / Symbol / Mode row
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        row2.addWidget(QLabel("Exchange"))
+        self.exchange = QComboBox()
+        for item in EXCHANGES:
+            self.exchange.addItem(str(item.label), str(item.id))
+        row2.addWidget(self.exchange)
+        idx_exchange = max(0, self.exchange.findData(self._exchange_id))
+        self.exchange.setCurrentIndex(idx_exchange)
+        self._exchange_id = _normalize_exchange_id(str(self.exchange.currentData() or self._exchange_id))
+        self._symbols = symbols_for_exchange(self._exchange_id) or self._symbols
+        self._default_symbol = normalize_symbol_for_exchange(self._exchange_id, self._default_symbol)
+
+        row2.addWidget(QLabel("Symbol"))
+        self.symbol = QComboBox()
+        row2.addWidget(self.symbol)
+
+        row2.addWidget(QLabel("Run Mode"))
+        self.run_mode = QComboBox()
+        self.run_mode.addItems(list(_FREE_RUN_MODES))
+        self.run_mode.setCurrentText(self._run_mode)
+        row2.addWidget(self.run_mode)
+        self.log_level_label = QLabel("Log Level")
+        row2.addWidget(self.log_level_label)
+        self.log_level = QComboBox()
+        self.log_level.addItems(list(_RUNTIME_LOG_LEVEL_VALUES))
+        self.log_level.setCurrentText(self._log_level)
+        self.log_level.setEnabled(False)
+        row2.addWidget(self.log_level)
+        row2.addStretch(1)
+        top_form.addLayout(row2)
+
+        self.replay_group = QGroupBox("Replay / Backtest / Dataset")
+        replay_layout = QVBoxLayout()
+        replay_layout.setContentsMargins(12, 10, 12, 12)
+        replay_layout.setSpacing(8)
+        self.replay_group.setLayout(replay_layout)
+
+        row_replay_root = QHBoxLayout()
+        row_replay_root.setSpacing(8)
+        row_replay_root.addWidget(QLabel("Dataset Root"))
+        self.replay_data = QLineEdit(self._replay_data_path)
+        self.replay_data.setPlaceholderText("Select dataset root containing <PREFIX>_5m and <PREFIX>_1h")
+        self.replay_data.setReadOnly(True)
+        self.btn_select_replay = QPushButton("Select Replay Data...")
+        self.btn_select_replay_dir = QPushButton("Select Dataset Root...")
+        row_replay_root.addWidget(self.replay_data, stretch=1)
+        row_replay_root.addWidget(self.btn_select_replay)
+        row_replay_root.addWidget(self.btn_select_replay_dir)
+        replay_layout.addLayout(row_replay_root)
+
+        row_replay_controls = QHBoxLayout()
+        row_replay_controls.setSpacing(8)
+        self.replay_symbol = QComboBox()
+        self.replay_tf = QComboBox()
+        self.replay_tf.addItems(["5m", "1m", "15m", "1h"])
+        self.replay_tf.setCurrentText("5m")
+        self.replay_since_ym = QLineEdit("2025-01")
+        self.replay_since_ym.setPlaceholderText("YYYY-MM")
+        self.replay_until_ym = QLineEdit("2025-12")
+        self.replay_until_ym.setPlaceholderText("YYYY-MM")
+        self.btn_run_replay = QPushButton("Run Replay")
+        row_replay_controls.addWidget(QLabel("Symbol"))
+        row_replay_controls.addWidget(self.replay_symbol)
+        row_replay_controls.addWidget(QLabel("TF"))
+        row_replay_controls.addWidget(self.replay_tf)
+        row_replay_controls.addWidget(QLabel("Since"))
+        row_replay_controls.addWidget(self.replay_since_ym)
+        row_replay_controls.addWidget(QLabel("Until"))
+        row_replay_controls.addWidget(self.replay_until_ym)
+        row_replay_controls.addStretch(1)
+        row_replay_controls.addWidget(self.btn_run_replay)
+        replay_layout.addLayout(row_replay_controls)
+        self.btn_run_replay.setVisible(False)
+        root.addWidget(self.replay_group)
+
+        self.report_group = QGroupBox("Report")
+        report_layout = QVBoxLayout()
+        report_layout.setContentsMargins(12, 10, 12, 12)
+        report_layout.setSpacing(8)
+        self.report_group.setLayout(report_layout)
+
+        row_report = QHBoxLayout()
+        row_report.setSpacing(8)
+        self.report_enabled = QCheckBox("Enable report")
+        self.report_enabled.setChecked(bool(self._settings.report_enabled))
+        row_report.addWidget(self.report_enabled)
+        row_report.addWidget(QLabel("Report Out"))
+        self.report_out = QLineEdit(str(self._settings.report_out or self._default_report_out()))
+        row_report.addWidget(self.report_out, stretch=1)
+        self.btn_report_out = QPushButton("Browse...")
+        row_report.addWidget(self.btn_report_out)
+        report_layout.addLayout(row_report)
+
+        row_report_preview = QHBoxLayout()
+        row_report_preview.setSpacing(8)
+        row_report_preview.addWidget(QLabel("Resolved"))
+        self.report_preview = QLineEdit()
+        self.report_preview.setReadOnly(True)
+        row_report_preview.addWidget(self.report_preview, stretch=1)
+        report_layout.addLayout(row_report_preview)
+        root.addWidget(self.report_group)
+
+        self.creds_group = QGroupBox("API Credentials")
+        self.creds_group.setCheckable(True)
+        self.creds_group.setChecked(True)
+        creds_layout = QVBoxLayout()
+        creds_layout.setContentsMargins(12, 10, 12, 12)
+        creds_layout.setSpacing(8)
+        self.creds_group.setLayout(creds_layout)
+        self.creds_stack = QStackedWidget()
+        creds_layout.addWidget(self.creds_stack)
+        root.addWidget(self.creds_group)
+        for item in EXCHANGES:
+            page = QWidget()
+            page_layout = QVBoxLayout()
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(8)
+            page.setLayout(page_layout)
+
+            key_row = QHBoxLayout()
+            key_row.setSpacing(8)
+            key_row.addWidget(QLabel("Key"))
+            key_edit = QLineEdit()
+            key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+            key_edit.setClearButtonEnabled(True)
+            key_edit.setPlaceholderText(f"{item.label} key")
+            key_row.addWidget(key_edit)
+            page_layout.addLayout(key_row)
+
+            secret_row = QHBoxLayout()
+            secret_row.setSpacing(8)
+            secret_row.addWidget(QLabel("Secret"))
+            secret_edit = QLineEdit()
+            secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            secret_edit.setClearButtonEnabled(True)
+            secret_edit.setPlaceholderText(f"{item.label} secret")
+            secret_row.addWidget(secret_edit)
+            page_layout.addLayout(secret_row)
+
+            index = self.creds_stack.addWidget(page)
+            self._credential_page_index[str(item.id)] = int(index)
+            self._credential_inputs[str(item.id)] = {"key": key_edit, "secret": secret_edit}
+
+            creds = load_creds(str(item.id))
+            if creds is not None:
+                key_edit.setText(_mask_secret(creds.api_key))
+                secret_edit.setText(_mask_secret(creds.api_secret))
+
+        self.tools_group = QGroupBox("Diagnostics / Pipeline")
+        tools_layout = QVBoxLayout()
+        tools_layout.setContentsMargins(12, 10, 12, 12)
+        tools_layout.setSpacing(8)
+        self.tools_group.setLayout(tools_layout)
+
+        row_tools = QHBoxLayout()
+        row_tools.setSpacing(8)
+        self.btn_diag = QPushButton("Run Diagnostics")
+        self.btn_bundle = QPushButton("Create Support Bundle")
+        row_tools.addWidget(self.btn_diag)
+        row_tools.addWidget(self.btn_bundle)
+        row_tools.addStretch(1)
+        tools_layout.addLayout(row_tools)
+
+        row_pipeline = QHBoxLayout()
+        row_pipeline.setSpacing(8)
+        self.pipeline_from_ym = QLineEdit(datetime.now().strftime("%Y-%m"))
+        self.pipeline_from_ym.setPlaceholderText("YYYY-MM")
+        self.pipeline_to_ym = QLineEdit(datetime.now().strftime("%Y-%m"))
+        self.pipeline_to_ym.setPlaceholderText("YYYY-MM")
+        self.pipeline_force = QCheckBox("Force re-download")
+        self.btn_pipeline = QPushButton("Download + Precompute")
+        row_pipeline.addWidget(QLabel("From"))
+        row_pipeline.addWidget(self.pipeline_from_ym)
+        row_pipeline.addWidget(QLabel("To"))
+        row_pipeline.addWidget(self.pipeline_to_ym)
+        row_pipeline.addWidget(self.pipeline_force)
+        row_pipeline.addWidget(self.btn_pipeline)
+        row_pipeline.addStretch(1)
+        tools_layout.addLayout(row_pipeline)
+        root.addWidget(self.tools_group)
+
+        row_buttons = QHBoxLayout()
+        row_buttons.setSpacing(8)
+        self.btn_save = QPushButton("Save Settings")
+        self.btn_clear = QPushButton("Clear API Keys")
+        self.btn_start = QPushButton("Start")
+        self.btn_start.setCheckable(True)
+        self.btn_start.setStyleSheet(
+            "QPushButton:checked, QPushButton:checked:disabled "
+            "{ background-color: #111; color: #fff; font-weight: 700; border: 1px solid #111; }"
+        )
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setEnabled(False)
+        row_buttons.addWidget(self.btn_save)
+        row_buttons.addWidget(self.btn_clear)
+        row_buttons.addStretch(1)
+        row_buttons.addWidget(self.btn_start)
+        row_buttons.addWidget(self.btn_stop)
+        root.addLayout(row_buttons)
+
+        self._refresh_replay_symbol_options(preferred=self._default_symbol)
+        first_inputs = self._credential_inputs.get(self._exchange_id, {})
+        self.api_key = first_inputs.get("key")
+        self.api_secret = first_inputs.get("secret")
+        self._sync_exchange_fields()
+        self._refresh_report_preview()
+        self._sync_mode_ui()
+        self._refresh_brand_logo(force=True)
+
+        # Log view
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.log.document().setMaximumBlockCount(3000)
+        self.log.setMinimumHeight(260)
+        root.addWidget(self.log, stretch=1)
+
+        # Signals
+        self.btn_save.clicked.connect(self.on_save)
+        self.btn_clear.clicked.connect(self.on_clear_keys)
+        self.btn_start.clicked.connect(self.on_start)
+        self.btn_stop.clicked.connect(self.on_stop)
+        self.btn_report_out.clicked.connect(self.on_select_report_out)
+        self.btn_diag.clicked.connect(self.on_run_diagnostics)
+        self.btn_bundle.clicked.connect(self.on_create_support_bundle)
+        self.btn_pipeline.clicked.connect(self.on_run_pipeline)
+        self.btn_select_replay.clicked.connect(self.on_select_replay_data)
+        self.btn_select_replay_dir.clicked.connect(self.on_select_replay_folder)
+        self.btn_run_replay.clicked.connect(self.on_run_replay)
+        self.exchange.currentTextChanged.connect(self._on_exchange_changed)
+        self.symbol.currentTextChanged.connect(self._on_symbol_changed)
+        self.run_mode.currentTextChanged.connect(self._on_run_mode_changed)
+        self.log_level.currentTextChanged.connect(self._on_log_level_changed)
+        self.creds_group.toggled.connect(self.creds_stack.setVisible)
+        self.report_out.textChanged.connect(self._refresh_report_preview)
+        self.report_enabled.toggled.connect(self._refresh_report_preview)
+        self.replay_since_ym.textEdited.connect(self._on_replay_range_edited)
+        self.replay_until_ym.textEdited.connect(self._on_replay_range_edited)
+        self.sig_log.connect(self._append)
+
+        # Timer to poll process exit
+        self._timer = QTimer(self)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self._poll_proc)
+        self._timer.start()
+
+        self._append("[ui] Ready.\n")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._titlebar_dark_applied:
+            self._refresh_brand_logo(force=True)
+            return
+        self._titlebar_dark_applied = True
+        QTimer.singleShot(0, lambda: apply_dark_titlebar(self))
+        QTimer.singleShot(0, lambda: self._refresh_brand_logo(force=True))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_brand_logo()
+
+    def _last_run_json_path(self) -> str:
+        return os.path.abspath(os.path.join(self._paths.exports_dir, "last_run.json"))
+
+    def _load_last_run_payload(self) -> dict[str, object] | None:
+        path = self._last_run_json_path()
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            return None
+        return raw if isinstance(raw, dict) else None
+
+    def _last_run_export_dir(self) -> str:
+        payload = self._load_last_run_payload()
+        if not payload:
+            return ""
+        raw = str(payload.get("export_dir", "") or "").strip().strip("\"' ")
+        if not raw:
+            return ""
+        if os.path.isabs(raw):
+            cand = os.path.abspath(raw)
+        else:
+            cand = os.path.abspath(os.path.join(self._paths.repo_root, raw))
+        return cand if os.path.isdir(cand) else ""
+
+    def _glob_existing_files(self, *patterns: str) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for pat in patterns:
+            if not str(pat or "").strip():
+                continue
+            for fp in glob.glob(pat):
+                ab = os.path.abspath(fp)
+                if ab in seen or not os.path.isfile(ab):
+                    continue
+                seen.add(ab)
+                out.append(ab)
+        return out
+
+    def _extend_targets_with_fallback(
+        self,
+        targets: list[str],
+        primary_patterns: list[str],
+        fallback_patterns: list[str],
+    ) -> None:
+        for pat in primary_patterns:
+            primary = self._glob_existing_files(pat)
+            if primary:
+                targets.extend(primary)
+                return
+        targets.extend(self._glob_existing_files(*fallback_patterns))
+
+    def _format_diag_artifact_path(self, path: str, *, runtime_exports: str, repo_root: str) -> str:
+        ab = os.path.abspath(path)
+        runtime_abs = os.path.abspath(runtime_exports)
+        repo_abs = os.path.abspath(repo_root)
+        try:
+            if os.path.commonpath([ab, runtime_abs]) == runtime_abs:
+                return str(os.path.relpath(ab, runtime_abs))
+        except Exception:
+            pass
+        try:
+            return str(os.path.relpath(ab, repo_abs))
+        except Exception:
+            return str(os.path.basename(ab))
+
+    def _default_report_out(self) -> str:
+        export_dir = self._last_run_export_dir()
+        if export_dir:
+            cand = os.path.abspath(os.path.join(export_dir, "report.json"))
+            if os.path.isfile(cand):
+                return cand
+        return os.path.abspath(os.path.join(self._paths.exports_dir, "report.json"))
+
+    def _report_out_value(self) -> str:
+        return str(self.report_out.text() or "").strip() or self._default_report_out()
+
+    def _report_out_abs(self) -> str:
+        value = self._report_out_value()
+        if os.path.isabs(value):
+            return os.path.abspath(value)
+        return os.path.abspath(os.path.join(self._paths.repo_root, value))
+
+    def _refresh_report_preview(self) -> None:
+        suffix = "" if self.report_enabled.isChecked() else " (disabled)"
+        self.report_preview.setText(f"{self._report_out_abs()}{suffix}")
+
+    def _ensure_report_parent(self) -> None:
+        if not self.report_enabled.isChecked():
+            return
+        out_path = self._report_out_abs()
+        parent = os.path.dirname(out_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+    def _logo_box_size(self) -> tuple[int, int]:
+        max_width = max(44, min(120, int(round(self.width() * 0.10))))
+        max_height = max(44, min(96, int(round(self.height() * 0.10))))
+        return (max_width, max_height)
+
+    def _clear_brand_logo(self) -> None:
+        self._last_logo_box = (0, 0)
+        self._logo_label.clear()
+        self._logo_label.setToolTip("")
+        self._logo_label.setVisible(False)
+
+    def _refresh_brand_logo(self, *, force: bool = False) -> None:
+        if self._logo_asset is None:
+            self._clear_brand_logo()
+            return
+        box_width, box_height = self._logo_box_size()
+        if (not force) and (self._last_logo_box == (box_width, box_height)):
+            return
+        pixmap = render_logo_pixmap(
+            self._logo_asset,
+            box_width=box_width,
+            box_height=box_height,
+            device_pixel_ratio=self.devicePixelRatioF(),
+        )
+        if pixmap is None:
+            self._clear_brand_logo()
+            return
+        self._last_logo_box = (box_width, box_height)
+        device_ratio = max(1.0, float(pixmap.devicePixelRatio()))
+        logical_size = QSize(
+            max(1, int(round(pixmap.width() / device_ratio))),
+            max(1, int(round(pixmap.height() / device_ratio))),
+        )
+        self._logo_label.setPixmap(pixmap)
+        self._logo_label.setFixedSize(logical_size)
+        self._logo_label.setToolTip(str(self._logo_asset.source_path))
+        self._logo_label.setVisible(True)
+
+    def _append(self, s: str) -> None:
+        text = str(s or "")
+        if self.thread() != self.log.thread():
+            self.sig_log.emit(text)
+            return
+
+        self._maybe_show_ip_whitelist_hint(text)
+        self._capture_replay_artifact_paths(text)
+        for ln in text.splitlines():
+            if ln.startswith("[stderr] "):
+                self._stderr_ring.append(ln)
+        try:
+            if str(self._proc_role) in {"replay", "backtest"} and self._replay_log_fp is not None:
+                self._replay_log_fp.write(text)
+                self._replay_log_fp.flush()
+            if str(self._proc_role) == "runner" and self._live_log_fp is not None:
+                self._live_log_fp.write(text)
+                self._live_log_fp.flush()
+        except Exception:
+            pass
+
+        self.log.moveCursor(QTextCursor.End)
+        self.log.insertPlainText(text)
+        self.log.moveCursor(QTextCursor.End)
+
+    def _selected_exchange_id(self) -> str:
+        try:
+            return _normalize_exchange_id(str(self.exchange.currentData() or self.exchange.currentText()))
+        except Exception:
+            return _normalize_exchange_id(self._exchange_id)
+
+    def _selected_exchange_option(self) -> ExchangeOption:
+        return get_exchange_option(self._selected_exchange_id())
+
+    def _selected_symbol(self) -> str:
+        try:
+            value = str(self.symbol.currentData() or self.symbol.currentText() or "").strip()
+        except Exception:
+            value = ""
+        return normalize_symbol_for_exchange(self._selected_exchange_id(), value or self._default_symbol)
+
+    def _available_replay_symbols(self) -> list[str]:
+        out: list[str] = []
+        candidate_syms = (
+            list(all_exchange_symbols(include_hidden=False))
+            + list(_config_symbols())
+            + list(self._symbols or [])
+            + [self._default_symbol]
+        )
+        for sym in candidate_syms:
+            raw = str(sym or "").strip()
+            if (not raw) or raw in out:
+                continue
+            out.append(raw)
+        return out or ["BTC/JPY", "BTC/USDT"]
+
+    def _selected_replay_symbol(self) -> str:
+        try:
+            value = str(self.replay_symbol.currentData() or self.replay_symbol.currentText() or "").strip()
+        except Exception:
+            value = ""
+        return str(value or self._selected_symbol() or self._default_symbol)
+
+    def _refresh_replay_symbol_options(self, preferred: str | None = None) -> None:
+        if not hasattr(self, "replay_symbol"):
+            return
+        target = str(preferred or self._selected_replay_symbol() or self._selected_symbol() or self._default_symbol).strip()
+        symbols = self._available_replay_symbols()
+        self.replay_symbol.blockSignals(True)
+        self.replay_symbol.clear()
+        for sym in symbols:
+            self.replay_symbol.addItem(str(sym), str(sym))
+        idx = self.replay_symbol.findData(target)
+        if idx < 0:
+            idx = self.replay_symbol.findData(self._selected_symbol())
+        if idx < 0:
+            idx = 0
+        self.replay_symbol.setCurrentIndex(int(idx))
+        self.replay_symbol.blockSignals(False)
+
+    def _parse_yyyy_mm(self, raw: str) -> tuple[int, int]:
+        text = str(raw or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}", text):
+            raise ValueError(f"invalid YYYY-MM: {text}")
+        year = int(text[:4])
+        month = int(text[5:7])
+        if month < 1 or month > 12:
+            raise ValueError(f"invalid month: {text}")
+        return (int(year), int(month))
+
+    def _ym_start_ms_utc(self, year: int, month: int) -> int:
+        dt0 = datetime(int(year), int(month), 1, tzinfo=timezone.utc)
+        return int(dt0.timestamp() * 1000)
+
+    def _replay_range_ms_from_inputs(self) -> tuple[int, int]:
+        since_year, since_month = self._parse_yyyy_mm(self.replay_since_ym.text())
+        until_year, until_month = self._parse_yyyy_mm(self.replay_until_ym.text())
+        since_ms = self._ym_start_ms_utc(int(since_year), int(since_month))
+        if int(until_month) == 12:
+            until_year_ex = int(until_year) + 1
+            until_month_ex = 1
+        else:
+            until_year_ex = int(until_year)
+            until_month_ex = int(until_month) + 1
+        until_ms = self._ym_start_ms_utc(int(until_year_ex), int(until_month_ex))
+        return (int(since_ms), int(until_ms))
+
+    def _month_range_cli_ymd_from_ms(self, since_ms: int, until_ms: int) -> tuple[str, str]:
+        if int(until_ms) <= int(since_ms):
+            raise ValueError("invalid month range")
+        since_ymd = datetime.fromtimestamp(int(since_ms) / 1000.0, tz=timezone.utc).strftime("%Y-%m-%d")
+        until_ymd = datetime.fromtimestamp((int(until_ms) - 1) / 1000.0, tz=timezone.utc).strftime("%Y-%m-%d")
+        return (str(since_ymd), str(until_ymd))
+
+    def _resolve_artifact_path(self, raw_path: str) -> str:
+        text = str(raw_path or "").strip().strip("\"' ")
+        if not text:
+            return ""
+        if os.path.isabs(text):
+            return text
+        p = get_paths()
+        candidates = [
+            os.path.abspath(os.path.join(str(p.runtime_dir), text)),
+            os.path.abspath(os.path.join(str(p.repo_root), text)),
+            os.path.abspath(text),
+        ]
+        for cand in candidates:
+            if os.path.exists(cand):
+                return str(cand)
+        return str(candidates[0])
+
+    def _capture_replay_artifact_paths(self, text: str) -> None:
+        for ln in str(text or "").splitlines():
+            m_report = re.search(r"\[REPLAY\]\[REPORT\]\s+path=(.+?)(?:\s+trades=|$)", ln)
+            if m_report:
+                self._last_replay_report_path = self._resolve_artifact_path(str(m_report.group(1)))
+                continue
+            m_trade = re.search(r"\[REPLAY\]\s+trade_log_path=(.+)$", ln)
+            if m_trade:
+                self._last_replay_trade_log_path = self._resolve_artifact_path(str(m_trade.group(1)))
+
+    def _credential_widgets(self, exchange_id: str | None = None) -> dict[str, QLineEdit]:
+        return self._credential_inputs.get(str(exchange_id or self._selected_exchange_id()), {})
+
+    def _resolve_runtime_creds(self, exchange_id: str | None = None) -> tuple[str, str]:
+        ex = str(exchange_id or self._selected_exchange_id())
+        widgets = self._credential_widgets(ex)
+        key_text = str((widgets.get("key").text() if widgets.get("key") is not None else "") or "").strip()
+        secret_text = str((widgets.get("secret").text() if widgets.get("secret") is not None else "") or "").strip()
+        key_plain = bool(key_text) and ("*" not in key_text)
+        secret_plain = bool(secret_text) and ("*" not in secret_text)
+        if key_plain and secret_plain:
+            return (key_text, secret_text)
+        creds = load_creds(ex)
+        if creds is not None:
+            return (str(creds.api_key or ""), str(creds.api_secret or ""))
+        if key_plain or secret_plain:
+            return (key_text if key_plain else "", secret_text if secret_plain else "")
+        return ("", "")
+
+    def _selected_run_mode(self) -> str:
+        try:
+            return _normalize_run_mode(self.run_mode.currentText())
+        except Exception:
+            return _normalize_run_mode(self._run_mode)
+
+    def _selected_log_level(self) -> str:
+        return "MINIMAL"
+
+    def _load_run_mode_from_settings(self) -> str:
+        mode = _normalize_run_mode(getattr(self._settings, "run_mode", "PAPER"))
+        try:
+            p = get_paths()
+            if os.path.exists(p.settings_path):
+                with open(p.settings_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    mode = _normalize_run_mode(raw.get("run_mode", mode))
+        except Exception:
+            pass
+        return mode
+
+    def _save_run_mode_to_settings(self) -> None:
+        mode = self._selected_run_mode()
+        self._run_mode = mode
+        self._settings.run_mode = mode
+        p = get_paths()
+        data: dict[str, object] = {}
+        try:
+            if os.path.exists(p.settings_path):
+                with open(p.settings_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    data = raw
+        except Exception:
+            data = {}
+        data["run_mode"] = str(mode)
+        with open(p.settings_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def _sync_exchange_fields(self) -> None:
+        ex = self._selected_exchange_id()
+        self._exchange_id = ex
+        symbols = symbols_for_exchange(ex) or self._symbols or [self._default_symbol]
+        current_symbol = self._selected_symbol() if self.symbol.count() > 0 else self._default_symbol
+        target_symbol = normalize_symbol_for_exchange(ex, current_symbol)
+        self.symbol.blockSignals(True)
+        self.symbol.clear()
+        for sym in symbols:
+            self.symbol.addItem(str(sym), str(sym))
+        idx_symbol = max(0, self.symbol.findData(target_symbol))
+        self.symbol.setCurrentIndex(idx_symbol)
+        self.symbol.blockSignals(False)
+        self._symbols = list(symbols)
+        self._default_symbol = target_symbol
+        page_index = self._credential_page_index.get(ex, 0)
+        self.creds_stack.setCurrentIndex(int(page_index))
+        is_visible = bool(self.creds_group.isChecked())
+        self.creds_stack.setVisible(is_visible)
+        active_inputs = self._credential_widgets(ex)
+        self.api_key = active_inputs.get("key")
+        self.api_secret = active_inputs.get("secret")
+        self._refresh_replay_symbol_options(preferred=target_symbol)
+
+    def _on_exchange_changed(self, _value: str) -> None:
+        self._sync_exchange_fields()
+
+    def _on_symbol_changed(self, _value: str) -> None:
+        self._default_symbol = self._selected_symbol()
+        self._refresh_replay_symbol_options(preferred=self._default_symbol)
+
+    def _sync_mode_ui(self) -> None:
+        mode = self._selected_run_mode()
+        self.replay_group.setVisible(mode in {"REPLAY", "BACKTEST"})
+        self.creds_group.setVisible(mode == "PAPER")
+        if mode == "PAPER":
+            self.btn_start.setText("Start Paper")
+        elif mode == "REPLAY":
+            self.btn_start.setText("Run Replay")
+        elif mode == "BACKTEST":
+            self.btn_start.setText("Run Backtest")
+        else:
+            self.btn_start.setText("Start Paper")
+
+    def _on_run_mode_changed(self, _value: str) -> None:
+        self._run_mode = self._selected_run_mode()
+        self._sync_mode_ui()
+
+    def _on_log_level_changed(self, _value: str) -> None:
+        self._log_level = "MINIMAL"
+
+    def on_select_report_out(self) -> None:
+        start_path = self._report_out_abs()
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Report Output",
+            start_path,
+            "JSON files (*.json);;All files (*.*)",
+        )
+        if not path:
+            return
+        self.report_out.setText(os.path.abspath(path))
+
+    def _open_replay_log_file(self, prefix: str = "replay") -> None:
+        self._close_replay_log_file()
+        self._stderr_ring.clear()
+        try:
+            p = get_paths()
+            os.makedirs(p.logs_dir, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = str(prefix or "replay").strip().lower() or "replay"
+            self._replay_log_path = os.path.join(p.logs_dir, f"{name}_{stamp}.log")
+            self._replay_log_fp = open(self._replay_log_path, "w", encoding="utf-8")
+            self._append(f"[ui] {name}_log_file={self._replay_log_path}\n")
+        except Exception as e:
+            self._replay_log_fp = None
+            self._replay_log_path = ""
+            self._append(f"[ui] {str(prefix or 'replay').strip().lower() or 'replay'}_log_open_error={e}\n")
+
+    def _close_replay_log_file(self) -> None:
+        fp = self._replay_log_fp
+        self._replay_log_fp = None
+        if fp is None:
+            return
+        try:
+            fp.close()
+        except Exception:
+            pass
+
+    def _open_live_log_file(self) -> None:
+        self._close_live_log_file()
+        try:
+            p = get_paths()
+            os.makedirs(p.logs_dir, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._live_log_path = os.path.join(p.logs_dir, f"live_{stamp}.log")
+            self._live_log_fp = open(self._live_log_path, "w", encoding="utf-8")
+            self._append(f"[ui] live_log_file={self._live_log_path}\n")
+        except Exception as e:
+            self._live_log_fp = None
+            self._live_log_path = ""
+            self._append(f"[ui] live_log_open_error={e}\n")
+
+    def _close_live_log_file(self) -> None:
+        fp = self._live_log_fp
+        self._live_log_fp = None
+        if fp is None:
+            return
+        try:
+            fp.close()
+        except Exception:
+            pass
+
+    def _save_last_stderr_tail(self) -> str:
+        p = get_paths()
+        os.makedirs(p.logs_dir, exist_ok=True)
+        out = os.path.join(p.logs_dir, "replay_last_stderr.txt")
+        try:
+            with open(out, "w", encoding="utf-8") as f:
+                if self._stderr_ring:
+                    f.write("\n".join(self._stderr_ring))
+                    f.write("\n")
+            return str(out)
+        except Exception:
+            return str(out)
+
+    def _append_replay_results_summary(self) -> None:
+        rp = self._resolve_artifact_path(str(self._last_replay_report_path or ""))
+        if not rp:
+            self._append("[results] summary unavailable (replay report path missing)\n")
+            return
+        if not os.path.exists(rp):
+            self._append(f"[results] summary unavailable (replay report not found: {rp})\n")
+            return
+        try:
+            with open(rp, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+            meta = obj.get("meta") if isinstance(obj, dict) else None
+            results = obj.get("results") if isinstance(obj, dict) else None
+            if not isinstance(meta, dict) or not isinstance(results, dict):
+                self._append(f"[results] summary unavailable (invalid replay report: {rp})\n")
+                return
+            self._append(f"[results] replay_report={rp}\n")
+            if str(self._last_replay_trade_log_path or "").strip():
+                self._append(f"[results] trade_log={self._last_replay_trade_log_path}\n")
+            self._append(
+                f"[results] bars={meta.get('bars')} "
+                f"range={meta.get('since')}..{meta.get('until')} "
+                f"first_ts_ms={meta.get('first_ts_ms')} last_ts_ms={meta.get('last_ts_ms')}\n"
+            )
+            self._append(
+                f"[results] trades={results.get('trades')} "
+                f"net_total={results.get('net_total')} "
+                f"return_pct_of_init={results.get('return_pct_of_init')} "
+                f"max_dd={results.get('max_dd')} "
+                f"sharpe_like={results.get('sharpe_like')}\n"
+            )
+        except Exception as e:
+            self._append(f"[results] summary unavailable (replay report read error: {e})\n")
+
+    def _on_replay_range_edited(self, _text: str) -> None:
+        if self._auto_range_enabled:
+            self._auto_range_enabled = False
+            self._append("[replay] auto range disabled by manual edit\n")
+
+    def _maybe_show_ip_whitelist_hint(self, line: str) -> None:
+        if self._ip_whitelist_alerted:
+            return
+        text = str(line or "")
+        lower = text.lower()
+        has_700006 = ('"code":700006' in lower) or ('code":700006' in lower)
+        has_ip_token = ("ip [" in lower) or ("ip[" in lower)
+        if not (has_700006 and has_ip_token):
+            return
+        m = re.search(r"ip\s*\[([^\]]+)\]", text, flags=re.IGNORECASE)
+        ip = str(m.group(1)).strip() if m else "不明"
+        if not ip:
+            ip = "不明"
+        self._ip_whitelist_alerted = True
+        msg = (
+            "IP制限がONのままです。リストを空にしてもOFFになりません。Bind IP のトグルをOFFにしてください\n"
+            f"MEXCが見ているIP：{ip}\n"
+            "MEXCのAPIキー編集画面でIP連携を無効化できない場合は、ホワイトリストにこのIPを追加してください"
+        )
+        QMessageBox.warning(self, "MEXC IP whitelist", msg)
+
+    def _safe_import_build_id(self, module_name: str) -> str:
+        try:
+            mod = __import__(module_name)
+            return str(getattr(mod, "BUILD_ID", None))
+        except Exception:
+            return "None"
+
+    def _latest_diff_trace_path(self, repo_root: str, runtime_exports: str) -> str:
+        last_run_export_dir = self._last_run_export_dir()
+        cands = self._glob_existing_files(
+            os.path.join(last_run_export_dir, "diff_trace_live_*.jsonl") if last_run_export_dir else "",
+            os.path.join(runtime_exports, "runs", "*", "*", "diff_trace_live_*.jsonl"),
+            os.path.join(runtime_exports, "diff_trace_live_*.jsonl"),
+        )
+        if not cands:
+            cands = self._glob_existing_files(
+                os.path.join(repo_root, "exports", "diff_trace_live_*.jsonl"),
+            )
+        if not cands:
+            return ""
+        try:
+            return str(max(cands, key=lambda p: os.path.getmtime(p)))
+        except Exception:
+            return ""
+
+    def _latest_diff_trace_file(self, repo_root: str, runtime_exports: str) -> str:
+        latest = self._latest_diff_trace_path(repo_root, runtime_exports)
+        if not latest:
+            return "None"
+        return self._format_diag_artifact_path(latest, runtime_exports=runtime_exports, repo_root=repo_root)
+
+    def on_run_diagnostics(self) -> None:
+        self._append("[diag] ===== Diagnostics =====\n")
+        p = ensure_runtime_dirs()
+
+        # 1) Version / build
+        self._append(f"[diag] gui_build_id={BUILD_ID}\n")
+        self._append(f"[diag] runner_build_id={self._safe_import_build_id('runner')}\n")
+        self._append(f"[diag] backtest_build_id={self._safe_import_build_id('backtest')}\n")
+        self._append(f"[diag] python_version={sys.version.splitlines()[0]}\n")
+        self._append(f"[diag] python_executable={sys.executable}\n")
+
+        # 2) Paths / artifacts
+        self._append(f"[diag] repo_root={p.repo_root}\n")
+        self._append(f"[diag] runtime_dir={p.runtime_dir}\n")
+        self._append(f"[diag] logs_dir={p.logs_dir}\n")
+        self._append(f"[diag] exports_dir={p.exports_dir}\n")
+        self._append(f"[diag] state_dir={p.state_dir}\n")
+        self._append(f"[diag] settings_path={p.settings_path} exists={os.path.exists(p.settings_path)}\n")
+        self._append(f"[diag] latest_diff_trace_live={self._latest_diff_trace_file(p.repo_root, p.exports_dir)}\n")
+
+        # 3) Keyring status (masked)
+        try:
+            for item in EXCHANGES:
+                ex = str(item.id)
+                creds = load_creds(ex)
+                if creds is None:
+                    self._append(f"[diag] keyring_{ex}_api_key=未保存\n")
+                    self._append(f"[diag] keyring_{ex}_api_secret=未保存\n")
+                else:
+                    self._append(f"[diag] keyring_{ex}_api_key={_mask_secret(str(creds.api_key or ''))}\n")
+                    self._append(f"[diag] keyring_{ex}_api_secret={_mask_secret(str(creds.api_secret or ''))}\n")
+        except Exception as e:
+            self._append(f"[diag] keyring_check_error={e}\n")
+
+        # 4) Time health
+        try:
+            self._append(f"[diag] utc_now={datetime.now(timezone.utc).isoformat()}\n")
+            self._append(f"[diag] local_now={datetime.now().astimezone().isoformat()}\n")
+            self._append(f"[diag] time_time={time.time():.6f}\n")
+        except Exception as e:
+            self._append(f"[diag] time_check_error={e}\n")
+        try:
+            cp = subprocess.run(
+                ["w32tm", "/query", "/status"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            out = (cp.stdout or "").strip()
+            if cp.returncode == 0 and out:
+                lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+                preview = " | ".join(lines[:6])
+                self._append(f"[diag] w32tm_status={preview}\n")
+            else:
+                err = (cp.stderr or "").strip() or "取得失敗"
+                self._append(f"[diag] w32tm_status=取得失敗 ({err})\n")
+        except Exception as e:
+            self._append(f"[diag] w32tm_status=取得失敗 ({e})\n")
+
+        # 5) Public network reachability
+        url = "https://api.mexc.com/api/v3/ping"
+        t0 = time.perf_counter()
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                status = int(getattr(resp, "status", 0) or resp.getcode() or 0)
+                _ = resp.read(128)
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            self._append(f"[diag] mexc_ping status={status} latency_ms={dt_ms:.1f}\n")
+        except Exception as e:
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            self._append(f"[diag] mexc_ping error={e} latency_ms={dt_ms:.1f}\n")
+
+    def on_create_support_bundle(self) -> None:
+        p = ensure_runtime_dirs()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_zip = os.path.join(p.exports_dir, f"support_bundle_{ts}.zip")
+        os.makedirs(p.exports_dir, exist_ok=True)
+
+        repo_exports = os.path.join(p.repo_root, "exports")
+        last_run_export_dir = self._last_run_export_dir()
+        targets = []
+        targets.extend(self._glob_existing_files(self._last_run_json_path()))
+        self._extend_targets_with_fallback(
+            targets,
+            [
+                os.path.join(p.exports_dir, "daily_metrics_*.json"),
+                os.path.join(last_run_export_dir, "daily_metrics_*.json") if last_run_export_dir else "",
+            ],
+            [os.path.join(repo_exports, "daily_metrics_*.json")],
+        )
+        latest_diff_trace = self._latest_diff_trace_path(p.repo_root, p.exports_dir)
+        if latest_diff_trace:
+            targets.append(latest_diff_trace)
+        self._extend_targets_with_fallback(
+            targets,
+            [
+                os.path.join(last_run_export_dir, "report.json") if last_run_export_dir else "",
+                os.path.join(p.exports_dir, "report.json"),
+            ],
+            [os.path.join(repo_exports, "report.json")],
+        )
+        if os.path.exists(p.settings_path):
+            targets.append(p.settings_path)
+        if os.path.isdir(p.logs_dir):
+            targets.extend(glob.glob(os.path.join(p.logs_dir, "*")))
+
+        uniq = []
+        seen = set()
+        for fp in targets:
+            ab = os.path.abspath(fp)
+            if ab in seen:
+                continue
+            if not os.path.isfile(ab):
+                continue
+            seen.add(ab)
+            uniq.append(ab)
+
+        try:
+            with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for fp in uniq:
+                    try:
+                        arc = os.path.relpath(fp, p.repo_root)
+                    except Exception:
+                        arc = os.path.basename(fp)
+                    zf.write(fp, arcname=arc)
+                zf.writestr("runtime/gui_log.txt", self.log.toPlainText())
+            self._append(f"[diag] support_bundle_created={out_zip} files={len(uniq)+1}\n")
+        except Exception as e:
+            self._append(f"[diag] support_bundle_error={e}\n")
+
+    def _tf_to_ms(self, tf: str) -> int:
+        s = str(tf or "").strip().lower()
+        try:
+            if s.endswith("m"):
+                return int(s[:-1]) * 60_000
+            if s.endswith("h"):
+                return int(s[:-1]) * 3_600_000
+            if s.endswith("d"):
+                return int(s[:-1]) * 86_400_000
+        except Exception:
+            return 300_000
+        return 300_000
+
+    def _to_ts_ms(self, raw: str) -> int:
+        try:
+            x = int(float(str(raw).strip()))
+        except Exception:
+            return 0
+        if x <= 0:
+            return 0
+        if x < 1_000_000_000_000:
+            x *= 1000
+        if x >= 100_000_000_000_000:
+            x //= 1000
+        return int(x)
+
+    def _csv_range_from_text_stream(self, stream: io.TextIOBase) -> tuple[int, int]:
+        ts_cols = ("ts_ms", "timestamp", "time", "ts", "open_time")
+        r = csv.reader(stream)
+        first_row = next(r, None)
+        if not first_row:
+            return (0, 0)
+        row0 = [str(x).strip() for x in first_row]
+        row0_l = [x.lower() for x in row0]
+        idx = 0
+        has_header = False
+        for k in ts_cols:
+            if k in row0_l:
+                idx = row0_l.index(k)
+                has_header = True
+                break
+        first_ts = 0
+        last_ts = 0
+
+        def _row_ts(row: list[str]) -> int:
+            if not row:
+                return 0
+            j = idx if idx < len(row) else 0
+            return self._to_ts_ms(row[j] if j < len(row) else "")
+
+        if not has_header:
+            t0 = _row_ts(row0)
+            if t0 > 0:
+                first_ts = t0
+                last_ts = t0
+
+        for row in r:
+            t = _row_ts([str(x).strip() for x in row])
+            if t <= 0:
+                continue
+            if first_ts <= 0:
+                first_ts = t
+            last_ts = t
+        return (int(first_ts), int(last_ts))
+
+    def _auto_set_replay_range_from_path(self, path: str, source: str = "") -> bool:
+        p = str(path or "").strip()
+        if not p or not os.path.exists(p):
+            return False
+        first_ts = 0
+        last_ts = 0
+        used_source = str(source or p)
+        try:
+            ext = os.path.splitext(p)[1].lower()
+            if ext == ".csv":
+                with open(p, "r", encoding="utf-8-sig", newline="") as f:
+                    first_ts, last_ts = self._csv_range_from_text_stream(f)
+                used_source = str(p)
+            elif os.path.isdir(p):
+                files = sorted(glob.glob(os.path.join(p, "*.csv")))
+                if files:
+                    fp = str(files[-1])
+                    with open(fp, "r", encoding="utf-8-sig", newline="") as f:
+                        first_ts, last_ts = self._csv_range_from_text_stream(f)
+                    used_source = str(fp)
+            elif ext == ".zip":
+                with zipfile.ZipFile(p, "r") as zf:
+                    names = [n for n in zf.namelist() if str(n).lower().endswith(".csv")]
+                    if names:
+                        name = str(sorted(names)[-1])
+                        with zf.open(name, "r") as bf:
+                            tf = io.TextIOWrapper(bf, encoding="utf-8-sig", errors="ignore", newline="")
+                            first_ts, last_ts = self._csv_range_from_text_stream(tf)
+                        used_source = f"{p}:{name}"
+            else:
+                return False
+        except Exception as e:
+            self._append(f"[replay] auto range parse failed: {e}\n")
+            return False
+
+        if first_ts <= 0 or last_ts <= 0:
+            return False
+        tf_ms = int(self._tf_to_ms(self.replay_tf.currentText()))
+        until_ms = int(last_ts) + int(tf_ms)
+        since_ym = datetime.fromtimestamp(int(first_ts) / 1000.0, tz=timezone.utc).strftime("%Y-%m")
+        until_ym = datetime.fromtimestamp(max(int(first_ts), int(until_ms) - 1) / 1000.0, tz=timezone.utc).strftime("%Y-%m")
+        self._last_auto_range_source = str(used_source)
+        self.replay_since_ym.setText(str(since_ym))
+        self.replay_until_ym.setText(str(until_ym))
+        self._append(
+            f"[replay] auto range set since={since_ym} until={until_ym} "
+            f"(since_ms={int(first_ts)} until_ms={int(until_ms)} tf_ms={int(tf_ms)}) source={used_source}\n"
+        )
+        return True
+
+    def _resolve_replay_data_arg(self, selected_path: str) -> str:
+        p = os.path.abspath(str(selected_path or "").strip())
+        if not p:
+            return str(self._default_dataset_root)
+        if os.path.isfile(p):
+            p = os.path.dirname(p)
+        return str(p)
+
+    def _symbol_to_prefix(self, symbol: str) -> str:
+        return symbol_to_prefix(symbol)
+
+    def _resolve_replay_dataset_paths(
+        self,
+        dataset_root: str,
+        symbol: str,
+        selected_csv_source: str = "",
+        year_hint_override: int | None = None,
+    ) -> tuple[str, str, str, str, str, str, str, int]:
+        root = self._resolve_replay_data_arg(dataset_root)
+        prefix = self._symbol_to_prefix(symbol)
+        if not root:
+            root = str(self._default_dataset_root)
+        year_hint = int(self._replay_dataset_year or 0)
+        reason = "from_default"
+
+        src = str(selected_csv_source or self._selected_replay_csv_source or "").strip()
+        if (not src) and self._auto_range_enabled:
+            src = str(self._last_auto_range_source or "").strip()
+        if src and ":" in src and (not os.path.exists(src)):
+            src = src.split(":", 1)[0]
+        if src:
+            pfx_src, y_src = infer_prefix_year_from_source(src, fallback_prefix=prefix)
+            if pfx_src:
+                prefix = str(pfx_src)
+            if y_src is not None:
+                year_hint = int(y_src)
+                reason = "from_selected_csv_year"
+
+        pfx_dir, y_dir = infer_prefix_year_from_source(root, fallback_prefix=prefix)
+        base = os.path.basename(os.path.abspath(root))
+        if y_dir is not None and re.match(rf"^{re.escape(pfx_dir)}_(5m|1h)_{int(y_dir)}$", base, flags=re.IGNORECASE):
+            prefix = str(pfx_dir)
+            year_hint = int(y_dir)
+            root = os.path.dirname(root) or root
+            reason = "from_selected_year_dir"
+        elif year_hint_override is not None and int(year_hint_override) > 0:
+            year_hint = int(year_hint_override)
+            reason = "from_range_year"
+
+        layout = resolve_dataset_layout(
+            dataset_root=root,
+            prefix=prefix,
+            year=(year_hint if int(year_hint) > 0 else None),
+            tf_dirs=("5m", "1h"),
+        )
+        if reason == "from_default":
+            reason = str(layout.reason)
+        y_out = int(layout.year) if layout.year is not None else 0
+        return (
+            str(layout.prefix),
+            str(layout.root),
+            str(layout.dir_entry),
+            str(layout.dir_filter),
+            str(layout.glob_entry),
+            str(layout.glob_filter),
+            str(reason),
+            int(y_out),
+        )
+
+    def _count_csv_matches(self, csv_dir: str) -> int:
+        d = str(csv_dir or "").strip()
+        if not d or (not os.path.isdir(d)):
+            return 0
+        try:
+            return int(len(glob.glob(os.path.join(d, "*.csv"))))
+        except Exception:
+            return 0
+
+    def on_select_replay_data(self) -> None:
+        p = get_paths()
+        start_dir = p.repo_root
+        cur = str(self.replay_data.text() or "").strip()
+        if cur and os.path.exists(cur):
+            start_dir = os.path.dirname(cur) if os.path.isfile(cur) else cur
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Replay Data",
+            start_dir,
+            "Replay data (*.zip *.csv *.json);;All files (*.*)",
+        )
+        if not path:
+            return
+        if os.path.isfile(path) and str(path).lower().endswith(".csv"):
+            self._selected_replay_csv_source = os.path.abspath(str(path))
+        else:
+            self._selected_replay_csv_source = ""
+        symbol = str(self._selected_replay_symbol() or self._default_symbol)
+        prefix, root, dir_5m, _, _, _, _, y = self._resolve_replay_dataset_paths(
+            str(path),
+            symbol,
+            selected_csv_source=self._selected_replay_csv_source,
+        )
+        self._replay_data_path = str(root or self._default_dataset_root)
+        self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
+        self._replay_dataset_year = int(y or 0)
+        self.replay_data.setText(self._replay_data_path)
+        self._append(f"[replay] data selected: {self._replay_data_path}\n")
+        if not self._auto_range_enabled:
+            self._append("[replay] auto range skipped (manual override)\n")
+            return
+        if os.path.isfile(path):
+            if not self._auto_set_replay_range_from_path(path, source=str(path)):
+                self._append("[replay] auto range not set (unsupported or parse failed)\n")
+            return
+        target = dir_5m if os.path.isdir(dir_5m) else self._replay_data_path
+        if not self._auto_set_replay_range_from_path(target, source=str(target)):
+            self._append("[replay] auto range not set (unsupported or parse failed)\n")
+
+    def on_select_replay_folder(self) -> None:
+        p = get_paths()
+        start_dir = p.repo_root
+        cur = str(self.replay_data.text() or "").strip()
+        if cur and os.path.exists(cur):
+            start_dir = cur if os.path.isdir(cur) else os.path.dirname(cur)
+        path = QFileDialog.getExistingDirectory(self, "Select Dataset Root", start_dir)
+        if not path:
+            return
+        self._selected_replay_csv_source = ""
+        symbol = str(self._selected_replay_symbol() or self._default_symbol)
+        prefix, root, dir_5m, _, _, _, _, y = self._resolve_replay_dataset_paths(str(path), symbol)
+        self._replay_data_path = str(root or self._default_dataset_root)
+        self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
+        self._replay_dataset_year = int(y or 0)
+        self.replay_data.setText(self._replay_data_path)
+        self._append(f"[replay] dataset root selected: {self._replay_data_path}\n")
+        _ = dir_5m
+        self._append("[replay] auto range unchanged (dataset root selected)\n")
+
+    def _parse_ms(self, raw: str, default: int) -> int:
+        s = str(raw or "").strip()
+        if not s:
+            return int(default)
+        try:
+            v = int(float(s))
+            if v > 0:
+                return int(v)
+        except Exception:
+            pass
+        return int(default)
+
+    def _prepare_offline_run_inputs(self, mode_name: str) -> Optional[dict[str, object]]:
+        title = str(mode_name or "Replay").strip() or "Replay"
+        tag = title.lower()
+        try:
+            since_ms, until_ms = self._replay_range_ms_from_inputs()
+            since_year, _ = self._parse_yyyy_mm(self.replay_since_ym.text())
+            until_year, _ = self._parse_yyyy_mm(self.replay_until_ym.text())
+            since_ymd, until_ymd = self._month_range_cli_ymd_from_ms(int(since_ms), int(until_ms))
+        except Exception as e:
+            QMessageBox.warning(self, f"{title} range invalid", f"Since/Until must be YYYY-MM.\n{e}")
+            return None
+        data_path = str(self.replay_data.text() or "").strip() or str(self._replay_data_path or self._default_dataset_root)
+        symbol = str(self._selected_replay_symbol() or self._default_symbol)
+        timeframe = str(self.replay_tf.currentText() or "5m")
+        prev_dataset_year = int(self._replay_dataset_year or 0)
+        range_year_hint = int(since_year) if int(since_year) == int(until_year) else 0
+        prefix, data_arg, dir_5m, dir_1h, glob_5m, glob_1h, resolve_reason, year = self._resolve_replay_dataset_paths(
+            data_path,
+            symbol,
+            selected_csv_source=self._selected_replay_csv_source,
+            year_hint_override=(int(range_year_hint) if int(range_year_hint) > 0 else None),
+        )
+        self._replay_data_path = str(data_arg)
+        self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
+        self._replay_dataset_year = int(year or 0)
+        self.replay_data.setText(self._replay_data_path)
+        if (not os.path.isdir(dir_5m)) or (not os.path.isdir(dir_1h)):
+            msg = build_missing_dataset_message(
+                context=f"GUI_{title.upper()}",
+                tf="5m/1h",
+                searched_dir=f"{dir_5m} | {dir_1h}",
+                searched_glob=f"{glob_5m} | {glob_1h}",
+                dataset_root=data_arg,
+                prefix=prefix,
+                year=(int(year) if int(year) > 0 else None),
+                tf_dirs=("5m", "1h"),
+            )
+            QMessageBox.warning(self, f"{title} folder missing", msg)
+            return None
+
+        if resolve_reason == "from_range_year" and int(prev_dataset_year) != int(year or 0):
+            self._append(f"[{tag}] dataset year aligned to range: {prev_dataset_year} -> {int(year or 0)}\n")
+        self._append(
+            f"[{tag}] resolved dirs: 5m_dir={dir_5m} 1h_dir={dir_1h} "
+            f"(reason={resolve_reason} year={int(year) if int(year) > 0 else 'auto'})\n"
+        )
+        cnt_5m = self._count_csv_matches(dir_5m)
+        cnt_1h = self._count_csv_matches(dir_1h)
+        cnt_total = int(cnt_5m) + int(cnt_1h)
+        self._append(
+            f"[{tag}] data check: 5m_dir={dir_5m} count={cnt_5m} "
+            f"1h_dir={dir_1h} count={cnt_1h} total={cnt_total}\n"
+        )
+        if cnt_total <= 0:
+            QMessageBox.warning(
+                self,
+                f"{title} data empty",
+                f"No CSV files were found under the resolved {tag} dataset folders.",
+            )
+            return None
+        if int(until_ms) <= int(since_ms):
+            QMessageBox.warning(self, f"{title} range invalid", "Until month must be greater than or equal to since month.")
+            return None
+        return {
+            "symbol": str(symbol),
+            "timeframe": str(timeframe),
+            "since_ms": int(since_ms),
+            "until_ms": int(until_ms),
+            "since_ymd": str(since_ymd),
+            "until_ymd": str(until_ymd),
+            "data_arg": str(data_arg),
+            "prefix": str(prefix),
+            "dir_5m": str(dir_5m),
+            "dir_1h": str(dir_1h),
+            "glob_5m": str(glob_5m),
+            "glob_1h": str(glob_1h),
+            "dataset_year": int(year or 0),
+        }
+
+    def on_run_pipeline(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            QMessageBox.information(self, "Already running", "Bot is already running.")
+            return
+        exchange_id = self._selected_exchange_id()
+        symbol = self._selected_symbol()
+        from_ym = str(self.pipeline_from_ym.text() or "").strip()
+        to_ym = str(self.pipeline_to_ym.text() or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}", from_ym) or not re.fullmatch(r"\d{4}-\d{2}", to_ym):
+            QMessageBox.warning(self, "Invalid period", "From/To must be YYYY-MM.")
+            return
+        try:
+            p = get_paths()
+            cmd = [
+                sys.executable,
+                "-u",
+                "-m",
+                "app.core.data_pipeline",
+                "--symbol",
+                str(symbol),
+                "--from",
+                str(from_ym),
+                "--to",
+                str(to_ym),
+            ]
+            env = dict(os.environ)
+            env["LWF_EXCHANGE_ID"] = str(exchange_id)
+            env["LWF_PIPELINE_FORCE"] = "1" if bool(self.pipeline_force.isChecked()) else "0"
+            option = self._selected_exchange_option()
+            api_key, api_secret = self._resolve_runtime_creds(exchange_id)
+            if option.key_env:
+                env[str(option.key_env)] = str(api_key or "")
+            if option.secret_env:
+                env[str(option.secret_env)] = str(api_secret or "")
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+            self._append(
+                f"[UI] pipeline started exchange_id={exchange_id} symbol={symbol} "
+                f"from={from_ym} to={to_ym} force={env['LWF_PIPELINE_FORCE']}\n"
+            )
+            self._proc_role = "pipeline"
+            self._close_replay_log_file()
+            self._close_live_log_file()
+            self._proc = subprocess.Popen(
+                cmd,
+                cwd=p.repo_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+                creationflags=creationflags,
+            )
+            start_log_threads(
+                stdout=self._proc.stdout,
+                stderr=self._proc.stderr,
+                emit=self.sig_log.emit,
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_start.setChecked(False)
+            self.btn_run_replay.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_pipeline.setEnabled(False)
+        except Exception as e:
+            QMessageBox.critical(self, "Pipeline start failed", str(e))
+            self._proc = None
+            self._proc_role = "runner"
+            self.btn_pipeline.setEnabled(True)
+
+    def _on_run_replay_legacy(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            QMessageBox.information(self, "Already running", "Bot is already running.")
+            return
+        try:
+            since_ms, until_ms = self._replay_range_ms_from_inputs()
+            since_year, _ = self._parse_yyyy_mm(self.replay_since_ym.text())
+            until_year, _ = self._parse_yyyy_mm(self.replay_until_ym.text())
+        except Exception as e:
+            QMessageBox.warning(self, "Replay range invalid", f"Since/Until must be YYYY-MM.\n{e}")
+            return
+        data_path = str(self.replay_data.text() or "").strip() or str(self._replay_data_path or self._default_dataset_root)
+        symbol = str(self._selected_replay_symbol() or self._default_symbol)
+        prev_dataset_year = int(self._replay_dataset_year or 0)
+        range_year_hint = int(since_year) if int(since_year) == int(until_year) else 0
+        prefix, data_arg, dir_5m, dir_1h, glob_5m, glob_1h, resolve_reason, y = self._resolve_replay_dataset_paths(
+            data_path,
+            symbol,
+            selected_csv_source=self._selected_replay_csv_source,
+            year_hint_override=(int(range_year_hint) if int(range_year_hint) > 0 else None),
+        )
+        self._replay_data_path = str(data_arg)
+        self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
+        self._replay_dataset_year = int(y or 0)
+        self.replay_data.setText(self._replay_data_path)
+        if (not os.path.isdir(dir_5m)) or (not os.path.isdir(dir_1h)):
+            msg = build_missing_dataset_message(
+                context="GUI_REPLAY",
+                tf="5m/1h",
+                searched_dir=f"{dir_5m} | {dir_1h}",
+                searched_glob=f"{glob_5m} | {glob_1h}",
+                dataset_root=data_arg,
+                prefix=prefix,
+                year=(int(y) if int(y) > 0 else None),
+                tf_dirs=("5m", "1h"),
+            )
+            QMessageBox.warning(
+                self,
+                "Replay folder missing",
+                msg,
+            )
+            return
+
+        if resolve_reason == "from_range_year" and int(prev_dataset_year) != int(y or 0):
+            self._append(f"[replay] dataset year aligned to range: {prev_dataset_year} -> {int(y or 0)}\n")
+        self._append(
+            f"[replay] resolved dirs: 5m_dir={dir_5m} 1h_dir={dir_1h} "
+            f"(reason={resolve_reason} year={int(y) if int(y) > 0 else 'auto'})\n"
+        )
+        cnt_5m = self._count_csv_matches(dir_5m)
+        cnt_1h = self._count_csv_matches(dir_1h)
+        cnt_total = int(cnt_5m) + int(cnt_1h)
+        self._append(
+            f"[replay] data check: 5m_dir={dir_5m} count={cnt_5m} "
+            f"1h_dir={dir_1h} count={cnt_1h} total={cnt_total}\n"
+        )
+        if cnt_total <= 0:
+            QMessageBox.warning(
+                self,
+                "Replay data empty",
+                "Replayデータが0件です。フォルダ指定にして、CSVが存在する場所を選んでください",
+            )
+            return
+
+        spec = ReplaySpec(
+            preset=str(self.preset.currentText() or "OFF"),
+            replay_data_path=data_arg,
+            symbol=str(symbol),
+            timeframe=str(self.replay_tf.currentText() or "5m"),
+            log_level=self._selected_log_level(),
+            since_ms=int(since_ms),
+            until_ms=int(until_ms),
+            replay_engine="live",
+            replay_csv_dir_5m=str(dir_5m),
+            replay_csv_dir_1h=str(dir_1h),
+            replay_csv_glob_5m=str(glob_5m),
+            replay_csv_glob_1h=str(glob_1h),
+            replay_dataset_root=str(data_arg),
+            replay_dataset_prefix=str(prefix),
+            replay_dataset_year=int(y or 0),
+        )
+        if int(spec.until_ms) <= int(spec.since_ms):
+            QMessageBox.warning(self, "Replay range invalid", "Until month must be greater than or equal to since month.")
+            return
+
+        try:
+            self._last_replay_report_path = ""
+            self._last_replay_trade_log_path = ""
+            self._settings.dataset_root = str(data_arg)
+            self._settings.dataset_prefix = str(prefix)
+            self._settings.dataset_year = int(y or 0)
+            self._settings.run_mode = self._selected_run_mode()
+            self._settings.log_level = self._selected_log_level()
+            save_settings(self._settings)
+            self._save_run_mode_to_settings()
+            self._proc_role = "replay"
+            self._close_live_log_file()
+            self._open_replay_log_file()
+            self._append(
+                f"[ui] Starting replay preset={spec.preset} symbol={spec.symbol} tf={spec.timeframe} "
+                f"log_level={spec.log_level} "
+                f"since={self.replay_since_ym.text().strip()} until={self.replay_until_ym.text().strip()} "
+                f"since_ms={spec.since_ms} until_ms={spec.until_ms} data={data_arg} "
+                f"dir_5m={dir_5m} dir_1h={dir_1h} dataset_year={spec.replay_dataset_year} "
+                "report=from_replay_output\n"
+            )
+            self._proc = launch_replay(spec)
+            start_log_threads(
+                stdout=self._proc.stdout,
+                stderr=self._proc.stderr,
+                emit=self.sig_log.emit,
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_start.setChecked(True)
+            self.btn_run_replay.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_pipeline.setEnabled(False)
+        except Exception as e:
+            QMessageBox.critical(self, "Replay start failed", str(e))
+            self._proc = None
+            self._proc_role = "runner"
+            self._close_replay_log_file()
+            self._close_live_log_file()
+            self.btn_pipeline.setEnabled(True)
+
+    def on_run_replay(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            QMessageBox.information(self, "Already running", "Bot is already running.")
+            return
+        prepared = self._prepare_offline_run_inputs("Replay")
+        if prepared is None:
+            return
+
+        spec = ReplaySpec(
+            preset=str(self.preset.currentText() or "OFF"),
+            replay_data_path=str(prepared["data_arg"]),
+            symbol=str(prepared["symbol"]),
+            timeframe=str(prepared["timeframe"]),
+            log_level=self._selected_log_level(),
+            since_ms=int(prepared["since_ms"]),
+            until_ms=int(prepared["until_ms"]),
+            replay_engine="live",
+            replay_csv_dir_5m=str(prepared["dir_5m"]),
+            replay_csv_dir_1h=str(prepared["dir_1h"]),
+            replay_csv_glob_5m=str(prepared["glob_5m"]),
+            replay_csv_glob_1h=str(prepared["glob_1h"]),
+            replay_dataset_root=str(prepared["data_arg"]),
+            replay_dataset_prefix=str(prepared["prefix"]),
+            replay_dataset_year=int(prepared["dataset_year"]),
+        )
+        if int(spec.until_ms) <= int(spec.since_ms):
+            QMessageBox.warning(self, "Replay range invalid", "Until month must be greater than or equal to since month.")
+            return
+
+        try:
+            self._last_replay_report_path = ""
+            self._last_replay_trade_log_path = ""
+            self._settings.dataset_root = str(prepared["data_arg"])
+            self._settings.dataset_prefix = str(prepared["prefix"])
+            self._settings.dataset_year = int(prepared["dataset_year"])
+            self._settings.run_mode = self._selected_run_mode()
+            self._settings.log_level = self._selected_log_level()
+            save_settings(self._settings)
+            self._save_run_mode_to_settings()
+            self._proc_role = "replay"
+            self._close_live_log_file()
+            self._open_replay_log_file(prefix="replay")
+            self._append(
+                f"[ui] Starting replay preset={spec.preset} symbol={spec.symbol} tf={spec.timeframe} "
+                f"log_level={spec.log_level} "
+                f"since={self.replay_since_ym.text().strip()} until={self.replay_until_ym.text().strip()} "
+                f"since_ms={spec.since_ms} until_ms={spec.until_ms} data={prepared['data_arg']} "
+                f"dir_5m={prepared['dir_5m']} dir_1h={prepared['dir_1h']} dataset_year={spec.replay_dataset_year} "
+                "report=from_replay_output\n"
+            )
+            self._proc = launch_replay(spec)
+            start_log_threads(
+                stdout=self._proc.stdout,
+                stderr=self._proc.stderr,
+                emit=self.sig_log.emit,
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_start.setChecked(True)
+            self.btn_run_replay.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_pipeline.setEnabled(False)
+        except Exception as e:
+            QMessageBox.critical(self, "Replay start failed", str(e))
+            self._proc = None
+            self._proc_role = "runner"
+            self._close_replay_log_file()
+            self._close_live_log_file()
+            self.btn_pipeline.setEnabled(True)
+
+    def on_run_backtest(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            QMessageBox.information(self, "Already running", "Bot is already running.")
+            return
+        prepared = self._prepare_offline_run_inputs("Backtest")
+        if prepared is None:
+            return
+
+        spec = BacktestSpec(
+            preset=str(self.preset.currentText() or "OFF"),
+            symbol=str(prepared["symbol"]),
+            entry_timeframe=str(prepared["timeframe"]),
+            since_ymd=str(prepared["since_ymd"]),
+            until_ymd=str(prepared["until_ymd"]),
+            report_enabled=bool(self.report_enabled.isChecked()),
+            report_out=self._report_out_value(),
+            backtest_csv_dir_5m=str(prepared["dir_5m"]),
+            backtest_csv_dir_1h=str(prepared["dir_1h"]),
+            backtest_csv_glob_5m=str(prepared["glob_5m"]),
+            backtest_csv_glob_1h=str(prepared["glob_1h"]),
+            backtest_dataset_root=str(prepared["data_arg"]),
+            backtest_dataset_prefix=str(prepared["prefix"]),
+            backtest_dataset_year=int(prepared["dataset_year"]),
+        )
+
+        try:
+            self._ensure_report_parent()
+            self._settings.dataset_root = str(prepared["data_arg"])
+            self._settings.dataset_prefix = str(prepared["prefix"])
+            self._settings.dataset_year = int(prepared["dataset_year"])
+            self._settings.run_mode = self._selected_run_mode()
+            self._settings.log_level = self._selected_log_level()
+            save_settings(self._settings)
+            self._save_run_mode_to_settings()
+            self._proc_role = "backtest"
+            self._close_live_log_file()
+            self._open_replay_log_file(prefix="backtest")
+            self._append(
+                f"[ui] Starting backtest preset={spec.preset} symbol={spec.symbol} tf={spec.entry_timeframe} "
+                f"since={self.replay_since_ym.text().strip()} until={self.replay_until_ym.text().strip()} "
+                f"since_ymd={spec.since_ymd} until_ymd={spec.until_ymd} data={prepared['data_arg']} "
+                f"dir_5m={prepared['dir_5m']} dir_1h={prepared['dir_1h']} dataset_year={spec.backtest_dataset_year} "
+                f"report={spec.report_enabled}\n"
+            )
+            self._proc = launch_backtest(spec)
+            start_log_threads(
+                stdout=self._proc.stdout,
+                stderr=self._proc.stderr,
+                emit=self.sig_log.emit,
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_start.setChecked(True)
+            self.btn_run_replay.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_pipeline.setEnabled(False)
+        except Exception as e:
+            QMessageBox.critical(self, "Backtest start failed", str(e))
+            self._proc = None
+            self._proc_role = "runner"
+            self._close_replay_log_file()
+            self._close_live_log_file()
+            self.btn_pipeline.setEnabled(True)
+
+    def _save_typed_creds(self) -> bool:
+        saved = False
+        for item in EXCHANGES:
+            widgets = self._credential_widgets(item.id)
+            key_edit = widgets.get("key")
+            secret_edit = widgets.get("secret")
+            key_text = str((key_edit.text() if key_edit is not None else "") or "").strip()
+            secret_text = str((secret_edit.text() if secret_edit is not None else "") or "").strip()
+            if key_text and ("*" not in key_text) and secret_text and ("*" not in secret_text):
+                save_creds(key_text, secret_text, str(item.id))
+                saved = True
+        return saved
+
+    def on_save(self) -> None:
+        # Save non-secret settings
+        self._settings.preset = self.preset.currentText()
+        self._settings.symbol = self._selected_symbol() or "BTC/JPY"
+        self._settings.report_enabled = bool(self.report_enabled.isChecked())
+        self._settings.report_out = self._report_out_value()
+        self._settings.exchange_id = self._selected_exchange_id()
+        self._settings.dataset_root = str(self.replay_data.text() or "").strip() or self._default_dataset_root
+        self._settings.dataset_prefix = str(self._replay_dataset_prefix or "")
+        self._settings.dataset_year = int(self._replay_dataset_year or 0)
+        self._settings.run_mode = self._selected_run_mode()
+        self._settings.log_level = self._selected_log_level()
+        save_settings(self._settings)
+        self._save_run_mode_to_settings()
+
+        if self._save_typed_creds():
+            self._append("[ui] Saved settings + API keys (keyring).\n")
+        else:
+            self._append("[ui] Saved settings.\n")
+
+    def on_clear_keys(self) -> None:
+        ex = self._selected_exchange_id()
+        clear_creds(ex)
+        widgets = self._credential_widgets(ex)
+        if widgets.get("key") is not None:
+            widgets["key"].setText("")
+        if widgets.get("secret") is not None:
+            widgets["secret"].setText("")
+        self._append(f"[ui] Cleared {ex} API keys from keyring.\n")
+
+    def _get_spec(self) -> Optional[LaunchSpec]:
+        preset = self.preset.currentText().strip() or "OFF"
+        symbol = self._selected_symbol() or "BTC/JPY"
+        exchange_id = self._selected_exchange_id()
+        api_key, api_secret = self._resolve_runtime_creds(exchange_id)
+        if not api_key or not api_secret:
+            QMessageBox.warning(
+                self,
+                "Missing API Keys",
+                f"Please enter {exchange_id.upper()} API Key/Secret and click Save.",
+            )
+            return None
+
+        return LaunchSpec(
+            preset=preset,
+            api_key=api_key,
+            api_secret=api_secret,
+            exchange_id=exchange_id,
+            symbol=symbol,
+            log_level=self._selected_log_level(),
+            report_enabled=bool(self.report_enabled.isChecked()),
+            report_out=self._report_out_value(),
+        )
+
+    def on_start(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            QMessageBox.information(self, "Already running", "Bot is already running.")
+            return
+
+        run_mode = self._selected_run_mode()
+        if run_mode == "REPLAY":
+            self._append("[ui] Run Mode=REPLAY -> launch replay.\n")
+            self.on_run_replay()
+            return
+        if run_mode == "BACKTEST":
+            self._append("[ui] Run Mode=BACKTEST -> launch backtest.\n")
+            self.on_run_backtest()
+            return
+
+        spec = self._get_spec()
+        if spec is None:
+            return
+
+        try:
+            self._ip_whitelist_alerted = False
+            self._ensure_report_parent()
+            os.environ["LWF_MODE_OVERRIDE"] = str(run_mode)
+            self._append(
+                f"[ui] Starting runner exchange_id={spec.exchange_id} "
+                f"run_mode={run_mode} log_level={spec.log_level} "
+                f"preset={spec.preset} symbol={spec.symbol} report={spec.report_enabled}\n"
+            )
+            self._proc_role = "runner"
+            self._close_replay_log_file()
+            self._open_live_log_file()
+            self._proc = launch_runner(spec)
+            start_log_threads(
+                stdout=self._proc.stdout,
+                stderr=self._proc.stderr,
+                emit=self.sig_log.emit,
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_start.setChecked(True)
+            self.btn_run_replay.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_pipeline.setEnabled(False)
+        except Exception as e:
+            QMessageBox.critical(self, "Start failed", str(e))
+            self._proc = None
+            self._close_live_log_file()
+            self.btn_pipeline.setEnabled(True)
+
+    def on_stop(self) -> None:
+        if self._proc is None:
+            return
+        self._append("[UI] graceful stop requested\n")
+        if str(self._proc_role) == "pipeline":
+            self._append("[ui] Stopping pipeline...\n")
+        elif str(self._proc_role) == "replay":
+            self._append("[ui] Stopping replay...\n")
+        elif str(self._proc_role) == "backtest":
+            self._append("[ui] Stopping backtest...\n")
+        else:
+            self._append("[ui] Stopping runner...\n")
+        fallback_used = bool(terminate_process(self._proc))
+        if fallback_used:
+            self._append("[UI] fallback terminate/kill\n")
+
+    def _poll_proc(self) -> None:
+        if self._proc is None:
+            return
+        code = self._proc.poll()
+        if code is None:
+            return
+        if str(self._proc_role) == "pipeline":
+            if int(code) == 0:
+                self._append("[UI] pipeline finished\n")
+            else:
+                self._append(f"[UI] pipeline error code={code}\n")
+        elif str(self._proc_role) in {"replay", "backtest"}:
+            stderr_path = self._save_last_stderr_tail()
+            role = str(self._proc_role)
+            self._close_replay_log_file()
+            self._append(f"[ui] {role.capitalize()} finished code={code}\n")
+            if int(code) == 0 and role == "replay":
+                self._append_replay_results_summary()
+            else:
+                if int(code) != 0:
+                    self._append(f"[ui] last_stderr_saved={stderr_path}\n")
+        else:
+            self._close_live_log_file()
+            self._append(f"[ui] Runner exited with code={code}\n")
+        self._proc = None
+        self._proc_role = "runner"
+        self.btn_start.setEnabled(True)
+        self.btn_start.setChecked(False)
+        self.btn_run_replay.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_pipeline.setEnabled(True)
+
+
+
+
+
+
+
+
+
+
+
+
+

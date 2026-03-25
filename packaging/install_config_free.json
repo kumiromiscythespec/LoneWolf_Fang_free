@@ -1,0 +1,14 @@
+{
+  "build_id": "2026-03-25_free_local_installer_v1",
+  "product": "LoneWolf_Fang_free",
+  "install_root_mode": "repo_root",
+  "install_root_name": "LoneWolf_Fang_free",
+  "overwrite_mode": "prompt",
+  "receipt_relative_path": ".install_receipt.json",
+  "shortcut_name": "LoneWolf Fang Free GUI",
+  "shortcut_relative_target": "Launch_LoneWolf_Fang_Free_GUI.vbs",
+  "shortcut_icon_relative_path": "app\\logos\\lwf_logo.ico",
+  "shortcut_description": "Launch LoneWolf Fang Free GUI",
+  "probe_python_before_shortcut": true,
+  "require_gui_import_check": true
+}

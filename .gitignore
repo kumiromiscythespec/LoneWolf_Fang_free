@@ -1,0 +1,32 @@
+﻿# runtime writable data
+runtime/archives/*
+runtime/exports/*
+runtime/exports/runs/*
+runtime/logs/*
+runtime/state/*
+
+# keep skeleton only
+!runtime/.gitkeep
+!runtime/archives/.gitkeep
+!runtime/exports/.gitkeep
+!runtime/exports/runs/.gitkeep
+!runtime/logs/.gitkeep
+!runtime/state/.gitkeep
+
+# packaging outputs
+packaging/staging/
+packaging/dist/
+packaging/test_desktop/
+
+# python cache
+__pycache__/
+*.pyc
+
+# local patch/output
+patched/
+
+# local datasets
+market_data/
+
+# local venv
+.venv/

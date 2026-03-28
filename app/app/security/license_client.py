@@ -1,4 +1,5 @@
-# BUILD_ID: 2026-03-22_standard_license_payload_and_network_grace_fix_v1
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
+# BUILD_ID: 2026-03-26_standard_activate_refresh_device_id_restore_v1
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ import urllib.request
 from typing import Any
 
 
-BUILD_ID = "2026-03-22_standard_license_payload_and_network_grace_fix_v1"
+BUILD_ID = "2026-03-26_standard_activate_refresh_device_id_restore_v1"
 _DEFAULT_PRODUCT_CODE = "standard"
 
 
@@ -71,7 +72,7 @@ def default_license_base_url() -> str:
         raw = str(os.getenv(env_name) or "").strip()
         if raw:
             return normalize_license_base_url(raw)
-    return "http://127.0.0.1:8000"
+    return "https://lonewolffang.com"
 
 
 def normalize_license_base_url(raw: str) -> str:
@@ -191,7 +192,7 @@ def parse_license_response(http_status: int, body: dict) -> LicenseResponse:
     lease = lease_raw if isinstance(lease_raw, dict) else {}
     entitlements = entitlements_raw if isinstance(entitlements_raw, dict) else {}
     ok = bool(body.get("ok"))
-    error_code = str(body.get("error_code") or body.get("errorCode") or "").strip()
+    error_code = str(body.get("error_code") or body.get("errorCode") or body.get("code") or "").strip()
     if not ok and not error_code:
         error_code = "network_error" if int(http_status or 0) <= 0 else "invalid_response"
     error_message = str(body.get("message") or body.get("detail") or body.get("error") or "").strip()
@@ -260,6 +261,38 @@ def activate_license(
                 "machineHash": compute_machine_hash(machine_summary),
                 "deviceName": config.device_name,
                 "machineSummary": machine_summary,
+            },
+            "client": {
+                "appVersion": config.app_version,
+                "buildId": config.build_id,
+            },
+        },
+        timeout_sec=config.timeout_sec,
+    )
+    return parse_license_response(http_status, body)
+
+
+def deactivate_license(
+    seat_key: str,
+    device_id: str,
+    *,
+    base_url: str = "",
+    app_version: str = "",
+    build_id: str = "",
+) -> LicenseResponse:
+    config = LicenseClientConfig(
+        base_url=normalize_license_base_url(base_url),
+        app_version=str(app_version or "").strip(),
+        build_id=str(build_id or "").strip(),
+    )
+    http_status, body = post_json(
+        f"{config.base_url}/api/desktop/deactivate",
+        {
+            "productCode": config.product_code,
+            "seatKey": str(seat_key or "").strip(),
+            "device": {
+                "deviceId": "",
+                "machineHash": compute_machine_hash(),
             },
             "client": {
                 "appVersion": config.app_version,

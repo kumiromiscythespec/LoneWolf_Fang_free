@@ -1,3 +1,10 @@
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
+# BUILD_ID: 2026-03-28_standard_live_equity_currency_auto_quote_v1
+# BUILD_ID: 2026-03-28_standard_kill_floor_by_ccy_v1
+# BUILD_ID: 2026-03-27_runner_live_chart_runtime_price_tap_v2_0_9
+# BUILD_ID: 2026-03-26_runner_live_zero_equity_persist_v2
+# BUILD_ID: 2026-03-26_runner_live_zero_equity_stop_new_only_v1
+# BUILD_ID: 2026-03-26_standard_runner_live_license_gate_restore_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
 # BUILD_ID: 2026-03-21_runner_final_residual_comment_cleanup_v1
 # BUILD_ID: 2026-03-20_runner_replay_mirror_dataset_diag_log_v2
@@ -107,6 +114,7 @@ import backtest as BT
 from exchange import ExchangeClient
 from state_store import StateStore
 from safety import check_and_update_emergency_stop
+from app.core.launch import ensure_live_license_or_raise
 # Strategy exit helpers may be absent in some branches, so keep this import tolerant.
 import strategy as STRAT
 from strategy import (
@@ -151,6 +159,7 @@ from app.core.export_paths import (
 from app.core.instrument_registry import default_quote_for_exchange
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import quote_for_symbol
+from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
 from app.core.state_context import (
     StateContext,
     build_state_context,
@@ -166,8 +175,9 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-03-21_runtime_logs_default_path_v1"
+BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
 BASE_DIR = Path(__file__).resolve().parent
+_FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
 
 
 def _resolve_runtime_log_path(configured_path: Any, default_name: str) -> str:
@@ -176,6 +186,18 @@ def _resolve_runtime_log_path(configured_path: Any, default_name: str) -> str:
     if not path_obj.is_absolute():
         path_obj = BASE_DIR / path_obj
     return str(path_obj)
+
+
+def _is_free_nonlive_build() -> bool:
+    config_tier = str(getattr(C, "BUILD_TIER", "") or "").strip().upper()
+    return config_tier == "FREE"
+
+
+def _reject_live_for_free_build(mode_name: str | None) -> None:
+    if not _is_free_nonlive_build():
+        return
+    if str(mode_name or "").strip().upper() == "LIVE":
+        raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
 
 
 STATE_DIR = BASE_DIR / "runtime" / "state"
@@ -194,6 +216,9 @@ _LIVE_EQUITY_SYMBOLS: list[str] = []
 _LIVE_EQUITY_FOR_SIZING: float | None = None
 _LIVE_EQUITY_REFRESH_AFTER_CLOSE_LAST_TS: float = 0.0
 _LIVE_EQUITY_LAST_CUR: str = ""
+_LIVE_EQUITY_RESOLUTION_LAST: tuple[str, str, str] | None = None
+_KILL_MIN_EQUITY_RESOLUTION_LAST: tuple[str, float, str] | None = None
+_KILL_MIN_EQUITY_INVALID_DICT_LOGGED: set[str] = set()
 _POST_ONLY_PARAMS: dict[str, Any] = {"postOnly": True}
 _RESUME_LOGGED_SYMBOLS: set[str] = set()
 _ORDER_SKIP_MIN_LOG_KEYS: set[tuple[str, int, str]] = set()
@@ -227,6 +252,1213 @@ _RUNTIME_SIGNAL_SUMMARY: dict[str, Any] = {
     "last_signal_symbol": "",
     "last_signal_regime": "",
 }
+_CHART_STATE_MAX_CANDLES = 180
+_CHART_STATE_MAX_MARKERS = 16
+_CHART_STATE_MARKERS: dict[str, dict[str, list[dict[str, Any]]]] = {}
+_LIVE_CHART_OHLCV_BY_SYMBOL: dict[str, dict[str, list[float]]] = {}
+_LIVE_CHART_SEED_BARS_BY_SYMBOL: dict[str, list[dict[str, float | int]]] = {}
+_LIVE_CHART_PARTIAL_BAR_BY_SYMBOL: dict[str, dict[str, float | int]] = {}
+_LIVE_CHART_SEED_PRICE_SOURCE_BY_SYMBOL: dict[str, str] = {}
+_LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL: dict[str, int] = {}
+_LIVE_CHART_IN_MEMORY_PRICE_BY_SYMBOL: dict[str, dict[str, Any]] = {}
+_LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL: dict[str, dict[str, list[float]]] = {}
+_LIVE_CHART_EXCHANGE_OHLCV_BY_SYMBOL: dict[str, dict[str, list[float]]] = {}
+_LIVE_CHART_DIAG_BY_SYMBOL: dict[str, dict[str, Any]] = {}
+_LIVE_CHART_WRITER_LOGGED_PATHS: dict[str, tuple[str, str, int, str, str, str]] = {}
+_LIVE_CHART_PERSISTED_SKIP_LOGGED: dict[str, tuple[str, int]] = {}
+
+
+def _chart_state_symbol_token(symbol: str) -> str:
+    return sanitize_symbol_for_chart_state(symbol)
+
+
+def _chart_state_symbol_keys(symbol: str) -> list[str]:
+    sym = str(symbol or "").strip()
+    if not sym:
+        return [""]
+    out: list[str] = [sym]
+    flat = sym.replace("/", "")
+    if flat and flat not in out:
+        out.append(flat)
+    if "/" not in sym and len(sym) >= 6:
+        split = f"{sym[:3]}/{sym[3:]}"
+        if split not in out:
+            out.append(split)
+    return out
+
+
+def _chart_state_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(out):
+        return None
+    return float(out)
+
+
+def _chart_state_int(value: Any) -> int | None:
+    try:
+        out = int(float(value))
+    except Exception:
+        return None
+    return int(out)
+
+
+def _chart_state_bucket(symbol: str) -> dict[str, list[dict[str, Any]]]:
+    key = _chart_state_symbol_token(symbol)
+    bucket = _CHART_STATE_MARKERS.get(key)
+    if isinstance(bucket, dict):
+        bucket.setdefault("entries", [])
+        bucket.setdefault("exits", [])
+        return bucket
+    bucket = {"entries": [], "exits": []}
+    _CHART_STATE_MARKERS[key] = bucket
+    return bucket
+
+
+def _chart_state_note_marker(symbol: str, *, kind: str, ts_ms: Any, price: Any, side: str, label: str) -> None:
+    bucket = _chart_state_bucket(symbol)
+    target_key = "entries" if str(kind or "").strip().lower().startswith("entry") else "exits"
+    target = bucket[target_key]
+    ts_value = _chart_state_int(ts_ms)
+    price_value = _chart_state_float(price)
+    if ts_value is None or ts_value <= 0 or price_value is None or price_value <= 0.0:
+        return
+    payload = {
+        "ts_ms": int(ts_value),
+        "price": float(price_value),
+        "side": str(side or "long").strip().lower() or "long",
+        "label": str(label or "").strip(),
+    }
+    if target:
+        last = target[-1]
+        if (
+            int(last.get("ts_ms") or 0) == int(payload["ts_ms"])
+            and abs(float(last.get("price") or 0.0) - float(payload["price"])) <= 1e-12
+            and str(last.get("label") or "") == str(payload["label"])
+        ):
+            return
+    target.append(payload)
+    if len(target) > _CHART_STATE_MAX_MARKERS:
+        del target[:-_CHART_STATE_MAX_MARKERS]
+
+
+def _chart_state_note_diag(
+    symbol: str,
+    *,
+    source: str,
+    reason: str = "",
+    candles_count: int = 0,
+    last_candle_ts_ms: int | None = None,
+    seed_price_source: str = "",
+    seed_price_source_age_ms: int | None = None,
+) -> None:
+    payload = {
+        "source": str(source or "empty").strip() or "empty",
+        "reason": str(reason or "").strip(),
+        "candles_count": max(0, int(candles_count or 0)),
+        "last_candle_ts_ms": int(last_candle_ts_ms) if last_candle_ts_ms is not None else None,
+        "seed_price_source": str(seed_price_source or "").strip(),
+        "seed_price_source_age_ms": int(seed_price_source_age_ms) if seed_price_source_age_ms is not None else None,
+    }
+    for key in _chart_state_symbol_keys(symbol):
+        _LIVE_CHART_DIAG_BY_SYMBOL[key] = dict(payload)
+
+
+def _chart_state_recent_ohlcv_copy(ohlcv: dict[str, Any] | None) -> dict[str, list[float]] | None:
+    if not isinstance(ohlcv, dict):
+        return None
+    ts = list(ohlcv.get("timestamp") or [])
+    op = list(ohlcv.get("open") or [])
+    hi = list(ohlcv.get("high") or [])
+    lo = list(ohlcv.get("low") or [])
+    cl = list(ohlcv.get("close") or [])
+    vol = list(ohlcv.get("volume") or [])
+    count = min(len(ts), len(op), len(hi), len(lo), len(cl))
+    if count <= 0:
+        return None
+    start = max(0, count - _CHART_STATE_MAX_CANDLES)
+    return {
+        "timestamp": [int(x) for x in ts[start:count]],
+        "open": [float(x) for x in op[start:count]],
+        "high": [float(x) for x in hi[start:count]],
+        "low": [float(x) for x in lo[start:count]],
+        "close": [float(x) for x in cl[start:count]],
+        "volume": [float(x) for x in vol[start:count]] if len(vol) >= count else [0.0 for _ in range(count - start)],
+    }
+
+
+def _chart_state_cache_ohlcv(
+    symbol: str,
+    ohlcv: dict[str, Any] | None,
+    *,
+    source: str,
+    reason: str = "",
+    seed_price_source: str = "",
+    seed_price_source_age_ms: int | None = None,
+) -> None:
+    payload = _chart_state_recent_ohlcv_copy(ohlcv)
+    if not isinstance(payload, dict):
+        _chart_state_note_diag(
+            symbol,
+            source=source,
+            reason=reason or "no_recent_ohlcv",
+            seed_price_source=seed_price_source,
+            seed_price_source_age_ms=seed_price_source_age_ms,
+        )
+        return
+    last_candle_ts_ms = int(payload["timestamp"][-1]) if payload["timestamp"] else None
+    target_cache = _LIVE_CHART_OHLCV_BY_SYMBOL
+    if str(source or "").strip() == "exchange_cache":
+        target_cache = _LIVE_CHART_EXCHANGE_OHLCV_BY_SYMBOL
+    for key in _chart_state_symbol_keys(symbol):
+        target_cache[key] = {
+            "timestamp": list(payload["timestamp"]),
+            "open": list(payload["open"]),
+            "high": list(payload["high"]),
+            "low": list(payload["low"]),
+            "close": list(payload["close"]),
+            "volume": list(payload["volume"]),
+        }
+    _chart_state_note_diag(
+        symbol,
+        source=source,
+        reason=str(reason or "").strip(),
+        candles_count=len(payload["timestamp"]),
+        last_candle_ts_ms=last_candle_ts_ms,
+        seed_price_source=seed_price_source,
+        seed_price_source_age_ms=seed_price_source_age_ms,
+    )
+
+
+def _chart_state_store_internal_bootstrap_ohlcv(symbol: str, ohlcv: dict[str, Any] | None) -> bool:
+    payload = _chart_state_recent_ohlcv_copy(ohlcv)
+    if not isinstance(payload, dict):
+        return False
+    for key in _chart_state_symbol_keys(symbol):
+        _LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL[key] = {
+            "timestamp": list(payload["timestamp"]),
+            "open": list(payload["open"]),
+            "high": list(payload["high"]),
+            "low": list(payload["low"]),
+            "close": list(payload["close"]),
+            "volume": list(payload["volume"]),
+        }
+    return bool(payload["timestamp"])
+
+
+def _chart_state_seed_builder_observe(
+    symbol: str,
+    timeframe: str,
+    *,
+    ts_ms: Any,
+    price: Any,
+    source: str = "",
+    source_age_ms: int | None = None,
+) -> bool:
+    ts_value = _chart_state_int(ts_ms)
+    price_value = _chart_state_float(price)
+    if ts_value is None or ts_value <= 0 or price_value is None or price_value <= 0.0:
+        return False
+    try:
+        tf_ms = max(60_000, int(_timeframe_to_ms(str(timeframe or "5m"))))
+    except Exception:
+        tf_ms = 300_000
+    bucket_ts_ms = max(0, (int(ts_value) // int(tf_ms)) * int(tf_ms))
+    recent: list[dict[str, float | int]] = []
+    partial: dict[str, float | int] | None = None
+    for key in _chart_state_symbol_keys(symbol):
+        raw_recent = _LIVE_CHART_SEED_BARS_BY_SYMBOL.get(key)
+        if isinstance(raw_recent, list):
+            recent = [dict(row) for row in raw_recent if isinstance(row, dict)]
+            partial_raw = _LIVE_CHART_PARTIAL_BAR_BY_SYMBOL.get(key)
+            partial = dict(partial_raw) if isinstance(partial_raw, dict) else None
+            break
+    price_f = float(price_value)
+    if isinstance(partial, dict) and int(partial.get("ts_ms") or 0) == int(bucket_ts_ms):
+        partial["high"] = max(float(partial.get("high") or price_f), price_f)
+        partial["low"] = min(float(partial.get("low") or price_f), price_f)
+        partial["close"] = float(price_f)
+    elif isinstance(partial, dict) and int(partial.get("ts_ms") or 0) > int(bucket_ts_ms):
+        updated = False
+        for row in recent:
+            if int(row.get("ts_ms") or 0) != int(bucket_ts_ms):
+                continue
+            row["high"] = max(float(row.get("high") or price_f), price_f)
+            row["low"] = min(float(row.get("low") or price_f), price_f)
+            row["close"] = float(price_f)
+            updated = True
+            break
+        if not updated:
+            recent.append(
+                {
+                    "ts_ms": int(bucket_ts_ms),
+                    "open": float(price_f),
+                    "high": float(price_f),
+                    "low": float(price_f),
+                    "close": float(price_f),
+                }
+            )
+            recent.sort(key=lambda row: int(row.get("ts_ms") or 0))
+    else:
+        if isinstance(partial, dict) and int(partial.get("ts_ms") or 0) > 0:
+            prev_ts = int(partial.get("ts_ms") or 0)
+            if recent and int(recent[-1].get("ts_ms") or 0) == prev_ts:
+                recent[-1] = dict(partial)
+            else:
+                recent.append(dict(partial))
+        partial = {
+            "ts_ms": int(bucket_ts_ms),
+            "open": float(price_f),
+            "high": float(price_f),
+            "low": float(price_f),
+            "close": float(price_f),
+        }
+    if len(recent) > _CHART_STATE_MAX_CANDLES:
+        recent = recent[-_CHART_STATE_MAX_CANDLES:]
+    for key in _chart_state_symbol_keys(symbol):
+        _LIVE_CHART_SEED_BARS_BY_SYMBOL[key] = [dict(row) for row in recent]
+        if isinstance(partial, dict):
+            _LIVE_CHART_PARTIAL_BAR_BY_SYMBOL[key] = dict(partial)
+        source_text = str(source or "").strip()
+        if source_text:
+            _LIVE_CHART_SEED_PRICE_SOURCE_BY_SYMBOL[key] = source_text
+            if source_age_ms is not None:
+                _LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL[key] = max(0, int(source_age_ms))
+            else:
+                _LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL.pop(key, None)
+    _chart_state_remember_in_memory_price(
+        symbol,
+        price=float(price_value),
+        ts_ms=int(ts_value),
+        source=str(source or "seed_builder_price"),
+        age_ms=source_age_ms,
+    )
+    return True
+
+
+def _chart_state_seed_builder_ohlcv(symbol: str) -> dict[str, list[float]] | None:
+    recent: list[dict[str, float | int]] = []
+    partial: dict[str, float | int] | None = None
+    for key in _chart_state_symbol_keys(symbol):
+        raw_recent = _LIVE_CHART_SEED_BARS_BY_SYMBOL.get(key)
+        if isinstance(raw_recent, list):
+            recent = [dict(row) for row in raw_recent if isinstance(row, dict)]
+            partial_raw = _LIVE_CHART_PARTIAL_BAR_BY_SYMBOL.get(key)
+            partial = dict(partial_raw) if isinstance(partial_raw, dict) else None
+            break
+    rows = [dict(row) for row in recent]
+    if isinstance(partial, dict) and int(partial.get("ts_ms") or 0) > 0:
+        if rows and int(rows[-1].get("ts_ms") or 0) == int(partial.get("ts_ms") or 0):
+            rows[-1] = dict(partial)
+        else:
+            rows.append(dict(partial))
+    if not rows:
+        return None
+    rows = rows[-_CHART_STATE_MAX_CANDLES:]
+    out = {
+        "timestamp": [],
+        "open": [],
+        "high": [],
+        "low": [],
+        "close": [],
+        "volume": [],
+    }
+    for row in rows:
+        ts_value = _chart_state_int(row.get("ts_ms"))
+        open_value = _chart_state_float(row.get("open"))
+        high_value = _chart_state_float(row.get("high"))
+        low_value = _chart_state_float(row.get("low"))
+        close_value = _chart_state_float(row.get("close"))
+        if ts_value is None or open_value is None or high_value is None or low_value is None or close_value is None:
+            continue
+        out["timestamp"].append(int(ts_value))
+        out["open"].append(float(open_value))
+        out["high"].append(max(float(open_value), float(high_value), float(low_value), float(close_value)))
+        out["low"].append(min(float(open_value), float(high_value), float(low_value), float(close_value)))
+        out["close"].append(float(close_value))
+        out["volume"].append(0.0)
+    return out if out["timestamp"] else None
+
+
+def _chart_state_last_price_from_ohlcv(ohlcv: dict[str, Any] | None) -> tuple[float | None, int | None]:
+    if not isinstance(ohlcv, dict):
+        return (None, None)
+    ts_list = list(ohlcv.get("timestamp") or [])
+    close_list = list(ohlcv.get("close") or [])
+    if not ts_list or not close_list:
+        return (None, None)
+    price_value = _chart_state_float(close_list[-1])
+    ts_value = _chart_state_int(ts_list[-1])
+    return (price_value, ts_value)
+
+
+def _chart_state_seed_reason_from_source(seed_price_source: str) -> str:
+    source_text = str(seed_price_source or "").strip()
+    if source_text.startswith("runtime_tap_") or source_text.startswith("in_memory_cached_runtime_tap_"):
+        return "using_runtime_price_tap"
+    if source_text.startswith("in_memory_"):
+        return "using_in_memory_live_price_cache"
+    if source_text.startswith("persisted_") or source_text in {
+        "position_entry_price",
+        "seed_builder_partial_close",
+        "last_success_cache_close",
+        "internal_bootstrap_close",
+        "exchange_cache_close",
+    }:
+        return "using_guaranteed_first_price_observation"
+    return "using_internal_price_seed_builder"
+
+
+def _chart_state_remember_in_memory_price(
+    symbol: str,
+    *,
+    price: Any,
+    ts_ms: Any,
+    source: str,
+    age_ms: int | None = None,
+) -> bool:
+    price_value = _chart_state_float(price)
+    ts_value = _chart_state_int(ts_ms)
+    source_text = str(source or "").strip()
+    if price_value is None or price_value <= 0.0 or not source_text:
+        return False
+    payload = {
+        "price": float(price_value),
+        "ts_ms": int(ts_value) if ts_value is not None and ts_value > 0 else None,
+        "source": str(source_text),
+        "age_ms": int(age_ms) if age_ms is not None else None,
+        "observed_at_ms": int(time.time() * 1000),
+    }
+    for key in _chart_state_symbol_keys(symbol):
+        _LIVE_CHART_IN_MEMORY_PRICE_BY_SYMBOL[key] = dict(payload)
+    return True
+
+
+def _chart_state_remember_runtime_tapped_price(
+    symbol: str,
+    *,
+    price: Any,
+    ts_ms: Any = None,
+    source: str,
+    age_ms: int | None = None,
+) -> bool:
+    source_text = str(source or "").strip()
+    if not source_text:
+        return False
+    if not source_text.startswith("runtime_tap_"):
+        source_text = f"runtime_tap_{source_text}"
+    ts_value = _chart_state_int(ts_ms)
+    if ts_value is None or ts_value <= 0:
+        ts_value = int(time.time() * 1000)
+    return _chart_state_remember_in_memory_price(
+        symbol,
+        price=price,
+        ts_ms=int(ts_value),
+        source=str(source_text),
+        age_ms=age_ms,
+    )
+
+
+def _chart_state_in_memory_price_max_age_ms(timeframe: str) -> int:
+    return _chart_state_persisted_snapshot_max_age_ms(str(timeframe or "5m"))
+
+
+def _chart_state_pick_in_memory_live_price(
+    ex: Any,
+    symbol: str,
+    *,
+    timeframe: str,
+    fallback_ts_ms: int,
+) -> tuple[float | None, int | None, str, int | None]:
+    max_age_ms = _chart_state_in_memory_price_max_age_ms(str(timeframe or "5m"))
+    now_ms = int(time.time() * 1000)
+
+    def _normalize_candidate(price: Any, ts_ms: Any, source: str, age_ms: int | None = None) -> tuple[float | None, int | None, str, int | None]:
+        price_value = _chart_state_float(price)
+        if price_value is None or price_value <= 0.0:
+            return (None, None, "", None)
+        ts_value = _chart_state_int(ts_ms)
+        if ts_value is not None:
+            computed_age_ms = int(age_ms) if age_ms is not None else int(now_ms - int(ts_value))
+            if computed_age_ms < -60_000:
+                return (None, None, "", None)
+            if computed_age_ms > int(max_age_ms):
+                return (None, None, "", None)
+            return (float(price_value), int(max(0, int(fallback_ts_ms or ts_value))), str(source), int(max(0, computed_age_ms)))
+        computed_age_ms = int(age_ms) if age_ms is not None else None
+        if computed_age_ms is not None and computed_age_ms > int(max_age_ms):
+            return (None, None, "", None)
+        return (float(price_value), int(max(0, int(fallback_ts_ms or 0))), str(source), computed_age_ms)
+
+    for key in _chart_state_symbol_keys(symbol):
+        cached = _LIVE_CHART_IN_MEMORY_PRICE_BY_SYMBOL.get(key)
+        if not isinstance(cached, dict):
+            continue
+        source_text = str(cached.get("source") or "").strip()
+        if not source_text:
+            continue
+        prefixed_source = source_text
+        if not (source_text.startswith("runtime_tap_") or source_text.startswith("in_memory_")):
+            prefixed_source = f"in_memory_cached_{source_text}"
+        candidate = _normalize_candidate(
+            cached.get("price"),
+            cached.get("ts_ms") or cached.get("observed_at_ms"),
+            prefixed_source,
+            cached.get("age_ms"),
+        )
+        if candidate[0] is not None:
+            return candidate
+
+    ex_obj = getattr(ex, "ex", None) if ex is not None else None
+    if ex_obj is None:
+        return (None, None, "", None)
+
+    symbol_variants = _chart_state_symbol_keys(symbol)
+
+    tickers = getattr(ex_obj, "tickers", None)
+    if isinstance(tickers, dict):
+        for key in symbol_variants:
+            ticker = tickers.get(key)
+            if not isinstance(ticker, dict):
+                continue
+            ticker_ts = _chart_state_int(ticker.get("timestamp")) or _chart_state_parse_iso_to_ms(ticker.get("datetime"))
+            last_value = _chart_state_float(ticker.get("last"))
+            if last_value is not None and last_value > 0.0:
+                candidate = _normalize_candidate(last_value, ticker_ts, "in_memory_ticker_last")
+                if candidate[0] is not None:
+                    return candidate
+            bid_value = _chart_state_float(ticker.get("bid"))
+            ask_value = _chart_state_float(ticker.get("ask"))
+            if bid_value is not None and ask_value is not None and bid_value > 0.0 and ask_value > 0.0:
+                candidate = _normalize_candidate((float(bid_value) + float(ask_value)) / 2.0, ticker_ts, "in_memory_ticker_mid")
+                if candidate[0] is not None:
+                    return candidate
+
+    orderbooks = getattr(ex_obj, "orderbooks", None)
+    if isinstance(orderbooks, dict):
+        for key in symbol_variants:
+            orderbook = orderbooks.get(key)
+            if not isinstance(orderbook, dict):
+                continue
+            bids = list(orderbook.get("bids") or [])
+            asks = list(orderbook.get("asks") or [])
+            if not bids or not asks:
+                continue
+            bid_value = _chart_state_float((bids[0][0] if bids else None))
+            ask_value = _chart_state_float((asks[0][0] if asks else None))
+            if bid_value is None or ask_value is None or bid_value <= 0.0 or ask_value <= 0.0:
+                continue
+            orderbook_ts = _chart_state_int(orderbook.get("timestamp")) or _chart_state_parse_iso_to_ms(orderbook.get("datetime"))
+            candidate = _normalize_candidate((float(bid_value) + float(ask_value)) / 2.0, orderbook_ts, "in_memory_orderbook_mid")
+            if candidate[0] is not None:
+                return candidate
+
+    trades_cache = getattr(ex_obj, "trades", None)
+    if isinstance(trades_cache, dict):
+        for key in symbol_variants:
+            trade_rows = trades_cache.get(key)
+            if trade_rows is None:
+                continue
+            try:
+                rows = list(trade_rows)
+            except Exception:
+                rows = []
+            if not rows:
+                continue
+            last_trade = rows[-1] if isinstance(rows[-1], dict) else {}
+            trade_price = _chart_state_float((last_trade or {}).get("price"))
+            trade_ts = _chart_state_int((last_trade or {}).get("timestamp")) or _chart_state_parse_iso_to_ms((last_trade or {}).get("datetime"))
+            candidate = _normalize_candidate(trade_price, trade_ts, "in_memory_ws_last_trade")
+            if candidate[0] is not None:
+                return candidate
+
+    return (None, None, "", None)
+
+
+def _chart_state_persisted_snapshot_max_age_ms(timeframe: str) -> int:
+    try:
+        tf_ms = max(60_000, int(_timeframe_to_ms(str(timeframe or "5m"))))
+    except Exception:
+        tf_ms = 300_000
+    return int(min(max(2 * int(tf_ms), 60_000), 15 * 60_000))
+
+
+def _chart_state_parse_iso_to_ms(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        normalized = text.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _chart_state_log_persisted_snapshot_skip(symbol: str, *, reason: str, age_ms: int = -1) -> None:
+    reason_text = str(reason or "").strip() or "unknown"
+    age_value = int(age_ms) if age_ms is not None else -1
+    state = (reason_text, age_value)
+    for key in _chart_state_symbol_keys(symbol):
+        if _LIVE_CHART_PERSISTED_SKIP_LOGGED.get(key) == state:
+            return
+    msg = f"[chart_state] persisted snapshot skipped symbol={symbol} reason={reason_text}"
+    if age_value >= 0:
+        msg += f" age_ms={age_value}"
+    logger.info(msg)
+    for key in _chart_state_symbol_keys(symbol):
+        _LIVE_CHART_PERSISTED_SKIP_LOGGED[key] = state
+
+
+def _chart_state_persisted_snapshot_price(
+    state_root: str,
+    exchange_id: str,
+    run_mode: str,
+    symbol: str,
+    fallback_ts_ms: int,
+    timeframe: str,
+) -> tuple[float | None, int | None, str, int | None]:
+    path = Path(build_chart_state_path(str(state_root), exchange_id, run_mode, symbol))
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return (None, None, "", None)
+    if not isinstance(payload, dict):
+        return (None, None, "", None)
+    payload_exchange = str(payload.get("exchange_id") or "").strip().lower()
+    payload_mode = str(payload.get("run_mode") or "").strip().lower()
+    payload_symbol = sanitize_symbol_for_chart_state(str(payload.get("symbol") or ""))
+    want_exchange = str(exchange_id or "").strip().lower()
+    want_mode = str(run_mode or "").strip().lower()
+    want_symbol = sanitize_symbol_for_chart_state(str(symbol or ""))
+    if payload_exchange != want_exchange or payload_mode != want_mode or payload_symbol != want_symbol:
+        _chart_state_log_persisted_snapshot_skip(symbol, reason="mismatch")
+        return (None, None, "", None)
+    current_price = _chart_state_float(payload.get("current_price"))
+    if current_price is None or current_price <= 0.0:
+        _chart_state_log_persisted_snapshot_skip(symbol, reason="missing_current_price")
+        return (None, None, "", None)
+    updated_at_ms = _chart_state_parse_iso_to_ms(payload.get("updated_at"))
+    if updated_at_ms is None:
+        _chart_state_log_persisted_snapshot_skip(symbol, reason="updated_at_parse_failed")
+        return (None, None, "", None)
+    now_ms = int(time.time() * 1000)
+    age_ms = int(now_ms - updated_at_ms)
+    if age_ms < -60_000:
+        _chart_state_log_persisted_snapshot_skip(symbol, reason="future_updated_at", age_ms=age_ms)
+        return (None, None, "", None)
+    max_age_ms = _chart_state_persisted_snapshot_max_age_ms(str(timeframe or "5m"))
+    if age_ms > max_age_ms:
+        _chart_state_log_persisted_snapshot_skip(symbol, reason="stale", age_ms=age_ms)
+        return (None, None, "", int(age_ms))
+    current_price = _chart_state_float(payload.get("current_price"))
+    if current_price is not None and current_price > 0.0:
+        return (
+            float(current_price),
+            int(max(0, int(fallback_ts_ms or 0))),
+            "persisted_chart_state_current_price",
+            int(max(0, age_ms)),
+        )
+    candles = list(payload.get("candles") or [])
+    if candles:
+        last = candles[-1] if isinstance(candles[-1], dict) else {}
+        close_value = _chart_state_float((last or {}).get("close"))
+        if close_value is not None and close_value > 0.0:
+            return (
+                float(close_value),
+                int(max(0, int(fallback_ts_ms or 0))),
+                "persisted_chart_state_last_close",
+                int(max(0, age_ms)),
+            )
+    _chart_state_log_persisted_snapshot_skip(symbol, reason="missing_close_after_fresh", age_ms=age_ms)
+    return (None, None, "", int(age_ms))
+
+
+def _pick_live_chart_seed_price(
+    symbol: str,
+    *,
+    ex: Any,
+    store: StateStore,
+    state_root: str,
+    exchange_id: str,
+    run_mode: str,
+    timeframe: str,
+    fallback_ts_ms: int,
+    entry_ohlcv: dict[str, Any] | None = None,
+    trace_bar_snap: dict[str, Any] | None = None,
+    best_bid: float | None = None,
+    best_ask: float | None = None,
+    close_last: float | None = None,
+) -> tuple[float | None, int | None, str, int | None]:
+    def _return_tapped(price: Any, ts_ms: Any, source: str, age_ms: int | None = None) -> tuple[float | None, int | None, str, int | None]:
+        price_norm = _chart_state_float(price)
+        if price_norm is None or price_norm <= 0.0:
+            return (None, None, "", None)
+        ts_norm = _chart_state_int(ts_ms)
+        if ts_norm is None or ts_norm <= 0:
+            ts_norm = int(max(0, int(fallback_ts_ms or 0)))
+        source_text = str(source or "").strip()
+        if not source_text:
+            return (None, None, "", None)
+        if not source_text.startswith("runtime_tap_"):
+            source_text = f"runtime_tap_{source_text}"
+        _chart_state_remember_runtime_tapped_price(
+            symbol,
+            price=float(price_norm),
+            ts_ms=int(ts_norm),
+            source=str(source_text),
+            age_ms=age_ms,
+        )
+        return (float(price_norm), int(ts_norm), str(source_text), age_ms)
+
+    price_value, ts_value = _chart_state_last_price_from_ohlcv(entry_ohlcv)
+    if price_value is not None and ts_value is not None:
+        return _return_tapped(float(price_value), int(ts_value), "entry_close_last", None)
+
+    if isinstance(trace_bar_snap, dict):
+        price_value = _chart_state_float(trace_bar_snap.get("bar_close"))
+        ts_value = _chart_state_int(trace_bar_snap.get("bar_ts_ms"))
+        if price_value is not None and ts_value is not None:
+            return _return_tapped(float(price_value), int(ts_value), "confirmed_bar_close", None)
+
+    for key in _chart_state_symbol_keys(symbol):
+        snap = _DIFF_TRACE_BAR_BY_SYMBOL.get(key)
+        if not isinstance(snap, dict):
+            continue
+        price_value = _chart_state_float(snap.get("bar_close"))
+        ts_value = _chart_state_int(snap.get("bar_ts_ms"))
+        if price_value is not None and ts_value is not None:
+            return _return_tapped(float(price_value), int(ts_value), "diff_trace_bar_close", None)
+
+    bid_value = _chart_state_float(best_bid)
+    ask_value = _chart_state_float(best_ask)
+    if bid_value is not None and ask_value is not None and bid_value > 0.0 and ask_value > 0.0:
+        return _return_tapped((float(bid_value) + float(ask_value)) / 2.0, int(max(0, int(fallback_ts_ms or 0))), "best_bid_ask_mid", None)
+    if ask_value is not None and ask_value > 0.0:
+        return _return_tapped(float(ask_value), int(max(0, int(fallback_ts_ms or 0))), "best_ask", None)
+    if bid_value is not None and bid_value > 0.0:
+        return _return_tapped(float(bid_value), int(max(0, int(fallback_ts_ms or 0))), "best_bid", None)
+
+    price_value, ts_value, source_text, source_age_ms = _chart_state_pick_in_memory_live_price(
+        ex,
+        symbol,
+        timeframe=str(timeframe or "5m"),
+        fallback_ts_ms=int(max(0, int(fallback_ts_ms or 0))),
+    )
+    if price_value is not None and ts_value is not None and str(source_text or "").strip():
+        return (float(price_value), int(ts_value), str(source_text), source_age_ms)
+
+    close_value = _chart_state_float(close_last)
+    if close_value is not None and close_value > 0.0:
+        return _return_tapped(float(close_value), int(max(0, int(fallback_ts_ms or 0))), "close_last", None)
+
+    try:
+        pos = store.get_position(symbol)
+    except Exception:
+        pos = None
+    if isinstance(pos, dict):
+        entry_value = _chart_state_float(pos.get("entry"))
+        if entry_value is not None and entry_value > 0.0:
+            return _return_tapped(float(entry_value), int(max(0, int(fallback_ts_ms or 0))), "position_entry_price", None)
+
+    last_success_cache = None
+    internal_bootstrap_cache = None
+    exchange_cache = None
+    for key in _chart_state_symbol_keys(symbol):
+        if last_success_cache is None and isinstance(_LIVE_CHART_OHLCV_BY_SYMBOL.get(key), dict):
+            last_success_cache = _LIVE_CHART_OHLCV_BY_SYMBOL.get(key)
+        if internal_bootstrap_cache is None and isinstance(_LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL.get(key), dict):
+            internal_bootstrap_cache = _LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL.get(key)
+        if exchange_cache is None and isinstance(_LIVE_CHART_EXCHANGE_OHLCV_BY_SYMBOL.get(key), dict):
+            exchange_cache = _LIVE_CHART_EXCHANGE_OHLCV_BY_SYMBOL.get(key)
+    for cache_name, cache_map in (
+        ("seed_builder_partial_close", _chart_state_seed_builder_ohlcv(symbol)),
+        ("last_success_cache_close", last_success_cache),
+        ("internal_bootstrap_close", internal_bootstrap_cache),
+        ("exchange_cache_close", exchange_cache),
+    ):
+        price_value, ts_value = _chart_state_last_price_from_ohlcv(cache_map if isinstance(cache_map, dict) else None)
+        if price_value is not None:
+            use_ts = ts_value if ts_value is not None and str(cache_name).startswith("seed_builder_") else int(max(0, int(fallback_ts_ms or ts_value or 0)))
+            return (float(price_value), int(use_ts), str(cache_name), None)
+
+    return _chart_state_persisted_snapshot_price(
+        state_root=str(state_root),
+        exchange_id=str(exchange_id),
+        run_mode=str(run_mode),
+        symbol=str(symbol),
+        fallback_ts_ms=int(max(0, int(fallback_ts_ms or 0))),
+        timeframe=str(timeframe or "5m"),
+    )
+
+
+def _observe_live_chart_guaranteed_price(
+    symbol: str,
+    *,
+    ex: Any,
+    timeframe: str,
+    store: StateStore,
+    state_root: str,
+    exchange_id: str,
+    run_mode: str,
+    fallback_ts_ms: int,
+    entry_ohlcv: dict[str, Any] | None = None,
+    trace_bar_snap: dict[str, Any] | None = None,
+    best_bid: float | None = None,
+    best_ask: float | None = None,
+    close_last: float | None = None,
+) -> bool:
+    price_value, ts_value, source_text, source_age_ms = _pick_live_chart_seed_price(
+        symbol,
+        ex=ex,
+        store=store,
+        state_root=str(state_root),
+        exchange_id=str(exchange_id),
+        run_mode=str(run_mode),
+        timeframe=str(timeframe or "5m"),
+        fallback_ts_ms=int(max(0, int(fallback_ts_ms or 0))),
+        entry_ohlcv=entry_ohlcv,
+        trace_bar_snap=trace_bar_snap,
+        best_bid=best_bid,
+        best_ask=best_ask,
+        close_last=close_last,
+    )
+    if price_value is None or ts_value is None or not str(source_text or "").strip():
+        return False
+    return _chart_state_seed_builder_observe(
+        symbol,
+        str(timeframe or "5m"),
+        ts_ms=int(ts_value),
+        price=float(price_value),
+        source=str(source_text),
+        source_age_ms=source_age_ms,
+    )
+
+
+def _chart_state_try_seed_builder(symbol: str, timeframe: str) -> bool:
+    payload = _chart_state_seed_builder_ohlcv(symbol)
+    if not isinstance(payload, dict):
+        return False
+    seed_price_source = ""
+    seed_price_source_age_ms = None
+    for key in _chart_state_symbol_keys(symbol):
+        seed_price_source = str(_LIVE_CHART_SEED_PRICE_SOURCE_BY_SYMBOL.get(key) or "").strip()
+        if key in _LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL:
+            seed_price_source_age_ms = int(_LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL.get(key) or 0)
+        if seed_price_source:
+            break
+    _chart_state_cache_ohlcv(
+        symbol,
+        payload,
+        source="runner_seed_builder",
+        reason=_chart_state_seed_reason_from_source(seed_price_source),
+        seed_price_source=seed_price_source,
+        seed_price_source_age_ms=seed_price_source_age_ms,
+    )
+    return True
+
+
+def _chart_state_append_internal_bootstrap_bar(
+    symbol: str,
+    *,
+    ts_ms: Any,
+    open_px: Any,
+    high_px: Any,
+    low_px: Any,
+    close_px: Any,
+) -> bool:
+    ts_value = _chart_state_int(ts_ms)
+    open_value = _chart_state_float(open_px)
+    high_value = _chart_state_float(high_px)
+    low_value = _chart_state_float(low_px)
+    close_value = _chart_state_float(close_px)
+    if ts_value is None or open_value is None or high_value is None or low_value is None or close_value is None:
+        return False
+    hi_value = max(float(open_value), float(high_value), float(low_value), float(close_value))
+    lo_value = min(float(open_value), float(high_value), float(low_value), float(close_value))
+    existing: dict[str, list[float]] | None = None
+    for key in _chart_state_symbol_keys(symbol):
+        cached = _LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL.get(key)
+        if isinstance(cached, dict):
+            existing = cached
+            break
+    payload = {
+        "timestamp": list((existing or {}).get("timestamp") or []),
+        "open": list((existing or {}).get("open") or []),
+        "high": list((existing or {}).get("high") or []),
+        "low": list((existing or {}).get("low") or []),
+        "close": list((existing or {}).get("close") or []),
+        "volume": list((existing or {}).get("volume") or []),
+    }
+    if payload["timestamp"] and int(payload["timestamp"][-1]) == int(ts_value):
+        payload["open"][-1] = float(open_value)
+        payload["high"][-1] = float(hi_value)
+        payload["low"][-1] = float(lo_value)
+        payload["close"][-1] = float(close_value)
+        if payload["volume"]:
+            payload["volume"][-1] = 0.0
+    else:
+        payload["timestamp"].append(int(ts_value))
+        payload["open"].append(float(open_value))
+        payload["high"].append(float(hi_value))
+        payload["low"].append(float(lo_value))
+        payload["close"].append(float(close_value))
+        payload["volume"].append(0.0)
+        if len(payload["timestamp"]) > _CHART_STATE_MAX_CANDLES:
+            keep = payload["timestamp"][-_CHART_STATE_MAX_CANDLES:]
+            payload["timestamp"] = keep
+            payload["open"] = payload["open"][-_CHART_STATE_MAX_CANDLES:]
+            payload["high"] = payload["high"][-_CHART_STATE_MAX_CANDLES:]
+            payload["low"] = payload["low"][-_CHART_STATE_MAX_CANDLES:]
+            payload["close"] = payload["close"][-_CHART_STATE_MAX_CANDLES:]
+            payload["volume"] = payload["volume"][-_CHART_STATE_MAX_CANDLES:]
+    return _chart_state_store_internal_bootstrap_ohlcv(symbol, payload)
+
+
+def _chart_state_try_internal_bootstrap(symbol: str) -> bool:
+    cached: dict[str, Any] | None = None
+    for key in _chart_state_symbol_keys(symbol):
+        raw = _LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL.get(key)
+        if isinstance(raw, dict) and list(raw.get("timestamp") or []):
+            cached = raw
+            break
+    if cached is None:
+        for key in _chart_state_symbol_keys(symbol):
+            idx_map = _DIFF_TRACE_BAR_INDEX_BY_SYMBOL.get(key)
+            if isinstance(idx_map, dict) and idx_map:
+                rows = sorted(idx_map.items())[-_CHART_STATE_MAX_CANDLES:]
+                payload = {
+                    "timestamp": [int(ts) for ts, _snap in rows],
+                    "open": [float((_snap or {}).get("bar_open") or 0.0) for _ts, _snap in rows],
+                    "high": [float((_snap or {}).get("bar_high") or 0.0) for _ts, _snap in rows],
+                    "low": [float((_snap or {}).get("bar_low") or 0.0) for _ts, _snap in rows],
+                    "close": [float((_snap or {}).get("bar_close") or 0.0) for _ts, _snap in rows],
+                    "volume": [0.0 for _ in rows],
+                }
+                if _chart_state_store_internal_bootstrap_ohlcv(symbol, payload):
+                    cached = payload
+                    break
+        if cached is None:
+            for key in _chart_state_symbol_keys(symbol):
+                snap = _DIFF_TRACE_BAR_BY_SYMBOL.get(key)
+                if not isinstance(snap, dict):
+                    continue
+                if _chart_state_append_internal_bootstrap_bar(
+                    symbol,
+                    ts_ms=snap.get("bar_ts_ms"),
+                    open_px=snap.get("bar_open"),
+                    high_px=snap.get("bar_high"),
+                    low_px=snap.get("bar_low"),
+                    close_px=snap.get("bar_close"),
+                ):
+                    cached = _LIVE_CHART_INTERNAL_BOOTSTRAP_BY_SYMBOL.get(key)
+                    break
+    if not isinstance(cached, dict):
+        return False
+    _chart_state_cache_ohlcv(
+        symbol,
+        cached,
+        source="runner_internal_bootstrap",
+        reason="using_internal_runner_bootstrap",
+    )
+    return True
+
+
+def _chart_state_use_runner_last_success_cache(symbol: str, *, reason: str = "") -> bool:
+    seed_price_source = ""
+    seed_price_source_age_ms = None
+    for diag_key in _chart_state_symbol_keys(symbol):
+        seed_price_source = str(_LIVE_CHART_SEED_PRICE_SOURCE_BY_SYMBOL.get(diag_key) or "").strip()
+        if diag_key in _LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL:
+            seed_price_source_age_ms = int(_LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL.get(diag_key) or 0)
+        if seed_price_source:
+            break
+    for key in _chart_state_symbol_keys(symbol):
+        cached = _LIVE_CHART_OHLCV_BY_SYMBOL.get(key)
+        if not isinstance(cached, dict):
+            continue
+        ts_list = list(cached.get("timestamp") or [])
+        last_candle_ts_ms = int(ts_list[-1]) if ts_list else None
+        _chart_state_note_diag(
+            symbol,
+            source="runner_last_success_cache",
+            reason=str(reason or "using_last_successful_runner_cache").strip(),
+            candles_count=len(ts_list),
+            last_candle_ts_ms=last_candle_ts_ms,
+            seed_price_source=seed_price_source,
+            seed_price_source_age_ms=seed_price_source_age_ms,
+        )
+        return bool(ts_list)
+    return False
+
+
+def _chart_state_ohlcv_for_symbol(symbol: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    diag: dict[str, Any] = {}
+    for key in _chart_state_symbol_keys(symbol):
+        cached = _LIVE_CHART_OHLCV_BY_SYMBOL.get(key)
+        if isinstance(cached, dict):
+            diag = dict(_LIVE_CHART_DIAG_BY_SYMBOL.get(key) or {})
+            ts_list = list(cached.get("timestamp") or [])
+            seed_price_source = str(_LIVE_CHART_SEED_PRICE_SOURCE_BY_SYMBOL.get(key) or "").strip()
+            seed_price_source_age_ms = None
+            if key in _LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL:
+                seed_price_source_age_ms = int(_LIVE_CHART_SEED_PRICE_SOURCE_AGE_MS_BY_SYMBOL.get(key) or 0)
+            if not diag:
+                diag = {
+                    "source": "runner_last_success_cache",
+                    "candles_count": len(ts_list),
+                    "last_candle_ts_ms": int(ts_list[-1]) if ts_list else None,
+                    "reason": "using_last_successful_runner_cache",
+                    "seed_price_source": seed_price_source,
+                    "seed_price_source_age_ms": seed_price_source_age_ms,
+                }
+            else:
+                source_text = str(diag.get("source") or "").strip()
+                if source_text not in ("runner_live_ohlcv", "runner_seed_builder", "runner_internal_bootstrap", "runner_last_success_cache"):
+                    source_text = "runner_last_success_cache"
+                diag["source"] = source_text
+                diag["candles_count"] = max(int(diag.get("candles_count") or 0), len(ts_list))
+                if (not str(diag.get("seed_price_source") or "").strip()) and seed_price_source:
+                    diag["seed_price_source"] = seed_price_source
+                if diag.get("seed_price_source_age_ms") is None and seed_price_source_age_ms is not None:
+                    diag["seed_price_source_age_ms"] = seed_price_source_age_ms
+                if diag.get("last_candle_ts_ms") in (None, 0) and ts_list:
+                    diag["last_candle_ts_ms"] = int(ts_list[-1])
+                if not str(diag.get("reason") or "").strip():
+                    if source_text == "runner_last_success_cache":
+                        diag["reason"] = "using_last_successful_runner_cache"
+                    elif source_text == "runner_seed_builder":
+                        diag["reason"] = _chart_state_seed_reason_from_source(str(diag.get("seed_price_source") or "").strip())
+                    elif source_text == "runner_internal_bootstrap":
+                        diag["reason"] = "using_internal_runner_bootstrap"
+            return cached, diag
+    for key in _chart_state_symbol_keys(symbol):
+        raw = _LIVE_CHART_EXCHANGE_OHLCV_BY_SYMBOL.get(key)
+        if isinstance(raw, dict):
+            ts_list = list(raw.get("timestamp") or [])
+            return raw, {
+                "source": "exchange_cache",
+                "candles_count": len(ts_list),
+                "last_candle_ts_ms": int(ts_list[-1]) if ts_list else None,
+                "reason": "",
+            }
+    for key in _chart_state_symbol_keys(symbol):
+        diag = dict(_LIVE_CHART_DIAG_BY_SYMBOL.get(key) or {})
+        if diag:
+            return None, diag
+    return None, {"source": "empty", "candles_count": 0, "last_candle_ts_ms": None, "reason": "no_recent_ohlcv"}
+
+
+def _chart_state_cached_ohlcv_from_exchange(ex: Any, symbol: str, timeframe: str) -> dict[str, Any] | None:
+    getter = getattr(ex, "_coincheck_get_cached_ohlcv", None)
+    if callable(getter):
+        try:
+            rows = getter(symbol, timeframe, limit=_CHART_STATE_MAX_CANDLES)
+            if isinstance(rows, list) and rows:
+                return ohlcv_to_dict(rows)
+        except Exception:
+            pass
+    cache_map = getattr(ex, "_coincheck_ohlcv_5m_by_symbol", None)
+    if isinstance(cache_map, dict):
+        try:
+            bars = cache_map.get(str(symbol)) or cache_map.get(str(symbol).replace("/", ""))
+            if isinstance(bars, dict) and bars:
+                rows = [list(bars[key]) for key in sorted(bars.keys())[-_CHART_STATE_MAX_CANDLES:]]
+                if rows:
+                    return ohlcv_to_dict(rows)
+        except Exception:
+            pass
+    return None
+
+
+def _chart_state_candles_from_ohlcv(ohlcv: dict[str, Any] | None) -> list[dict[str, float | int]]:
+    if not isinstance(ohlcv, dict):
+        return []
+    ts = list(ohlcv.get("timestamp") or [])
+    op = list(ohlcv.get("open") or [])
+    hi = list(ohlcv.get("high") or [])
+    lo = list(ohlcv.get("low") or [])
+    cl = list(ohlcv.get("close") or [])
+    count = min(len(ts), len(op), len(hi), len(lo), len(cl))
+    if count <= 0:
+        return []
+    start = max(0, count - _CHART_STATE_MAX_CANDLES)
+    out: list[dict[str, float | int]] = []
+    for index in range(start, count):
+        ts_ms = _chart_state_int(ts[index])
+        open_px = _chart_state_float(op[index])
+        high_px = _chart_state_float(hi[index])
+        low_px = _chart_state_float(lo[index])
+        close_px = _chart_state_float(cl[index])
+        if ts_ms is None or open_px is None or high_px is None or low_px is None or close_px is None:
+            continue
+        high_norm = max(float(open_px), float(high_px), float(low_px), float(close_px))
+        low_norm = min(float(open_px), float(high_px), float(low_px), float(close_px))
+        out.append(
+            {
+                "ts_ms": int(ts_ms),
+                "open": float(open_px),
+                "high": float(high_norm),
+                "low": float(low_norm),
+                "close": float(close_px),
+            }
+        )
+    return out
+
+
+def _chart_state_position_payload(store: StateStore, symbol: str, current_price: float | None) -> dict[str, Any]:
+    try:
+        pos = store.get_position(symbol)
+    except Exception:
+        pos = None
+    if not isinstance(pos, dict):
+        return {
+            "is_open": False,
+            "side": "",
+            "entry_price": None,
+            "qty": None,
+            "stop_price": None,
+            "tp_price": None,
+            "unrealized_pnl": None,
+            "opened_ts_ms": None,
+        }
+    entry_price = _chart_state_float(pos.get("entry"))
+    qty = _chart_state_float(pos.get("qty"))
+    stop_price = _chart_state_float(pos.get("stop"))
+    tp_price = _chart_state_float(pos.get("take_profit") or pos.get("tp"))
+    opened_ts_ms = _chart_state_int(pos.get("candle_ts_open"))
+    side = str(pos.get("side") or pos.get("direction") or pos.get("dir") or "long").strip().lower() or "long"
+    unrealized = None
+    if current_price is not None and entry_price is not None and qty is not None:
+        if side == "short":
+            unrealized = (float(entry_price) - float(current_price)) * float(qty)
+        else:
+            unrealized = (float(current_price) - float(entry_price)) * float(qty)
+    return {
+        "is_open": True,
+        "side": str(side),
+        "entry_price": entry_price,
+        "qty": qty,
+        "stop_price": stop_price,
+        "tp_price": tp_price,
+        "unrealized_pnl": unrealized,
+        "opened_ts_ms": opened_ts_ms,
+    }
+
+
+def _chart_state_markers_payload(symbol: str, position_payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    bucket = _chart_state_bucket(symbol)
+    entries = list(bucket.get("entries") or [])
+    exits = list(bucket.get("exits") or [])
+    if bool(position_payload.get("is_open")):
+        entry_price = _chart_state_float(position_payload.get("entry_price"))
+        opened_ts_ms = _chart_state_int(position_payload.get("opened_ts_ms"))
+        side = str(position_payload.get("side") or "long").strip().lower() or "long"
+        if entry_price is not None and opened_ts_ms is not None:
+            exists = any(
+                int(item.get("ts_ms") or 0) == int(opened_ts_ms) and abs(float(item.get("price") or 0.0) - float(entry_price)) <= 1e-12
+                for item in entries
+            )
+            if not exists:
+                entries.append(
+                    {
+                        "ts_ms": int(opened_ts_ms),
+                        "price": float(entry_price),
+                        "side": str(side),
+                        "label": "OPEN",
+                    }
+                )
+    if len(entries) > _CHART_STATE_MAX_MARKERS:
+        entries = entries[-_CHART_STATE_MAX_MARKERS:]
+    if len(exits) > _CHART_STATE_MAX_MARKERS:
+        exits = exits[-_CHART_STATE_MAX_MARKERS:]
+    return {"entries": entries, "exits": exits}
+
+
+def _emit_live_chart_states(store: StateStore, symbols: list[str], *, run_mode: str, timeframe: str) -> None:
+    mode_text = str(run_mode or "").strip().upper()
+    if mode_text not in ("LIVE", "PAPER"):
+        return
+    state_root = Path(STATE_DIR)
+    state_root.mkdir(parents=True, exist_ok=True)
+    exchange_id = str(_resolve_exchange_id() or "").strip().lower() or "exchange"
+    tf_text = str(timeframe or getattr(C, "ENTRY_TF", "5m") or "5m").strip() or "5m"
+    updated_at = datetime.now(timezone.utc).isoformat()
+    for symbol in list(symbols or []):
+        ohlcv, diag = _chart_state_ohlcv_for_symbol(symbol)
+        candles = _chart_state_candles_from_ohlcv(ohlcv)
+        candles_count = max(int(diag.get("candles_count") or 0), len(candles))
+        last_candle_ts_ms = _chart_state_int(diag.get("last_candle_ts_ms"))
+        if last_candle_ts_ms is None and candles:
+            last_candle_ts_ms = _chart_state_int(candles[-1].get("ts_ms"))
+        candle_source = str(diag.get("source") or "").strip() or ("runner_last_success_cache" if candles else "empty")
+        chart_state_reason = str(diag.get("reason") or "").strip()
+        seed_price_source = str(diag.get("seed_price_source") or "").strip()
+        seed_price_source_age_ms = _chart_state_int(diag.get("seed_price_source_age_ms"))
+        if (not chart_state_reason) and (not candles):
+            chart_state_reason = "candles_not_ready"
+        current_price = _chart_state_float(candles[-1].get("close")) if candles else None
+        position_payload = _chart_state_position_payload(store, str(symbol), current_price)
+        markers = _chart_state_markers_payload(str(symbol), position_payload)
+        payload = {
+            "schema_version": "2.0.9",
+            "updated_at": str(updated_at),
+            "exchange_id": str(exchange_id),
+            "run_mode": str(mode_text),
+            "symbol": str(symbol),
+            "timeframe": str(tf_text),
+            "candles": candles,
+            "candles_count": int(candles_count),
+            "candle_source": str(candle_source),
+            "last_candle_ts_ms": last_candle_ts_ms,
+            "chart_state_reason": str(chart_state_reason),
+            "seed_price_source": str(seed_price_source),
+            "seed_price_source_age_ms": seed_price_source_age_ms,
+            "current_price": current_price,
+            "position": position_payload,
+            "markers": markers,
+            "view_hint": {"preferred_mode": "Candle"},
+        }
+        path = Path(build_chart_state_path(str(state_root), exchange_id, mode_text, symbol))
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+            log_key = f"{exchange_id}:{mode_text.lower()}:{_chart_state_symbol_token(symbol)}"
+            path_text = str(path.resolve())
+            log_state = (
+                path_text,
+                str(candle_source),
+                int(candles_count),
+                str(chart_state_reason),
+                str(seed_price_source),
+                str(seed_price_source_age_ms if seed_price_source_age_ms is not None else ""),
+            )
+            if _LIVE_CHART_WRITER_LOGGED_PATHS.get(log_key) != log_state:
+                msg = f"[chart_state] writer path={path_text} source={candle_source} candles={int(candles_count)}"
+                if str(chart_state_reason):
+                    msg += f" reason={chart_state_reason}"
+                if str(seed_price_source):
+                    msg += f" seed={seed_price_source}"
+                if seed_price_source_age_ms is not None:
+                    msg += f" age_ms={int(seed_price_source_age_ms)}"
+                logger.info(msg)
+                _LIVE_CHART_WRITER_LOGGED_PATHS[log_key] = log_state
+        except Exception:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
 
 _PARITY_PROBE_PATH = _resolve_runtime_log_path(
     getattr(C, "PARITY_PROBE_LOG_FILE", ""),
@@ -677,6 +1909,16 @@ def _quote_ccy_for_symbol(symbol: str | None) -> str:
         return quote
     fallback = str(_LIVE_EQUITY_LAST_CUR or "").strip().upper()
     return fallback or _default_quote_for_runtime()
+
+
+def _quote_ccy_from_symbol_no_fallback(symbol: str | None) -> str:
+    raw = str(symbol or "").strip()
+    if not raw:
+        return ""
+    quote = resolve_quote_ccy(raw)
+    if not quote:
+        quote = quote_for_symbol(raw, fallback="")
+    return _normalize_ccy_key(quote)
 
 
 def _market_meta_cache_ttl_sec() -> float:
@@ -2160,6 +3402,103 @@ def _risk_week_key_from_ts_ms(ts_ms: int) -> str:
 def _kv_key_risk_weekly(week_key: str) -> str:
     return f"risk_weekly:{week_key}"
 
+def _normalize_ccy_key(value: str | None) -> str:
+    return str(value or "").strip().upper()
+
+
+def _live_equity_symbols_label(symbols: list[str] | None = None) -> str:
+    vals = [str(s or "").strip() for s in list(symbols or _LIVE_EQUITY_SYMBOLS or []) if str(s or "").strip()]
+    if not vals:
+        return "-"
+    if len(vals) == 1:
+        return str(vals[0])
+    preview = ",".join(vals[:3])
+    if len(vals) > 3:
+        preview = f"{preview},+{len(vals) - 3}"
+    return preview
+
+
+def _maybe_log_invalid_kill_min_equity_dict_value(*, equity_ccy: str | None, raw_value: Any) -> None:
+    global _KILL_MIN_EQUITY_INVALID_DICT_LOGGED
+    ccy = _normalize_ccy_key(equity_ccy) or "UNKNOWN"
+    state = f"{ccy}:{raw_value!r}"
+    if state in _KILL_MIN_EQUITY_INVALID_DICT_LOGGED:
+        return
+    logger.warning(
+        "[KILL] min_equity_by_ccy invalid value ignored equity_ccy=%s raw=%r -> treating as dict miss",
+        str(ccy),
+        raw_value,
+    )
+    _KILL_MIN_EQUITY_INVALID_DICT_LOGGED.add(state)
+
+
+def _resolve_equity_floor_by_ccy(
+    *,
+    floor_scalar: float,
+    floor_map: dict | None,
+    equity_ccy: str | None,
+    resolve_mode: str = "AUTO",
+) -> tuple[float, str]:
+    def _coerce_floor(value: Any, default: float = 0.0) -> float:
+        try:
+            num = float(value)
+        except Exception:
+            return float(default)
+        if not math.isfinite(num):
+            return float(default)
+        return max(0.0, float(num))
+
+    def _coerce_positive_floor(value: Any) -> float | None:
+        try:
+            num = float(value)
+        except Exception:
+            return None
+        if (not math.isfinite(num)) or (num <= 0.0):
+            return None
+        return float(num)
+
+    ccy = _normalize_ccy_key(equity_ccy)
+    mode = str(resolve_mode or "AUTO").strip().upper()
+    if mode not in {"AUTO", "STRICT"}:
+        mode = "AUTO"
+    scalar = _coerce_floor(floor_scalar, 0.0)
+
+    if isinstance(floor_map, dict) and ccy:
+        invalid_dict_value: Any = None
+        for raw_key, raw_value in floor_map.items():
+            if _normalize_ccy_key(raw_key) != ccy:
+                continue
+            dict_floor = _coerce_positive_floor(raw_value)
+            if dict_floor is not None:
+                return float(dict_floor), f"DICT:{ccy}"
+            invalid_dict_value = raw_value
+        if invalid_dict_value is not None:
+            _maybe_log_invalid_kill_min_equity_dict_value(equity_ccy=ccy, raw_value=invalid_dict_value)
+
+    if mode == "STRICT":
+        return 0.0, f"STRICT_MISS:{ccy or 'UNKNOWN'}"
+    if scalar <= 0.0:
+        return 0.0, "DISABLED"
+    return float(scalar), "SCALAR_FALLBACK"
+
+
+def _maybe_log_kill_min_equity_resolution(*, equity_ccy: str | None, floor: float, source: str) -> None:
+    global _KILL_MIN_EQUITY_RESOLUTION_LAST
+    if not bool(getattr(C, "KILL_MIN_EQUITY_LOG_RESOLUTION", True)):
+        return
+    ccy = _normalize_ccy_key(equity_ccy) or "UNKNOWN"
+    state = (str(ccy), max(0.0, float(floor)), str(source))
+    if _KILL_MIN_EQUITY_RESOLUTION_LAST == state:
+        return
+    logger.info(
+        "[KILL] min_equity_resolution equity_ccy=%s floor=%.6f source=%s",
+        str(ccy),
+        float(state[1]),
+        str(source),
+    )
+    _KILL_MIN_EQUITY_RESOLUTION_LAST = state
+
+
 def _kill_switch_check(ctx: Dict[str, Any]) -> tuple[bool, str]:
     if not bool(ctx.get("enabled", False)):
         return False, ""
@@ -3311,29 +4650,55 @@ def _record_maker_result(
 # Equity sync
 # ---------------------------
 
-def _get_live_equity(ex: ExchangeClient) -> float | None:
+def _resolve_live_equity_currency() -> tuple[str, str]:
+    cfg_cur = getattr(C, "LIVE_EQUITY_CURRENCY", None)
+    cfg_cur_s = _normalize_ccy_key(cfg_cur)
+    default_quote = _default_quote_for_runtime()
+    if cfg_cur_s:
+        return str(cfg_cur_s), "CONFIG"
+
+    quotes: set[str] = set()
+    for symbol in list(_LIVE_EQUITY_SYMBOLS or []):
+        quote = _quote_ccy_from_symbol_no_fallback(symbol)
+        if quote:
+            quotes.add(str(quote))
+    if len(quotes) == 1:
+        return str(next(iter(quotes))), "AUTO_QUOTE"
+    return _normalize_ccy_key(default_quote) or "USDT", "DEFAULT"
+
+
+def _maybe_log_live_equity_currency_resolution(*, equity_ccy: str | None, source: str) -> None:
+    global _LIVE_EQUITY_RESOLUTION_LAST
+    ccy = _normalize_ccy_key(equity_ccy) or "UNKNOWN"
+    symbol_label = _live_equity_symbols_label()
+    state = (str(ccy), str(source), str(symbol_label))
+    if _LIVE_EQUITY_RESOLUTION_LAST == state:
+        return
+    if str(source) == "AUTO_QUOTE":
+        logger.info(
+            "[LIVE_EQ] equity_ccy=%s source=%s symbols=%s detail=following current symbol quote selected via GUI/CLI",
+            str(ccy),
+            str(source),
+            str(symbol_label),
+        )
+    else:
+        logger.info(
+            "[LIVE_EQ] equity_ccy=%s source=%s symbols=%s",
+            str(ccy),
+            str(source),
+            str(symbol_label),
+        )
+    _LIVE_EQUITY_RESOLUTION_LAST = state
+
+
+def _get_live_equity_info(ex: ExchangeClient) -> tuple[float | None, str]:
     """
     ExchangeClient is expected to provide get_total_equity(currency).
     Add the equivalent helper in exchange.py before enabling live equity sync.
     """
     global _LIVE_EQUITY_DIAG_LOGGED, _LIVE_EQUITY_LAST_CUR
-    cfg_cur = getattr(C, "LIVE_EQUITY_CURRENCY", None)
-    cfg_cur_s = str(cfg_cur or "").strip().upper()
-    default_quote = _default_quote_for_runtime()
-    cur = cfg_cur_s or str(default_quote)
-    cur_source = "CONFIG" if cfg_cur_s else "DEFAULT"
-    if (cfg_cur is None) or (cfg_cur_s == "") or (cfg_cur_s == str(default_quote) and not hasattr(C, "LIVE_EQUITY_CURRENCY")):
-        quotes: set[str] = set()
-        for symbol in list(_LIVE_EQUITY_SYMBOLS or []):
-            raw = str(symbol or "").strip()
-            if not raw or "/" not in raw:
-                continue
-            quote = raw.split("/", 1)[1].strip().upper()
-            if quote:
-                quotes.add(quote)
-        if len(quotes) == 1:
-            cur = next(iter(quotes))
-            cur_source = "AUTO_QUOTE"
+    cur, cur_source = _resolve_live_equity_currency()
+    _maybe_log_live_equity_currency_resolution(equity_ccy=cur, source=cur_source)
     _LIVE_EQUITY_LAST_CUR = str(cur)
     do_diag = not _LIVE_EQUITY_DIAG_LOGGED
     usdt_free = None
@@ -3382,10 +4747,10 @@ def _get_live_equity(ex: ExchangeClient) -> float | None:
     try:
         live_eq = float(ex.get_total_equity(cur))
         live_eq_for_log = float(live_eq)
-        return float(live_eq)
+        return float(live_eq), str(cur)
     except Exception as e:
         logger.warning(f"Failed to fetch live equity: {e} unit={cur} cur={cur}")
-        return None
+        return None, str(cur)
     finally:
         if do_diag:
             logger.info(
@@ -3402,6 +4767,11 @@ def _get_live_equity(ex: ExchangeClient) -> float | None:
                 str(cur_source),
             )
             _LIVE_EQUITY_DIAG_LOGGED = True
+
+
+def _get_live_equity(ex: ExchangeClient) -> float | None:
+    live_eq, _ = _get_live_equity_info(ex)
+    return live_eq
 
 
 def _symbols_signature(symbols: list[str]) -> str:
@@ -4882,6 +6252,7 @@ def main(
 
     mode_env_override = _resolve_mode_override_env()
     mode = str(mode_override).upper() if mode_override is not None else (mode_env_override or str(getattr(C, "MODE", "PAPER")).upper())  # PAPER / LIVE
+    _reject_live_for_free_build(mode)
     os.environ["LWF_RUNTIME_MODE"] = str(mode)
     if dryrun_override is not None:
         dryrun = bool(dryrun_override)
@@ -5011,6 +6382,31 @@ def main(
                             str(fee_hint.get("source") or ""),
                         )
                     _bid, ask = ex.fetch_best_bid_ask(symbol)
+                    price_hint = None
+                    if _bid is not None and ask is not None and float(_bid) > 0.0 and float(ask) > 0.0:
+                        price_hint = (float(_bid) + float(ask)) / 2.0
+                    elif ask is not None and float(ask) > 0.0:
+                        price_hint = float(ask)
+                    elif _bid is not None and float(_bid) > 0.0:
+                        price_hint = float(_bid)
+                    if price_hint is not None:
+                        seed_source = "runtime_tap_best_bid_ask_mid"
+                        if not (_bid is not None and ask is not None and float(_bid) > 0.0 and float(ask) > 0.0):
+                            seed_source = "runtime_tap_best_ask" if ask is not None and float(ask) > 0.0 else "runtime_tap_best_bid"
+                        price_hint_ts_ms = int(time.time() * 1000)
+                        _chart_state_remember_runtime_tapped_price(
+                            symbol,
+                            price=float(price_hint),
+                            ts_ms=int(price_hint_ts_ms),
+                            source=str(seed_source),
+                        )
+                        _chart_state_seed_builder_observe(
+                            symbol,
+                            str(getattr(C, "ENTRY_TF", getattr(C, "TIMEFRAME_ENTRY", "5m"))),
+                            ts_ms=int(price_hint_ts_ms),
+                            price=float(price_hint),
+                            source=str(seed_source),
+                        )
                     if meta.quote_ccy == "JPY" and ask is not None and float(ask) > 0.0:
                         min_oper_jpy = estimate_min_operational_balance(meta, float(ask))
                         logger.info(
@@ -5173,8 +6569,8 @@ def main(
                 )
                 _PAPER_EQUITY_STATE_LOG_DONE = True
     if str(mode).upper() == "LIVE" and (not dryrun):
-        if _LIVE_EQUITY_FOR_SIZING is not None and float(_LIVE_EQUITY_FOR_SIZING) > 0.0:
-            equity_for_sizing = float(_LIVE_EQUITY_FOR_SIZING)
+        if _LIVE_EQUITY_FOR_SIZING is not None:
+            equity_for_sizing = max(0.0, float(_LIVE_EQUITY_FOR_SIZING))
 
     # Process-once startup ops guard (avoid repeated cancel/equity sync in live loop).
     if (not skip_startup_ops) and (not _STARTUP_OPS_DONE):
@@ -5188,7 +6584,15 @@ def main(
                 _LIVE_EQUITY_FOR_SIZING = float(live_eq)
                 logger.info(f"[LIVE] Equity synced on start: {equity_for_sizing:.6f}")
             else:
-                logger.warning(f"[LIVE] Equity sync skipped (live_eq={live_eq}, min={min_eq})")
+                equity_for_sizing = 0.0
+                _LIVE_EQUITY_FOR_SIZING = 0.0
+                stop_new_only_active = True
+                _LIVE_RESUME_FORCE_STOP_NEW_ONLY = True
+                logger.error(
+                    "[LIVE] Equity sync skipped (live_eq=%s, min=%s) -> STOP_NEW_ONLY for this run; equity_for_sizing=0.0",
+                    live_eq,
+                    min_eq,
+                )
         _STARTUP_OPS_DONE = True
         logger.info("[STARTUP] ops_done=True")
 
@@ -5301,6 +6705,24 @@ def main(
         risk = payload.get("risk") if isinstance(payload.get("risk"), dict) else {}
         day_pnl = float(risk.get("daily_pnl_jpy", 0.0) or 0.0)
         consec_losses = int(risk.get("loss_streak", 0) or 0)
+        kill_equity_ccy = str(equity_currency_for_state)
+        if str(mode).upper() == "LIVE" and (not dryrun):
+            kill_equity_ccy, kill_equity_ccy_source = _resolve_live_equity_currency()
+            _maybe_log_live_equity_currency_resolution(
+                equity_ccy=kill_equity_ccy,
+                source=str(kill_equity_ccy_source),
+            )
+        kill_min_equity, kill_min_equity_source = _resolve_equity_floor_by_ccy(
+            floor_scalar=float(getattr(C, "KILL_MIN_EQUITY", 0.0) or 0.0),
+            floor_map=getattr(C, "KILL_MIN_EQUITY_BY_CCY", None) or None,
+            equity_ccy=kill_equity_ccy,
+            resolve_mode=str(getattr(C, "KILL_MIN_EQUITY_RESOLVE_MODE", "AUTO") or "AUTO"),
+        )
+        _maybe_log_kill_min_equity_resolution(
+            equity_ccy=kill_equity_ccy,
+            floor=float(kill_min_equity),
+            source=str(kill_min_equity_source),
+        )
 
         ctx: Dict[str, Any] = {
             "enabled": True,
@@ -5314,7 +6736,7 @@ def main(
             "kill_max_daily_loss_pct": float(getattr(C, "KILL_MAX_DAILY_LOSS_PCT", 0.0) or 0.0),
             "kill_max_consec_losses": int(getattr(C, "KILL_MAX_CONSEC_LOSSES", 0) or 0),
             "kill_max_spread_bps": float(getattr(C, "KILL_MAX_SPREAD_BPS", 0.0) or 0.0),
-            "kill_min_equity": float(getattr(C, "KILL_MIN_EQUITY", 0.0) or 0.0),
+            "kill_min_equity": float(kill_min_equity),
         }
         halt, reason = _kill_switch_check(ctx)
 
@@ -5505,6 +6927,20 @@ def main(
             entry_bar_ms = _timeframe_to_ms(tf_entry)
 
             ci0 = _confirmed_candle_idx(e_first["timestamp"], entry_bar_ms, now_ms_run)
+            try:
+                cut0 = len(e_first.get("timestamp") or [])
+                if ci0 == -2:
+                    cut0 = max(0, int(cut0) - 1)
+                if cut0 > 0:
+                    bootstrap_ohlcv = {
+                        _k: list((e_first.get(_k) or [])[:cut0])
+                        for _k in ("timestamp", "open", "high", "low", "close", "volume")
+                    }
+                    _chart_state_store_internal_bootstrap_ohlcv(str(symbols[0] if symbols else ""), bootstrap_ohlcv)
+                elif len(e_first.get("timestamp") or []) > 0:
+                    _chart_state_store_internal_bootstrap_ohlcv(str(symbols[0] if symbols else ""), e_first)
+            except Exception:
+                pass
 
             candle_ts_run = int(e_first["timestamp"][ci0])
 
@@ -5561,6 +6997,19 @@ def main(
             return 0
         if stop_loop.should_stop and stop_loop.stop_mode == "STOP_NEW_ONLY":
             stop_new_only_active = True
+        try:
+            _observe_live_chart_guaranteed_price(
+                symbol,
+                ex=ex,
+                timeframe=str(tf_entry),
+                store=store,
+                state_root=str(STATE_DIR),
+                exchange_id=_resolve_exchange_id(),
+                run_mode=str(mode),
+                fallback_ts_ms=int(ts_ms_now),
+            )
+        except Exception:
+            pass
 
         # --- always fetch entry TF for position management ---
         try:
@@ -5594,9 +7043,21 @@ def main(
                     # Never crash LIVE/REPLAY due to trace alignment logic.
                     pass
             if not e_raw or not e.get("high"):
+                if (not _chart_state_try_seed_builder(symbol, tf_entry)) and (not _chart_state_try_internal_bootstrap(symbol)) and (not _chart_state_use_runner_last_success_cache(symbol)):
+                    cached_ohlcv = _chart_state_cached_ohlcv_from_exchange(ex, symbol, tf_entry)
+                    if isinstance(cached_ohlcv, dict):
+                        _chart_state_cache_ohlcv(symbol, cached_ohlcv, source="exchange_cache", reason="fetch_ohlcv_entry_empty")
+                    else:
+                        _chart_state_note_diag(symbol, source="empty", reason="fetch_ohlcv_entry_empty")
                 _summ_reason(summ_hold, "fetch_ohlcv_entry_empty")
                 continue
         except Exception as ex_e:
+            if (not _chart_state_try_seed_builder(symbol, tf_entry)) and (not _chart_state_try_internal_bootstrap(symbol)) and (not _chart_state_use_runner_last_success_cache(symbol)):
+                cached_ohlcv = _chart_state_cached_ohlcv_from_exchange(ex, symbol, tf_entry)
+                if isinstance(cached_ohlcv, dict):
+                    _chart_state_cache_ohlcv(symbol, cached_ohlcv, source="exchange_cache", reason="fetch_ohlcv_entry_failed")
+                else:
+                    _chart_state_note_diag(symbol, source="empty", reason="fetch_ohlcv_entry_failed")
             logger.warning("[OHLCV][ENTRY] symbol=%s tf=%s reason=%s", str(symbol), str(tf_entry), ex_e)
             _summ_reason(summ_hold, f"fetch_ohlcv_entry_failed:{ex_e}")
             _diff_trace_exception(
@@ -5610,6 +7071,12 @@ def main(
 
         # Guard: ReplayExchange may return empty OHLCV on missing data / boundaries.
         if not e.get("timestamp") or not e.get("high") or not e.get("low"):
+            if (not _chart_state_try_seed_builder(symbol, tf_entry)) and (not _chart_state_try_internal_bootstrap(symbol)) and (not _chart_state_use_runner_last_success_cache(symbol)):
+                cached_ohlcv = _chart_state_cached_ohlcv_from_exchange(ex, symbol, tf_entry)
+                if isinstance(cached_ohlcv, dict):
+                    _chart_state_cache_ohlcv(symbol, cached_ohlcv, source="exchange_cache", reason="fetch_ohlcv_entry_empty")
+                else:
+                    _chart_state_note_diag(symbol, source="empty", reason="fetch_ohlcv_entry_empty")
             _summ_reason(summ_hold, "fetch_ohlcv_entry_empty")
             _diff_trace_write(
                 {
@@ -5622,6 +7089,7 @@ def main(
                 }
             )
             continue
+        _chart_state_cache_ohlcv(symbol, e, source="runner_live_ohlcv")
 
         # Confirmed 5m bar OHLC snapshot for trace parity checks (single source of truth).
         # _trace_bar_snapshot_at() already maps ref_ts_ms -> previous confirmed bar.
@@ -5644,6 +7112,27 @@ def main(
             "bar_low": float(bar_low),
             "bar_close": float(bar_close),
         }
+        _chart_state_append_internal_bootstrap_bar(
+            symbol,
+            ts_ms=int(bar_ts_ms),
+            open_px=float(bar_open),
+            high_px=float(bar_high),
+            low_px=float(bar_low),
+            close_px=float(bar_close),
+        )
+        _chart_state_seed_builder_observe(
+            symbol,
+            str(tf_entry),
+            ts_ms=int(bar_ts_ms),
+            price=float(bar_close),
+            source="runtime_tap_confirmed_bar_close",
+        )
+        _chart_state_remember_runtime_tapped_price(
+            symbol,
+            price=float(bar_close),
+            ts_ms=int(bar_ts_ms),
+            source="runtime_tap_confirmed_bar_close",
+        )
 
         # Expose bar snapshot to trace writer (used for verify_diff OHLC strict checks).
         _trace_update_bar_cache(str(symbol), e, ref_ts_ms=int(trace_ref_ms), is_replay=is_replay)
@@ -5659,6 +7148,24 @@ def main(
                 bar_close=float(bar_close),
             )
         close_last = float(e["close"][-1])
+        if e.get("timestamp"):
+            try:
+                close_last_ts_ms = int(e["timestamp"][-1])
+                _chart_state_seed_builder_observe(
+                    symbol,
+                    str(tf_entry),
+                    ts_ms=int(close_last_ts_ms),
+                    price=float(close_last),
+                    source="runtime_tap_entry_close_last",
+                )
+                _chart_state_remember_runtime_tapped_price(
+                    symbol,
+                    price=float(close_last),
+                    ts_ms=int(close_last_ts_ms),
+                    source="runtime_tap_entry_close_last",
+                )
+            except Exception:
+                pass
 
         candle_ts_entry = int(bar_ts_ms)
         # diff-trace OPEN/CLOSE timestamps must follow backtest confirmed-bar-only key basis.
@@ -5840,6 +7347,14 @@ def main(
                                                 )
                                                 closed_this_bar = True
                                                 closed_exit_reason = "TP1_PROFIT_FULL"
+                                                _chart_state_note_marker(
+                                                    symbol,
+                                                    kind="exit",
+                                                    ts_ms=int(trace_event_ts_manage_ms),
+                                                    price=float(exit_px),
+                                                    side="long",
+                                                    label="TP1_PROFIT_FULL",
+                                                )
                                                 res = _ensure_pnl_fee(
                                                     res=res,
                                                     pos=pos,
@@ -6381,6 +7896,14 @@ def main(
                                         )
                                         closed_this_bar = True
                                         closed_exit_reason = str(exit_reason)
+                                        _chart_state_note_marker(
+                                            symbol,
+                                            kind="exit",
+                                            ts_ms=int(trace_event_ts_manage_ms),
+                                            price=float(exit_px),
+                                            side="long",
+                                            label=str(exit_reason),
+                                        )
                                         _parity_probe_write(
                                             "CLOSE_COMMIT",
                                             {
@@ -6537,6 +8060,14 @@ def main(
                                         )
                                         closed_this_bar = True
                                         closed_exit_reason = str(exit_reason)
+                                        _chart_state_note_marker(
+                                            symbol,
+                                            kind="exit",
+                                            ts_ms=int(trace_event_ts_manage_ms),
+                                            price=float(exit_px),
+                                            side="long",
+                                            label=str(exit_reason),
+                                        )
                                         res = _ensure_pnl_fee(
                                             res=res,
                                             pos=pos,
@@ -6688,6 +8219,14 @@ def main(
                                 )
                                 closed_this_bar = True
                                 closed_exit_reason = str(exit_reason)
+                                _chart_state_note_marker(
+                                    symbol,
+                                    kind="exit",
+                                    ts_ms=int(trace_event_ts_manage_ms),
+                                    price=float(exit_px),
+                                    side="long",
+                                    label=str(exit_reason),
+                                )
                                 res = _ensure_pnl_fee(
                                     res=res,
                                     pos=pos,
@@ -6817,6 +8356,14 @@ def main(
                                     )
                                     closed_this_bar = True
                                     closed_exit_reason = str(exit_reason)
+                                    _chart_state_note_marker(
+                                        symbol,
+                                        kind="exit",
+                                        ts_ms=int(trace_event_ts_manage_ms),
+                                        price=float(exit_px),
+                                        side="long",
+                                        label=str(exit_reason),
+                                    )
                                     res = _ensure_pnl_fee(
                                         res=res,
                                         pos=pos,
@@ -8534,6 +10081,14 @@ def main(
             candle_ts_open=candle_ts_run,
             stop_kind="init",
         )
+        _chart_state_note_marker(
+            symbol,
+            kind="entry",
+            ts_ms=int(trace_event_ts_open_ms),
+            price=float(entry_exec),
+            side="long",
+            label="OPEN",
+        )
         # Match backtest: initialize a fresh trade from its executed entry, not prior extrema.
         _set_pos_max_fav(store, symbol, float(entry_exec))
         _set_pos_min_adv(store, symbol, float(entry_exec))
@@ -8612,6 +10167,15 @@ def main(
     # --- run summary print (throttled) ---
     _maybe_log_run_summary(summ_regime=summ_regime, summ_evt=summ_evt, summ_hold=summ_hold)
     _maybe_log_ttl_stats()
+    try:
+        _emit_live_chart_states(
+            store,
+            symbols,
+            run_mode=str(mode),
+            timeframe=str(getattr(C, "ENTRY_TF", "5m") or "5m"),
+        )
+    except Exception:
+        pass
 
     if skip_exports:
         return 0
@@ -10307,6 +11871,20 @@ def _parse_runner_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+
+
+def _enforce_cli_live_license_gate(args: argparse.Namespace) -> None:
+    if bool(getattr(args, "replay", False)):
+        return
+    startup_mode = (_resolve_mode_override_env() or str(getattr(C, "MODE", "PAPER"))).strip().upper()
+    _reject_live_for_free_build(startup_mode)
+    if startup_mode != "LIVE":
+        return
+    try:
+        ensure_live_license_or_raise(feature_name="LIVE execution")
+    except Exception as exc:
+        raise SystemExit(str(exc) or "LIVE execution requires desktop activation.")
+
 def _run_replay(args: argparse.Namespace) -> int:
     global _DIFF_TRACE_SOURCE, _DIFF_TRACE_SAMPLE_EVERY_REPLAY, _DIFF_TRACE_SAMPLE_COUNTER_REPLAY, _DIFF_TRACE_SAMPLE_SKIPPED_REPLAY, _REPLAY_SIZING_STATE
     _DIFF_TRACE_SOURCE = "replay"
@@ -11352,7 +12930,9 @@ if __name__ == "__main__":
         os.environ["LWF_RUNTIME_MODE"] = "REPLAY"
     else:
         startup_mode = _resolve_mode_override_env() or str(getattr(C, "MODE", "PAPER")).upper()
+        _reject_live_for_free_build(startup_mode)
         os.environ["LWF_RUNTIME_MODE"] = str(startup_mode)
+    _enforce_cli_live_license_gate(args)
     logger, trade_logger, error_logger = _setup_logging()
     _TTL_STATS_INTERVAL_SEC_OVERRIDE = getattr(args, "ttl_stats_interval_sec", None)
     preset_name = str(getattr(args, "preset", "") or "").strip()

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-25_free_launch_boundary_v1
 from __future__ import annotations
 
@@ -31,10 +32,11 @@ from app.security.license_client import (
 )
 
 
-BUILD_ID = "2026-03-25_free_launch_boundary_v1"
+BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
 
 _RUNTIME_LOG_LEVELS = {"MINIMAL", "OPS", "DEBUG"}
 _FREE_RUN_MODES = {"PAPER", "REPLAY", "BACKTEST"}
+_FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
 
 
 def _is_free_build() -> bool:
@@ -49,6 +51,17 @@ def _normalize_runtime_log_level(raw: str) -> str:
         return value
     fallback = str(getattr(C, "RUNTIME_LOG_LEVEL", "OPS") or "OPS").strip().upper()
     return fallback if fallback in _RUNTIME_LOG_LEVELS else "OPS"
+
+
+def _ensure_free_mode_supported(mode: str) -> str:
+    value = str(mode or "").strip().upper()
+    if not _is_free_build():
+        return value
+    if value == "LIVE":
+        raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
+    if value in _FREE_RUN_MODES:
+        return value
+    return "PAPER"
 
 
 @dataclass
@@ -237,6 +250,8 @@ def refresh_and_store_license(*, base_url: str = "") -> LicenseState:
 
 
 def ensure_live_license_or_raise(*, base_url: str = "", feature_name: str = "LIVE execution") -> None:
+    if _is_free_build():
+        raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
     require_live(feature_name=feature_name)
     local_state = load_license_state()
     if local_state is None:
@@ -383,13 +398,13 @@ def _build_dataset_override_shim() -> str:
 def _resolve_runner_mode(env: Dict[str, str]) -> str:
     mode = str(env.get("LWF_MODE_OVERRIDE") or "").strip().upper()
     if _is_free_build():
-        if mode in _FREE_RUN_MODES:
-            return mode
-        config_mode = str(getattr(C, "RUN_MODE", "PAPER") or "PAPER").strip().upper()
-        return config_mode if config_mode in _FREE_RUN_MODES else "PAPER"
+        if mode:
+            return _ensure_free_mode_supported(mode)
+        config_mode = str(getattr(C, "RUN_MODE", getattr(C, "MODE", "PAPER")) or "PAPER").strip().upper()
+        return _ensure_free_mode_supported(config_mode)
     if mode in ("LIVE", "PAPER", "REPLAY", "BACKTEST"):
         return mode
-    return str(getattr(C, "RUN_MODE", "LIVE") or "LIVE").strip().upper()
+    return str(getattr(C, "RUN_MODE", getattr(C, "MODE", "LIVE")) or "LIVE").strip().upper()
 
 
 def _resolve_serve_sleep_sec(env: Dict[str, str]) -> float:

@@ -1,4 +1,22 @@
-# BUILD_ID: 2026-03-25_free_gui_boundary_v1
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
+# BUILD_ID: 2026-03-27_main_window_activation_local_reset_v1
+# BUILD_ID: 2026-03-27_main_window_collapsible_sections_v1
+# BUILD_ID: 2026-03-27_main_window_snapshot_folder_align_v1
+# BUILD_ID: 2026-03-27_main_window_chart_state_path_fix_v2_0_2
+# BUILD_ID: 2026-03-27_main_window_chart_axis_layout_v1_2
+# BUILD_ID: 2026-03-27_main_window_result_chart_panel_v1_1
+# BUILD_ID: 2026-03-27_main_window_result_chart_panel_v1
+# BUILD_ID: 2026-03-26_main_window_compact_controls_single_row_v1
+# BUILD_ID: 2026-03-26_main_window_compact_activation_log_spacing_tune_v1
+# BUILD_ID: 2026-03-26_main_window_compact_report_activation_semihorizontal_v1
+# BUILD_ID: 2026-03-26_main_window_compact_responsive_layout_v1
+# BUILD_ID: 2026-03-26_main_window_smaller_min_size_log_v1
+# BUILD_ID: 2026-03-26_main_window_report_tools_default_open_v1
+# BUILD_ID: 2026-03-26_main_window_report_tools_collapsible_v1
+# BUILD_ID: 2026-03-26_main_window_runtime_section_autocollapse_v1
+# BUILD_ID: 2026-03-26_main_window_initial_collapsible_sections_v1
+# BUILD_ID: 2026-03-26_standard_gui_clear_requires_typed_seat_v4
+# BUILD_ID: 2026-03-20_gui_runtime_exports_last_run_v1
 # BUILD_ID: 2026-03-19_market_data_root_stage1_patchfix_v2
 # BUILD_ID: 2026-03-12_gui_log_level_dropdown_v1
 from __future__ import annotations
@@ -20,12 +38,13 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -35,12 +54,34 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QGroupBox,
+    QSplitter,
     QStackedWidget,
 )
 
-from app.core.settings_store import AppSettings, load_settings, save_settings
-from app.security.keyring_store import load_creds, save_creds, clear_creds
-from app.core.launch import BacktestSpec, LaunchSpec, ReplaySpec, launch_backtest, launch_runner, launch_replay, terminate_process
+from app.core.settings_store import AppSettings, get_gui_chart_state, load_settings, save_settings, set_gui_chart_state
+from app.core.chart_state_path import build_chart_state_path
+from app.security.keyring_store import (
+    clear_creds,
+    clear_license_local_test_state,
+    load_creds,
+    load_license_device_id,
+    load_license_seat_key,
+    load_license_state,
+    save_creds,
+)
+from app.core.launch import (
+    BacktestSpec,
+    LaunchSpec,
+    LicenseOperationError,
+    ReplaySpec,
+    activate_and_store_license,
+    ensure_live_license_or_raise,
+    launch_backtest,
+    launch_runner,
+    launch_replay,
+    refresh_and_store_license,
+    terminate_process,
+)
 from app.core.log_stream import start_log_threads
 from app.core.paths import ensure_runtime_dirs, get_paths
 from app.core.dataset import (
@@ -58,15 +99,36 @@ from app.gui.exchange_registry import (
     normalize_symbol_for_exchange,
     symbols_for_exchange,
 )
-from app.gui.logo_loader import LogoAsset, load_logo_asset, load_logo_icon, render_logo_pixmap
+from app.gui.chart_dialog import ChartDialog
+from app.gui.logo_loader import LogoAsset, load_logo_asset, render_logo_pixmap
+from app.gui.result_chart import (
+    CHART_MODE_CANDLE,
+    LiveChartState,
+    ResultChartData,
+    ResultPanel,
+    ResultChartWidget,
+    infer_result_chart_snapshot_symbol,
+    load_latest_result_chart_data,
+    load_live_chart_state_for_runtime,
+    with_live_chart_state,
+)
 from app.gui.win_titlebar import apply_dark_titlebar
+from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-03-25_free_gui_boundary_v1"
+BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
 logger = logging.getLogger(__name__)
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
 _RUNTIME_LOG_LEVEL_VALUES = ("MINIMAL",)
+FREE_BUILD_NOTE = "FREE build: PAPER / REPLAY / BACKTEST only"
+COMPACT_WIDTH_THRESHOLD = 980
+DEFAULT_LOG_MIN_HEIGHT = 180
+COMPACT_LOG_MIN_HEIGHT = 120
+DEFAULT_SECTION_VERTICAL_SPACING = 8
+COMPACT_SECTION_VERTICAL_SPACING = 6
+DEFAULT_MAIN_WINDOW_WIDTH = 840
+DEFAULT_MAIN_WINDOW_HEIGHT = 620
 
 
 def _mask_secret(s: str) -> str:
@@ -118,6 +180,7 @@ class MainWindow(QWidget):
 
         self._proc: Optional[subprocess.Popen] = None
         self._settings: AppSettings = load_settings()
+        self._chart_ui_state = get_gui_chart_state(self._settings)
         self._exchange_id: str = _normalize_exchange_id(getattr(self._settings, "exchange_id", "coincheck"))
         config_symbols = _config_symbols()
         saved_symbol = str(getattr(self._settings, "symbol", "") or "").strip()
@@ -147,14 +210,26 @@ class MainWindow(QWidget):
         self._credential_inputs: dict[str, dict[str, QLineEdit]] = {}
         self._credential_page_index: dict[str, int] = {}
         self._titlebar_dark_applied = False
+        self._chart_dialog: ChartDialog | None = None
+        self._base_result_data = ResultChartData()
+        self._live_chart_state: LiveChartState | None = None
+        self._live_chart_available: bool = False
+        self._chart_mode_before_live_candle: str = ""
+        self._chart_mode_user_locked: bool = False
+        self._chart_mode_auto_live_candle_applied: bool = False
+        self._suppress_chart_mode_user_lock: bool = False
+        self._last_chart_state_diag_key: tuple[str, int, int, str] | None = None
+        self._last_chart_state_reader_path: str = ""
         self._logo_asset: LogoAsset | None = load_logo_asset(self._paths.repo_root)
-        self._logo_icon = load_logo_icon(self._paths.repo_root)
+        if self._logo_asset is not None:
+            self.setWindowIcon(QIcon(str(self._logo_asset.source_path)))
         self._last_logo_box: tuple[int, int] = (0, 0)
         self._logo_label = QLabel()
-        if self._logo_icon is not None:
-            self.setWindowIcon(self._logo_icon)
-        self.resize(1120, 900)
-        self.setMinimumSize(960, 760)
+        self._compact_mode: bool | None = None
+        self.setMinimumSize(DEFAULT_MAIN_WINDOW_WIDTH, DEFAULT_MAIN_WINDOW_HEIGHT)
+        initial_width = int(getattr(self._settings, "main_window_width", DEFAULT_MAIN_WINDOW_WIDTH) or DEFAULT_MAIN_WINDOW_WIDTH)
+        initial_height = int(getattr(self._settings, "main_window_height", DEFAULT_MAIN_WINDOW_HEIGHT) or DEFAULT_MAIN_WINDOW_HEIGHT)
+        self.resize(initial_width, initial_height)
 
         # --- UI ---
         root = QVBoxLayout()
@@ -173,49 +248,42 @@ class MainWindow(QWidget):
         top_area.addWidget(self._logo_label, 0, Qt.AlignRight | Qt.AlignTop)
         root.addLayout(top_area)
 
-        # Preset row
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-        row1.addWidget(QLabel("Preset"))
+        self.preset_label = QLabel("Preset")
         self.preset = QComboBox()
         self.preset.addItems(["OFF", "SELL_SAFE"])
         self.preset.setCurrentText(self._settings.preset if self._settings.preset in ("OFF", "SELL_SAFE") else "OFF")
-        row1.addWidget(self.preset)
-        row1.addStretch(1)
-        top_form.addLayout(row1)
 
         # Exchange / Symbol / Mode row
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-        row2.addWidget(QLabel("Exchange"))
+        self.controls_layout = QGridLayout()
+        self.controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_layout.setHorizontalSpacing(8)
+        self.controls_layout.setVerticalSpacing(8)
+        self.exchange_label = QLabel("Exchange")
         self.exchange = QComboBox()
         for item in EXCHANGES:
             self.exchange.addItem(str(item.label), str(item.id))
-        row2.addWidget(self.exchange)
         idx_exchange = max(0, self.exchange.findData(self._exchange_id))
         self.exchange.setCurrentIndex(idx_exchange)
         self._exchange_id = _normalize_exchange_id(str(self.exchange.currentData() or self._exchange_id))
         self._symbols = symbols_for_exchange(self._exchange_id) or self._symbols
         self._default_symbol = normalize_symbol_for_exchange(self._exchange_id, self._default_symbol)
 
-        row2.addWidget(QLabel("Symbol"))
+        self.symbol_label = QLabel("Symbol")
         self.symbol = QComboBox()
-        row2.addWidget(self.symbol)
 
-        row2.addWidget(QLabel("Run Mode"))
+        self.run_mode_label = QLabel("Run Mode")
         self.run_mode = QComboBox()
         self.run_mode.addItems(list(_FREE_RUN_MODES))
         self.run_mode.setCurrentText(self._run_mode)
-        row2.addWidget(self.run_mode)
         self.log_level_label = QLabel("Log Level")
-        row2.addWidget(self.log_level_label)
         self.log_level = QComboBox()
         self.log_level.addItems(list(_RUNTIME_LOG_LEVEL_VALUES))
         self.log_level.setCurrentText(self._log_level)
-        self.log_level.setEnabled(False)
-        row2.addWidget(self.log_level)
-        row2.addStretch(1)
-        top_form.addLayout(row2)
+        top_form.addLayout(self.controls_layout)
+
+        self.free_build_note = QLabel(FREE_BUILD_NOTE)
+        self.free_build_note.setStyleSheet("color: #9aa4af;")
+        top_form.addWidget(self.free_build_note)
 
         self.replay_group = QGroupBox("Replay / Backtest / Dataset")
         replay_layout = QVBoxLayout()
@@ -262,40 +330,42 @@ class MainWindow(QWidget):
         root.addWidget(self.replay_group)
 
         self.report_group = QGroupBox("Report")
+        self.report_group.setCheckable(True)
         report_layout = QVBoxLayout()
         report_layout.setContentsMargins(12, 10, 12, 12)
         report_layout.setSpacing(8)
         self.report_group.setLayout(report_layout)
+        self.report_container = QWidget()
+        self.report_container_layout = QGridLayout()
+        self.report_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.report_container_layout.setHorizontalSpacing(8)
+        self.report_container_layout.setVerticalSpacing(8)
+        self.report_container.setLayout(self.report_container_layout)
 
-        row_report = QHBoxLayout()
-        row_report.setSpacing(8)
         self.report_enabled = QCheckBox("Enable report")
         self.report_enabled.setChecked(bool(self._settings.report_enabled))
-        row_report.addWidget(self.report_enabled)
-        row_report.addWidget(QLabel("Report Out"))
+        self.report_out_label = QLabel("Report Out")
         self.report_out = QLineEdit(str(self._settings.report_out or self._default_report_out()))
-        row_report.addWidget(self.report_out, stretch=1)
         self.btn_report_out = QPushButton("Browse...")
-        row_report.addWidget(self.btn_report_out)
-        report_layout.addLayout(row_report)
-
-        row_report_preview = QHBoxLayout()
-        row_report_preview.setSpacing(8)
-        row_report_preview.addWidget(QLabel("Resolved"))
+        self.report_resolved_label = QLabel("Resolved")
+        report_expanded = True
+        self.report_group.setChecked(report_expanded)
+        self.report_container.setVisible(report_expanded)
         self.report_preview = QLineEdit()
         self.report_preview.setReadOnly(True)
-        row_report_preview.addWidget(self.report_preview, stretch=1)
-        report_layout.addLayout(row_report_preview)
+        report_layout.addWidget(self.report_container)
         root.addWidget(self.report_group)
 
         self.creds_group = QGroupBox("API Credentials")
         self.creds_group.setCheckable(True)
-        self.creds_group.setChecked(True)
+        creds_expanded = bool(getattr(self._settings, "gui_section_api_expanded", False))
+        self.creds_group.setChecked(creds_expanded)
         creds_layout = QVBoxLayout()
         creds_layout.setContentsMargins(12, 10, 12, 12)
         creds_layout.setSpacing(8)
         self.creds_group.setLayout(creds_layout)
         self.creds_stack = QStackedWidget()
+        self.creds_stack.setVisible(creds_expanded)
         creds_layout.addWidget(self.creds_stack)
         root.addWidget(self.creds_group)
         for item in EXCHANGES:
@@ -334,37 +404,73 @@ class MainWindow(QWidget):
                 key_edit.setText(_mask_secret(creds.api_key))
                 secret_edit.setText(_mask_secret(creds.api_secret))
 
+        self.activation_group = QGroupBox("Desktop Activation")
+        self.activation_group.setCheckable(True)
+        activation_expanded = bool(getattr(self._settings, "gui_section_activation_expanded", False))
+        self.activation_group.setChecked(activation_expanded)
+        activation_layout = QVBoxLayout()
+        activation_layout.setContentsMargins(12, 10, 12, 12)
+        activation_layout.setSpacing(8)
+        self.activation_group.setLayout(activation_layout)
+        self.activation_container = QWidget()
+        self.activation_container.setVisible(activation_expanded)
+        self.activation_container_layout = QGridLayout()
+        self.activation_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.activation_container_layout.setHorizontalSpacing(8)
+        self.activation_container_layout.setVerticalSpacing(8)
+        self.activation_container.setLayout(self.activation_container_layout)
+
+        self.activation_seat_key_label = QLabel("Seat Key")
+        self.license_seat_key = QLineEdit(str(load_license_seat_key() or ""))
+        self.license_seat_key.setClearButtonEnabled(True)
+        self.license_seat_key.setPlaceholderText("Paste your Desktop Activation seat key")
+        self.btn_license_activate = QPushButton("Activate")
+        self.btn_license_refresh = QPushButton("Refresh")
+        self.btn_license_clear = QPushButton("Clear")
+        self.btn_license_reset_local = QPushButton("Reset Test State")
+        self.btn_license_reset_local.setToolTip(
+            "Clear only the saved local Desktop Activation state, seat key, and device id. "
+            "Remote device binding is unchanged."
+        )
+        self.activation_status_label = QLabel("Status")
+        self.license_status = QLineEdit()
+        self.license_status.setReadOnly(True)
+        self.activation_details_label = QLabel("Details")
+        self.license_meta = QLineEdit()
+        self.license_meta.setReadOnly(True)
+        activation_layout.addWidget(self.activation_container)
+
+        root.addWidget(self.activation_group)
+        self.activation_group.setVisible(False)
+        self.activation_group.setEnabled(False)
+
         self.tools_group = QGroupBox("Diagnostics / Pipeline")
+        self.tools_group.setCheckable(True)
+        tools_expanded = bool(getattr(self._settings, "gui_section_diagnostics_expanded", False))
+        self.tools_group.setChecked(tools_expanded)
         tools_layout = QVBoxLayout()
         tools_layout.setContentsMargins(12, 10, 12, 12)
         tools_layout.setSpacing(8)
         self.tools_group.setLayout(tools_layout)
+        self.tools_container = QWidget()
+        self.tools_container.setVisible(tools_expanded)
+        self.tools_container_layout = QGridLayout()
+        self.tools_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.tools_container_layout.setHorizontalSpacing(8)
+        self.tools_container_layout.setVerticalSpacing(8)
+        self.tools_container.setLayout(self.tools_container_layout)
 
-        row_tools = QHBoxLayout()
-        row_tools.setSpacing(8)
         self.btn_diag = QPushButton("Run Diagnostics")
         self.btn_bundle = QPushButton("Create Support Bundle")
-        row_tools.addWidget(self.btn_diag)
-        row_tools.addWidget(self.btn_bundle)
-        row_tools.addStretch(1)
-        tools_layout.addLayout(row_tools)
-
-        row_pipeline = QHBoxLayout()
-        row_pipeline.setSpacing(8)
+        self.pipeline_from_label = QLabel("From")
         self.pipeline_from_ym = QLineEdit(datetime.now().strftime("%Y-%m"))
         self.pipeline_from_ym.setPlaceholderText("YYYY-MM")
+        self.pipeline_to_label = QLabel("To")
         self.pipeline_to_ym = QLineEdit(datetime.now().strftime("%Y-%m"))
         self.pipeline_to_ym.setPlaceholderText("YYYY-MM")
         self.pipeline_force = QCheckBox("Force re-download")
         self.btn_pipeline = QPushButton("Download + Precompute")
-        row_pipeline.addWidget(QLabel("From"))
-        row_pipeline.addWidget(self.pipeline_from_ym)
-        row_pipeline.addWidget(QLabel("To"))
-        row_pipeline.addWidget(self.pipeline_to_ym)
-        row_pipeline.addWidget(self.pipeline_force)
-        row_pipeline.addWidget(self.btn_pipeline)
-        row_pipeline.addStretch(1)
-        tools_layout.addLayout(row_pipeline)
+        tools_layout.addWidget(self.tools_container)
         root.addWidget(self.tools_group)
 
         row_buttons = QHBoxLayout()
@@ -393,19 +499,35 @@ class MainWindow(QWidget):
         self._sync_exchange_fields()
         self._refresh_report_preview()
         self._sync_mode_ui()
-        self._refresh_brand_logo(force=True)
+        self._apply_responsive_layout(force=True)
 
-        # Log view
+        # Log + result view
+        self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.bottom_splitter.setChildrenCollapsible(False)
+        self.bottom_splitter.setHandleWidth(6)
+        root.addWidget(self.bottom_splitter, stretch=1)
+
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.log.document().setMaximumBlockCount(3000)
-        self.log.setMinimumHeight(260)
-        root.addWidget(self.log, stretch=1)
+        self.log.setMinimumHeight(DEFAULT_LOG_MIN_HEIGHT)
+        self.bottom_splitter.addWidget(self.log)
+        self.result_panel = ResultPanel()
+        self.bottom_splitter.addWidget(self.result_panel)
+        self.bottom_splitter.setStretchFactor(0, 3)
+        self.bottom_splitter.setStretchFactor(1, 2)
+        self.bottom_splitter.setSizes([560, 320])
+        self._restore_chart_panel_state()
+        self._set_log_minimum_height(bool(self._compact_mode))
 
         # Signals
         self.btn_save.clicked.connect(self.on_save)
         self.btn_clear.clicked.connect(self.on_clear_keys)
+        self.btn_license_activate.clicked.connect(self.on_activate_license)
+        self.btn_license_refresh.clicked.connect(self.on_refresh_license)
+        self.btn_license_clear.clicked.connect(self.on_clear_activation)
+        self.btn_license_reset_local.clicked.connect(self.on_reset_activation_test_state)
         self.btn_start.clicked.connect(self.on_start)
         self.btn_stop.clicked.connect(self.on_stop)
         self.btn_report_out.clicked.connect(self.on_select_report_out)
@@ -415,11 +537,23 @@ class MainWindow(QWidget):
         self.btn_select_replay.clicked.connect(self.on_select_replay_data)
         self.btn_select_replay_dir.clicked.connect(self.on_select_replay_folder)
         self.btn_run_replay.clicked.connect(self.on_run_replay)
+        self.result_panel.refreshRequested.connect(self.on_refresh_result_panel)
+        self.result_panel.expandRequested.connect(self.on_expand_result_chart)
+        self.result_panel.saveRequested.connect(self.on_save_result_chart)
+        self.result_panel.openFolderRequested.connect(lambda: self._open_result_export_folder(self.result_panel.result_data()))
+        self.result_panel.modeChanged.connect(self._on_result_panel_mode_changed)
+        self.bottom_splitter.splitterMoved.connect(self._on_bottom_splitter_moved)
         self.exchange.currentTextChanged.connect(self._on_exchange_changed)
         self.symbol.currentTextChanged.connect(self._on_symbol_changed)
         self.run_mode.currentTextChanged.connect(self._on_run_mode_changed)
         self.log_level.currentTextChanged.connect(self._on_log_level_changed)
+        self.report_group.toggled.connect(self.report_container.setVisible)
         self.creds_group.toggled.connect(self.creds_stack.setVisible)
+        self.activation_group.toggled.connect(self.activation_container.setVisible)
+        self.tools_group.toggled.connect(self.tools_container.setVisible)
+        self.creds_group.toggled.connect(self._on_collapsible_sections_changed)
+        self.activation_group.toggled.connect(self._on_collapsible_sections_changed)
+        self.tools_group.toggled.connect(self._on_collapsible_sections_changed)
         self.report_out.textChanged.connect(self._refresh_report_preview)
         self.report_enabled.toggled.connect(self._refresh_report_preview)
         self.replay_since_ym.textEdited.connect(self._on_replay_range_edited)
@@ -431,8 +565,15 @@ class MainWindow(QWidget):
         self._timer.setInterval(500)
         self._timer.timeout.connect(self._poll_proc)
         self._timer.start()
+        self._live_chart_timer = QTimer(self)
+        self._live_chart_timer.setInterval(1500)
+        self._live_chart_timer.timeout.connect(self._poll_live_chart_state)
+        self._live_chart_timer.start()
 
+        self._refresh_license_widgets()
         self._append("[ui] Ready.\n")
+        QTimer.singleShot(0, self._refresh_result_panel)
+        QTimer.singleShot(0, self._poll_live_chart_state)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -445,7 +586,355 @@ class MainWindow(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._apply_responsive_layout()
         self._refresh_brand_logo()
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        try:
+            self._persist_chart_ui_state()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+    def _is_compact_width(self) -> bool:
+        return int(self.width()) < COMPACT_WIDTH_THRESHOLD
+
+    def _reset_grid_layout(self, layout: QGridLayout) -> None:
+        while layout.count():
+            layout.takeAt(0)
+        for index in range(12):
+            layout.setColumnStretch(index, 0)
+            layout.setRowStretch(index, 0)
+
+    def _apply_controls_layout(self, compact: bool) -> None:
+        self._reset_grid_layout(self.controls_layout)
+        self.controls_layout.setHorizontalSpacing(6 if compact else 8)
+        self.controls_layout.setVerticalSpacing(8)
+        if compact:
+            self.controls_layout.addWidget(self.preset_label, 0, 0)
+            self.controls_layout.addWidget(self.preset, 0, 1)
+            self.controls_layout.addWidget(self.exchange_label, 0, 2)
+            self.controls_layout.addWidget(self.exchange, 0, 3)
+            self.controls_layout.addWidget(self.symbol_label, 0, 4)
+            self.controls_layout.addWidget(self.symbol, 0, 5)
+            self.controls_layout.addWidget(self.run_mode_label, 1, 0)
+            self.controls_layout.addWidget(self.run_mode, 1, 1, 1, 2)
+            self.controls_layout.addWidget(self.log_level_label, 1, 3)
+            self.controls_layout.addWidget(self.log_level, 1, 4, 1, 2)
+            self.controls_layout.setColumnStretch(1, 1)
+            self.controls_layout.setColumnStretch(3, 1)
+            self.controls_layout.setColumnStretch(5, 1)
+            return
+        self.controls_layout.addWidget(self.preset_label, 0, 0)
+        self.controls_layout.addWidget(self.preset, 0, 1)
+        self.controls_layout.addWidget(self.exchange_label, 0, 2)
+        self.controls_layout.addWidget(self.exchange, 0, 3)
+        self.controls_layout.addWidget(self.symbol_label, 0, 4)
+        self.controls_layout.addWidget(self.symbol, 0, 5)
+        self.controls_layout.addWidget(self.run_mode_label, 0, 6)
+        self.controls_layout.addWidget(self.run_mode, 0, 7)
+        self.controls_layout.addWidget(self.log_level_label, 0, 8)
+        self.controls_layout.addWidget(self.log_level, 0, 9)
+        self.controls_layout.setColumnStretch(1, 1)
+        self.controls_layout.setColumnStretch(3, 1)
+        self.controls_layout.setColumnStretch(5, 1)
+        self.controls_layout.setColumnStretch(7, 1)
+        self.controls_layout.setColumnStretch(9, 1)
+        self.controls_layout.setColumnStretch(10, 1)
+
+    def _sync_window_size_settings(self) -> None:
+        if not isinstance(self._settings, AppSettings):
+            self._settings = AppSettings()
+        self._settings.main_window_width = max(DEFAULT_MAIN_WINDOW_WIDTH, int(self.width()))
+        self._settings.main_window_height = max(DEFAULT_MAIN_WINDOW_HEIGHT, int(self.height()))
+
+    def _section_ui_state(self) -> dict[str, bool]:
+        return {
+            "gui_section_api_expanded": bool(self.creds_group.isChecked()) if hasattr(self, "creds_group") else False,
+            "gui_section_activation_expanded": (
+                bool(self.activation_group.isChecked()) if hasattr(self, "activation_group") else False
+            ),
+            "gui_section_diagnostics_expanded": bool(self.tools_group.isChecked()) if hasattr(self, "tools_group") else False,
+        }
+
+    def _sync_collapsible_section_settings(self) -> None:
+        if not isinstance(self._settings, AppSettings):
+            self._settings = AppSettings()
+        section_state = self._section_ui_state()
+        self._settings.gui_section_api_expanded = bool(section_state["gui_section_api_expanded"])
+        self._settings.gui_section_activation_expanded = bool(section_state["gui_section_activation_expanded"])
+        self._settings.gui_section_diagnostics_expanded = bool(section_state["gui_section_diagnostics_expanded"])
+
+    def _on_collapsible_sections_changed(self, _checked: bool) -> None:
+        self._sync_collapsible_section_settings()
+
+    def _apply_report_layout(self, compact: bool) -> None:
+        self._reset_grid_layout(self.report_container_layout)
+        self.report_container_layout.setVerticalSpacing(
+            COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
+        )
+        if compact:
+            self.report_container_layout.addWidget(self.report_enabled, 0, 0, 1, 4)
+            self.report_container_layout.addWidget(self.report_out_label, 1, 0)
+            self.report_container_layout.addWidget(self.report_out, 1, 1, 1, 2)
+            self.report_container_layout.addWidget(self.btn_report_out, 1, 3)
+            self.report_container_layout.addWidget(self.report_resolved_label, 2, 0)
+            self.report_container_layout.addWidget(self.report_preview, 2, 1, 1, 3)
+            self.report_container_layout.setColumnStretch(1, 1)
+            self.report_container_layout.setColumnStretch(2, 1)
+            return
+        self.report_container_layout.addWidget(self.report_enabled, 0, 0)
+        self.report_container_layout.addWidget(self.report_out_label, 0, 1)
+        self.report_container_layout.addWidget(self.report_out, 0, 2)
+        self.report_container_layout.addWidget(self.btn_report_out, 0, 3)
+        self.report_container_layout.addWidget(self.report_resolved_label, 1, 0)
+        self.report_container_layout.addWidget(self.report_preview, 1, 1, 1, 3)
+        self.report_container_layout.setColumnStretch(2, 1)
+
+    def _apply_activation_layout(self, compact: bool) -> None:
+        self._reset_grid_layout(self.activation_container_layout)
+        self.activation_container_layout.setVerticalSpacing(
+            COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
+        )
+        if compact:
+            self.activation_container_layout.addWidget(self.activation_seat_key_label, 0, 0)
+            self.activation_container_layout.addWidget(self.license_seat_key, 0, 1, 1, 3)
+            self.activation_container_layout.addWidget(self.btn_license_activate, 1, 0)
+            self.activation_container_layout.addWidget(self.btn_license_refresh, 1, 1)
+            self.activation_container_layout.addWidget(self.btn_license_clear, 1, 2)
+            self.activation_container_layout.addWidget(self.btn_license_reset_local, 2, 0, 1, 4)
+            self.activation_container_layout.addWidget(self.activation_status_label, 3, 0)
+            self.activation_container_layout.addWidget(self.license_status, 3, 1, 1, 3)
+            self.activation_container_layout.addWidget(self.activation_details_label, 4, 0)
+            self.activation_container_layout.addWidget(self.license_meta, 4, 1, 1, 3)
+            self.activation_container_layout.setColumnStretch(1, 1)
+            self.activation_container_layout.setColumnStretch(2, 1)
+            self.activation_container_layout.setColumnStretch(3, 1)
+            return
+        self.activation_container_layout.addWidget(self.activation_seat_key_label, 0, 0)
+        self.activation_container_layout.addWidget(self.license_seat_key, 0, 1, 1, 3)
+        self.activation_container_layout.addWidget(self.btn_license_activate, 1, 0)
+        self.activation_container_layout.addWidget(self.btn_license_refresh, 1, 1)
+        self.activation_container_layout.addWidget(self.btn_license_clear, 1, 2)
+        self.activation_container_layout.addWidget(self.btn_license_reset_local, 2, 0, 1, 4)
+        self.activation_container_layout.addWidget(self.activation_status_label, 3, 0)
+        self.activation_container_layout.addWidget(self.license_status, 3, 1, 1, 3)
+        self.activation_container_layout.addWidget(self.activation_details_label, 4, 0)
+        self.activation_container_layout.addWidget(self.license_meta, 4, 1, 1, 3)
+        self.activation_container_layout.setColumnStretch(1, 1)
+        self.activation_container_layout.setColumnStretch(2, 1)
+        self.activation_container_layout.setColumnStretch(3, 1)
+
+    def _apply_tools_layout(self, compact: bool) -> None:
+        self._reset_grid_layout(self.tools_container_layout)
+        self.tools_container_layout.addWidget(self.btn_diag, 0, 0)
+        self.tools_container_layout.addWidget(self.btn_bundle, 0, 1)
+        if compact:
+            self.tools_container_layout.addWidget(self.pipeline_from_label, 1, 0)
+            self.tools_container_layout.addWidget(self.pipeline_from_ym, 1, 1)
+            self.tools_container_layout.addWidget(self.pipeline_to_label, 1, 2)
+            self.tools_container_layout.addWidget(self.pipeline_to_ym, 1, 3)
+            self.tools_container_layout.addWidget(self.pipeline_force, 2, 0, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_pipeline, 2, 2, 1, 2)
+            self.tools_container_layout.setColumnStretch(1, 1)
+            self.tools_container_layout.setColumnStretch(3, 1)
+            return
+        self.tools_container_layout.addWidget(self.pipeline_from_label, 1, 0)
+        self.tools_container_layout.addWidget(self.pipeline_from_ym, 1, 1)
+        self.tools_container_layout.addWidget(self.pipeline_to_label, 1, 2)
+        self.tools_container_layout.addWidget(self.pipeline_to_ym, 1, 3)
+        self.tools_container_layout.addWidget(self.pipeline_force, 1, 4)
+        self.tools_container_layout.addWidget(self.btn_pipeline, 1, 5)
+        self.tools_container_layout.setColumnStretch(1, 1)
+        self.tools_container_layout.setColumnStretch(3, 1)
+        self.tools_container_layout.setColumnStretch(6, 1)
+
+    def _set_log_minimum_height(self, compact: bool) -> None:
+        if not hasattr(self, "log"):
+            return
+        self.log.setMinimumHeight(COMPACT_LOG_MIN_HEIGHT if compact else DEFAULT_LOG_MIN_HEIGHT)
+
+    def _apply_responsive_layout(self, compact: bool | None = None, *, force: bool = False) -> None:
+        mode = self._is_compact_width() if compact is None else bool(compact)
+        if (not force) and (self._compact_mode == mode):
+            return
+        self._compact_mode = mode
+        self._apply_controls_layout(mode)
+        self._apply_report_layout(mode)
+        self._apply_activation_layout(mode)
+        self._apply_tools_layout(mode)
+        self._set_log_minimum_height(mode)
+        if mode:
+            self._clear_brand_logo()
+            return
+        self._refresh_brand_logo(force=True)
+
+    def _license_base_url(self) -> str:
+        try:
+            return str(default_license_base_url() or "").strip()
+        except Exception:
+            return str(os.getenv("LWF_LICENSE_BASE_URL") or os.getenv("LWF_SITE_BASE_URL") or "").strip()
+
+    def _license_status_text(self) -> str:
+        state = load_license_state()
+        if state is None:
+            return "Not activated"
+        status = str(state.license_status or "").strip() or "unknown"
+        parts = [f"status={status}"]
+        try:
+            seat_no = int(state.seat_no or 0)
+        except Exception:
+            seat_no = 0
+        if seat_no > 0:
+            parts.append(f"seat={seat_no}")
+        parts.append(f"live={'yes' if bool(state.live_allowed) else 'no'}")
+        grace = str(state.offline_grace_until or "").strip()
+        if grace:
+            parts.append(f"offline_grace_until={grace}")
+        return " | ".join(parts)
+
+    def _refresh_license_widgets(self) -> None:
+        stored_seat_key = str(load_license_seat_key() or "").strip()
+        if stored_seat_key and not str(self.license_seat_key.text() or "").strip():
+            self.license_seat_key.setText(stored_seat_key)
+        self.license_status.setText(self._license_status_text())
+        device_id = str(load_license_device_id() or "").strip()
+        base_url = self._license_base_url()
+        detail_parts = [f"base_url={base_url or '(unset)'}"]
+        detail_parts.append(f"device_id={device_id or '(not created yet)'}")
+        self.license_meta.setText(" | ".join(detail_parts))
+
+    def _clear_local_activation_state(self) -> None:
+        clear_license_local_test_state()
+        self.license_seat_key.clear()
+        self._refresh_license_widgets()
+
+    def on_reset_activation_test_state(self) -> None:
+        response = QMessageBox.question(
+            self,
+            "Desktop Activation",
+            "This clears only the local Desktop Activation test state.\n"
+            "Remote device binding is NOT changed.\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._clear_local_activation_state()
+            self.activation_group.setChecked(True)
+            self._append("[ui] Desktop activation local test state reset.\n")
+        except Exception as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = str(exc) or exc.__class__.__name__
+            self._append(f"[ui] Desktop activation local reset failed error={msg}\n")
+            QMessageBox.warning(self, "Desktop Activation", msg)
+
+    def on_activate_license(self) -> None:
+        seat_key = str(self.license_seat_key.text() or "").strip()
+        if not seat_key:
+            self.activation_group.setChecked(True)
+            QMessageBox.warning(self, "Desktop Activation", "Seat Key is required.")
+            return
+        try:
+            state = activate_and_store_license(seat_key, base_url=self._license_base_url())
+            self.license_seat_key.setText(str(state.seat_key or seat_key))
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(False)
+            self._append(f"[ui] Desktop activation succeeded status={str(state.license_status or '')} live_allowed={bool(state.live_allowed)}\n")
+            QMessageBox.information(self, "Desktop Activation", "Activation completed successfully.")
+        except LicenseOperationError as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = str(exc) or "Desktop activation failed."
+            self._append(f"[ui] Desktop activation failed error={msg}\n")
+            QMessageBox.warning(self, "Desktop Activation", msg)
+        except Exception as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = str(exc) or exc.__class__.__name__
+            self._append(f"[ui] Desktop activation failed error={msg}\n")
+            QMessageBox.critical(self, "Desktop Activation", msg)
+
+    def on_refresh_license(self) -> None:
+        typed_seat_key = str(self.license_seat_key.text() or "").strip()
+        stored_seat_key = str(load_license_seat_key() or "").strip()
+        if (not stored_seat_key) and typed_seat_key:
+            self.on_activate_license()
+            return
+        if (not stored_seat_key) and (not typed_seat_key):
+            self.activation_group.setChecked(True)
+            QMessageBox.warning(self, "Desktop Activation", "No saved Seat Key was found. Activate first.")
+            return
+        try:
+            state = refresh_and_store_license(base_url=self._license_base_url())
+            self.license_seat_key.setText(str(load_license_seat_key() or typed_seat_key or ""))
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(False)
+            self._append(f"[ui] Desktop activation refresh succeeded status={str(state.license_status or '')} live_allowed={bool(state.live_allowed)}\n")
+            QMessageBox.information(self, "Desktop Activation", "Refresh completed successfully.")
+        except LicenseOperationError as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = str(exc) or "Desktop activation refresh failed."
+            self._append(f"[ui] Desktop activation refresh failed error={msg}\n")
+            QMessageBox.warning(self, "Desktop Activation", msg)
+        except Exception as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = str(exc) or exc.__class__.__name__
+            self._append(f"[ui] Desktop activation refresh failed error={msg}\n")
+            QMessageBox.critical(self, "Desktop Activation", msg)
+
+    def on_clear_activation(self) -> None:
+        seat_key = str(load_license_seat_key() or self.license_seat_key.text() or "").strip()
+        device_id = str(load_license_device_id() or "").strip()
+        if not seat_key:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            msg = (
+                "Seat Key is required to clear the remote device binding. "
+                "Paste the Seat Key and press Clear again. Local state was not changed."
+            )
+            self._append(f"[ui] Desktop activation clear blocked error={msg}\n")
+            QMessageBox.warning(self, "Desktop Activation", msg)
+            return
+
+        remote_outcome = ""
+        try:
+            response = deactivate_license(
+                seat_key,
+                device_id,
+                base_url=self._license_base_url(),
+            )
+            if not response.ok:
+                self._refresh_license_widgets()
+                self.activation_group.setChecked(True)
+                detail = str(response.error_message or response.error_code or "desktop activation clear failed").strip()
+                msg = f"Could not clear the remote device binding. {detail}"
+                self._append(f"[ui] Desktop activation clear failed error={msg}\n")
+                QMessageBox.warning(self, "Desktop Activation", msg)
+                return
+            remote_outcome = str(response.outcome or "deactivated").strip() or "deactivated"
+        except Exception as exc:
+            self._refresh_license_widgets()
+            self.activation_group.setChecked(True)
+            detail = str(exc) or exc.__class__.__name__
+            msg = f"Could not clear the remote device binding. {detail}"
+            self._append(f"[ui] Desktop activation clear failed error={msg}\n")
+            QMessageBox.warning(self, "Desktop Activation", msg)
+            return
+
+        self._clear_local_activation_state()
+        self.activation_group.setChecked(True)
+        self._append(f"[ui] Desktop activation cleared remote_binding={remote_outcome} and local state.\n")
+        QMessageBox.information(
+            self,
+            "Desktop Activation",
+            "Remote device binding was cleared and the saved local activation state was removed from keyring.",
+        )
 
     def _last_run_json_path(self) -> str:
         return os.path.abspath(os.path.join(self._paths.exports_dir, "last_run.json"))
@@ -556,6 +1045,9 @@ class MainWindow(QWidget):
         self._logo_label.setVisible(False)
 
     def _refresh_brand_logo(self, *, force: bool = False) -> None:
+        if bool(self._compact_mode):
+            self._clear_brand_logo()
+            return
         if self._logo_asset is None:
             self._clear_brand_logo()
             return
@@ -726,6 +1218,19 @@ class MainWindow(QWidget):
     def _credential_widgets(self, exchange_id: str | None = None) -> dict[str, QLineEdit]:
         return self._credential_inputs.get(str(exchange_id or self._selected_exchange_id()), {})
 
+    def _has_saved_creds(self, exchange_id: str | None = None) -> bool:
+        try:
+            return load_creds(str(exchange_id or self._selected_exchange_id())) is not None
+        except Exception:
+            return False
+
+    def _has_saved_activation(self) -> bool:
+        try:
+            stored_seat_key = str(load_license_seat_key() or "").strip()
+            return bool(stored_seat_key) and (load_license_state() is not None)
+        except Exception:
+            return False
+
     def _resolve_runtime_creds(self, exchange_id: str | None = None) -> tuple[str, str]:
         ex = str(exchange_id or self._selected_exchange_id())
         widgets = self._credential_widgets(ex)
@@ -749,7 +1254,10 @@ class MainWindow(QWidget):
             return _normalize_run_mode(self._run_mode)
 
     def _selected_log_level(self) -> str:
-        return "MINIMAL"
+        try:
+            return _normalize_runtime_log_level(self.log_level.currentText())
+        except Exception:
+            return _normalize_runtime_log_level(self._log_level)
 
     def _load_run_mode_from_settings(self) -> str:
         mode = _normalize_run_mode(getattr(self._settings, "run_mode", "PAPER"))
@@ -767,7 +1275,6 @@ class MainWindow(QWidget):
     def _save_run_mode_to_settings(self) -> None:
         mode = self._selected_run_mode()
         self._run_mode = mode
-        self._settings.run_mode = mode
         p = get_paths()
         data: dict[str, object] = {}
         try:
@@ -808,18 +1315,19 @@ class MainWindow(QWidget):
 
     def _on_exchange_changed(self, _value: str) -> None:
         self._sync_exchange_fields()
+        self._poll_live_chart_state()
 
     def _on_symbol_changed(self, _value: str) -> None:
         self._default_symbol = self._selected_symbol()
         self._refresh_replay_symbol_options(preferred=self._default_symbol)
+        self._poll_live_chart_state()
 
     def _sync_mode_ui(self) -> None:
         mode = self._selected_run_mode()
         self.replay_group.setVisible(mode in {"REPLAY", "BACKTEST"})
         self.creds_group.setVisible(mode == "PAPER")
-        if mode == "PAPER":
-            self.btn_start.setText("Start Paper")
-        elif mode == "REPLAY":
+        self.activation_group.setVisible(False)
+        if mode == "REPLAY":
             self.btn_start.setText("Run Replay")
         elif mode == "BACKTEST":
             self.btn_start.setText("Run Backtest")
@@ -829,9 +1337,15 @@ class MainWindow(QWidget):
     def _on_run_mode_changed(self, _value: str) -> None:
         self._run_mode = self._selected_run_mode()
         self._sync_mode_ui()
+        if self._run_mode != "PAPER":
+            self._restore_chart_mode_after_live_candle()
+            self._last_chart_state_diag_key = None
+            self._set_live_chart_state(None, auto_prefer_candle=False)
+            return
+        self._poll_live_chart_state()
 
     def _on_log_level_changed(self, _value: str) -> None:
-        self._log_level = "MINIMAL"
+        self._log_level = self._selected_log_level()
 
     def on_select_report_out(self) -> None:
         start_path = self._report_out_abs()
@@ -941,6 +1455,330 @@ class MainWindow(QWidget):
             )
         except Exception as e:
             self._append(f"[results] summary unavailable (replay report read error: {e})\n")
+
+    def _load_result_chart_data(self):
+        return load_latest_result_chart_data(
+            self._paths.exports_dir,
+            repo_root=self._paths.repo_root,
+            last_run_payload=self._load_last_run_payload(),
+        )
+
+    def _apply_result_panel_data(self, data: ResultChartData) -> None:
+        payload = data if isinstance(data, ResultChartData) else ResultChartData()
+        self.result_panel.set_result_data(payload)
+        if self._chart_dialog is not None:
+            try:
+                self._chart_dialog.set_result_data(payload)
+            except Exception:
+                pass
+
+    def _set_chart_mode_programmatically(self, mode: str) -> None:
+        self._suppress_chart_mode_user_lock = True
+        try:
+            self.result_panel.set_chart_mode(str(mode or ""))
+            if self._chart_dialog is not None:
+                try:
+                    self._chart_dialog.set_chart_mode(str(mode or ""))
+                except Exception:
+                    pass
+        finally:
+            self._suppress_chart_mode_user_lock = False
+
+    def _build_waiting_live_chart_state(self, *, reason: str, path: str = "", state_present: bool = False) -> LiveChartState:
+        resolved_path = str(path or "").strip()
+        if not resolved_path:
+            resolved_path = build_chart_state_path(
+                self._paths.state_dir,
+                self._selected_exchange_id(),
+                self._selected_run_mode(),
+                self._selected_symbol(),
+            )
+        return LiveChartState(
+            path=str(resolved_path or ""),
+            exchange_id=self._selected_exchange_id(),
+            run_mode=self._selected_run_mode(),
+            symbol=self._selected_symbol(),
+            candle_source="empty",
+            chart_state_reason=str(reason or "").strip(),
+            state_present=bool(state_present),
+        )
+
+    def _log_live_chart_reader_path(self, state: LiveChartState | None) -> None:
+        path_text = str(getattr(state, "path", "") or "").strip()
+        if not path_text:
+            path_text = build_chart_state_path(
+                self._paths.state_dir,
+                self._selected_exchange_id(),
+                self._selected_run_mode(),
+                self._selected_symbol(),
+            )
+        if not path_text or path_text == self._last_chart_state_reader_path:
+            return
+        self._last_chart_state_reader_path = path_text
+        self._append(f"[chart_state] reader path={path_text}\n")
+
+    def _log_live_chart_diag(self, state: LiveChartState | None) -> None:
+        if not isinstance(state, LiveChartState):
+            self._last_chart_state_diag_key = None
+            return
+        key = (
+            str(state.candle_source or "").strip(),
+            int(state.candles_count or 0),
+            int(state.last_candle_ts_ms or 0),
+            str(state.chart_state_reason or "").strip(),
+        )
+        if key == self._last_chart_state_diag_key:
+            return
+        self._last_chart_state_diag_key = key
+        parts = ["[chart_state]"]
+        if key[0]:
+            parts.append(f"source={key[0]}")
+        parts.append(f"candles={key[1]}")
+        if key[2] > 0:
+            parts.append(f"last_ts={key[2]}")
+        if key[3]:
+            parts.append(f"reason={key[3]}")
+        self._append(" ".join(parts) + "\n")
+
+    def _restore_chart_mode_after_live_candle(self) -> None:
+        if not self._chart_mode_auto_live_candle_applied:
+            return
+        if self._chart_mode_user_locked:
+            self._chart_mode_auto_live_candle_applied = False
+            return
+        if self.result_panel.chart_mode() != CHART_MODE_CANDLE:
+            self._chart_mode_auto_live_candle_applied = False
+            return
+        restore_mode = str(self._chart_mode_before_live_candle or "Equity")
+        self._set_chart_mode_programmatically(restore_mode)
+        self._chart_mode_auto_live_candle_applied = False
+
+    def _set_live_chart_state(self, state: LiveChartState | None, *, auto_prefer_candle: bool) -> None:
+        self._live_chart_state = state if isinstance(state, LiveChartState) else None
+        self._live_chart_available = bool(self._live_chart_state is not None and self._live_chart_state.has_data)
+        merged = with_live_chart_state(self._base_result_data, self._live_chart_state)
+        self._apply_result_panel_data(merged)
+        self._log_live_chart_diag(self._live_chart_state)
+        if (
+            self._live_chart_available
+            and auto_prefer_candle
+            and (not self._chart_mode_user_locked)
+            and (not self._chart_mode_auto_live_candle_applied)
+        ):
+            current_mode = self.result_panel.chart_mode()
+            if current_mode != CHART_MODE_CANDLE:
+                self._chart_mode_before_live_candle = str(current_mode or "Equity")
+            self._set_chart_mode_programmatically(CHART_MODE_CANDLE)
+            self._chart_mode_auto_live_candle_applied = True
+
+    def _poll_live_chart_state(self) -> None:
+        run_mode = self._selected_run_mode()
+        if run_mode not in {"PAPER"}:
+            self._last_chart_state_diag_key = None
+            self._last_chart_state_reader_path = ""
+            self._set_live_chart_state(None, auto_prefer_candle=False)
+            return
+        try:
+            chart_state = load_live_chart_state_for_runtime(
+                self._paths.state_dir,
+                self._selected_exchange_id(),
+                run_mode,
+                self._selected_symbol(),
+            )
+        except Exception:
+            chart_state = self._build_waiting_live_chart_state(reason="state_load_failed")
+        try:
+            is_runner_active = self._proc is not None and self._proc.poll() is None and str(self._proc_role) == "runner"
+            if (not is_runner_active) and chart_state.path:
+                age_sec = max(0.0, time.time() - os.path.getmtime(chart_state.path))
+                if age_sec > 120.0:
+                    chart_state = self._build_waiting_live_chart_state(
+                        reason="state_stale",
+                        path=str(chart_state.path or ""),
+                        state_present=False,
+                    )
+        except Exception:
+            pass
+        self._log_live_chart_reader_path(chart_state)
+        self._set_live_chart_state(chart_state, auto_prefer_candle=True)
+
+    def _restore_chart_panel_state(self) -> None:
+        state = dict(self._chart_ui_state or {})
+        try:
+            self._set_chart_mode_programmatically(str(state.get("last_chart_mode", "") or ""))
+        except Exception:
+            self._set_chart_mode_programmatically("")
+        current_mode = self.result_panel.chart_mode()
+        if current_mode != CHART_MODE_CANDLE:
+            self._chart_mode_before_live_candle = str(current_mode or "Equity")
+        sizes = state.get("chart_splitter_sizes")
+        if isinstance(sizes, list) and len(sizes) == 2:
+            try:
+                self.bottom_splitter.setSizes([int(sizes[0]), int(sizes[1])])
+            except Exception:
+                pass
+
+    def _update_chart_ui_state(
+        self,
+        *,
+        chart_mode: str | None = None,
+        chart_splitter_sizes: list[int] | None = None,
+    ) -> None:
+        if not isinstance(self._settings, AppSettings):
+            self._settings = AppSettings()
+        set_gui_chart_state(
+            self._settings,
+            last_chart_mode=chart_mode if chart_mode is not None else self.result_panel.chart_mode(),
+            chart_splitter_sizes=chart_splitter_sizes if chart_splitter_sizes is not None else self.bottom_splitter.sizes(),
+        )
+        self._sync_window_size_settings()
+        self._sync_collapsible_section_settings()
+        self._chart_ui_state = get_gui_chart_state(self._settings)
+
+    def _persist_chart_ui_state(
+        self,
+        *,
+        chart_mode: str | None = None,
+        chart_splitter_sizes: list[int] | None = None,
+    ) -> None:
+        previous = dict(self._chart_ui_state or {})
+        previous_window = (
+            int(getattr(self._settings, "main_window_width", DEFAULT_MAIN_WINDOW_WIDTH) or DEFAULT_MAIN_WINDOW_WIDTH),
+            int(getattr(self._settings, "main_window_height", DEFAULT_MAIN_WINDOW_HEIGHT) or DEFAULT_MAIN_WINDOW_HEIGHT),
+        )
+        previous_sections = {
+            "gui_section_api_expanded": bool(getattr(self._settings, "gui_section_api_expanded", False)),
+            "gui_section_activation_expanded": bool(getattr(self._settings, "gui_section_activation_expanded", False)),
+            "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", False)),
+        }
+        try:
+            self._update_chart_ui_state(chart_mode=chart_mode, chart_splitter_sizes=chart_splitter_sizes)
+            current_window = (
+                int(getattr(self._settings, "main_window_width", DEFAULT_MAIN_WINDOW_WIDTH) or DEFAULT_MAIN_WINDOW_WIDTH),
+                int(getattr(self._settings, "main_window_height", DEFAULT_MAIN_WINDOW_HEIGHT) or DEFAULT_MAIN_WINDOW_HEIGHT),
+            )
+            current_sections = {
+                "gui_section_api_expanded": bool(getattr(self._settings, "gui_section_api_expanded", False)),
+                "gui_section_activation_expanded": bool(getattr(self._settings, "gui_section_activation_expanded", False)),
+                "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", False)),
+            }
+            if self._chart_ui_state == previous and current_window == previous_window and current_sections == previous_sections:
+                return
+            save_settings(self._settings)
+        except Exception as exc:
+            self._append(f"[ui] chart_state_save_failed error={exc}\n")
+
+    def _on_result_panel_mode_changed(self, mode: str) -> None:
+        if not self._suppress_chart_mode_user_lock:
+            self._chart_mode_user_locked = True
+        if str(mode or "") != CHART_MODE_CANDLE:
+            self._chart_mode_before_live_candle = str(mode or "Equity")
+            self._chart_mode_auto_live_candle_applied = False
+        self._persist_chart_ui_state(chart_mode=str(mode or ""))
+
+    def _on_bottom_splitter_moved(self, _pos: int, _index: int) -> None:
+        self._persist_chart_ui_state(chart_splitter_sizes=self.bottom_splitter.sizes())
+
+    def _snapshot_exports_dir(self) -> str:
+        target = os.path.abspath(os.path.join(self._paths.exports_dir, "snapshots"))
+        os.makedirs(target, exist_ok=True)
+        return target
+
+    def _result_export_folder_path(self, _data) -> str:
+        return self._snapshot_exports_dir()
+
+    def _open_folder_path(self, path: str) -> bool:
+        target = os.path.abspath(str(path or "").strip() or self._snapshot_exports_dir())
+        if not os.path.isdir(target):
+            return False
+        if sys.platform.startswith("win") and hasattr(os, "startfile"):
+            try:
+                os.startfile(target)
+                return True
+            except Exception:
+                pass
+        try:
+            return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
+        except Exception:
+            return False
+
+    def _open_result_export_folder(self, data) -> None:
+        folder = self._result_export_folder_path(data)
+        try:
+            ok = self._open_folder_path(folder)
+        except Exception as exc:
+            self._append(f"[result] open_folder failed error={exc}\n")
+            return
+        if ok:
+            self._append(f"[result] open_folder path={folder}\n")
+            return
+        self._append(f"[result] open_folder failed path={folder}\n")
+
+    def _refresh_result_panel(self, *, announce: bool = False) -> None:
+        try:
+            data, messages = self._load_result_chart_data()
+        except Exception as exc:
+            self._base_result_data = ResultChartData()
+            self._set_live_chart_state(self._live_chart_state, auto_prefer_candle=False)
+            self._append(f"[result] refresh failed error={exc}\n")
+            return
+        self._base_result_data = data if isinstance(data, ResultChartData) else ResultChartData()
+        self._set_live_chart_state(self._live_chart_state, auto_prefer_candle=False)
+        for msg in messages:
+            self._append(f"[result] {msg}\n")
+        if announce:
+            shown = self.result_panel.result_data()
+            if shown.has_any_result:
+                location = shown.export_dir or self._last_run_export_dir() or self._result_export_folder_path(shown)
+                self._append(f"[result] refreshed export_dir={location}\n")
+            else:
+                self._append("[result] No result data\n")
+
+    def on_refresh_result_panel(self) -> None:
+        self._refresh_result_panel(announce=True)
+
+    def _default_result_chart_png_path(self, mode: str, data: ResultChartData | None = None) -> str:
+        safe_mode = re.sub(r"[^a-z0-9]+", "_", str(mode or "").strip().lower()).strip("_") or "equity"
+        safe_symbol = infer_result_chart_snapshot_symbol(data if isinstance(data, ResultChartData) else ResultChartData())
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = self._snapshot_exports_dir()
+        return os.path.abspath(os.path.join(folder, f"chart_{safe_mode}_{safe_symbol}_{stamp}.png"))
+
+    def _save_result_chart_widget(self, widget: ResultChartWidget, mode: str) -> None:
+        path = self._default_result_chart_png_path(mode, widget.result_data())
+        try:
+            ok = bool(widget.save_png(path, QSize(1600, 900)))
+        except Exception as exc:
+            self._append(f"[result] save failed error={exc}\n")
+            QMessageBox.warning(self, "Save PNG", f"Could not save chart PNG.\n{exc}")
+            return
+        if not ok:
+            msg = f"Could not save chart PNG.\n{path}"
+            self._append(f"[result] save failed path={path}\n")
+            QMessageBox.warning(self, "Save PNG", msg)
+            return
+        self._append(f"[result] chart_saved path={path}\n")
+
+    def on_save_result_chart(self) -> None:
+        self._save_result_chart_widget(self.result_panel.chart_widget, self.result_panel.chart_mode())
+
+    def on_expand_result_chart(self) -> None:
+        if self._chart_dialog is None:
+            dialog = ChartDialog(self)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            dialog.saveRequested.connect(lambda: self._save_result_chart_widget(dialog.chart_widget, dialog.chart_mode()))
+            dialog.openFolderRequested.connect(lambda: self._open_result_export_folder(dialog.chart_widget.result_data()))
+
+            def _clear_dialog_ref(_result: int) -> None:
+                self._chart_dialog = None
+
+            dialog.finished.connect(_clear_dialog_ref)
+            self._chart_dialog = dialog
+        self._chart_dialog.set_result_data(self.result_panel.result_data())
+        self._chart_dialog.set_chart_mode(self.result_panel.chart_mode())
+        self._chart_dialog.show()
+        self._chart_dialog.raise_()
+        self._chart_dialog.activateWindow()
 
     def _on_replay_range_edited(self, _text: str) -> None:
         if self._auto_range_enabled:
@@ -1637,7 +2475,6 @@ class MainWindow(QWidget):
             self._settings.dataset_root = str(data_arg)
             self._settings.dataset_prefix = str(prefix)
             self._settings.dataset_year = int(y or 0)
-            self._settings.run_mode = self._selected_run_mode()
             self._settings.log_level = self._selected_log_level()
             save_settings(self._settings)
             self._save_run_mode_to_settings()
@@ -1706,7 +2543,6 @@ class MainWindow(QWidget):
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
             self._settings.dataset_year = int(prepared["dataset_year"])
-            self._settings.run_mode = self._selected_run_mode()
             self._settings.log_level = self._selected_log_level()
             save_settings(self._settings)
             self._save_run_mode_to_settings()
@@ -1770,7 +2606,6 @@ class MainWindow(QWidget):
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
             self._settings.dataset_year = int(prepared["dataset_year"])
-            self._settings.run_mode = self._selected_run_mode()
             self._settings.log_level = self._selected_log_level()
             save_settings(self._settings)
             self._save_run_mode_to_settings()
@@ -1826,8 +2661,8 @@ class MainWindow(QWidget):
         self._settings.dataset_root = str(self.replay_data.text() or "").strip() or self._default_dataset_root
         self._settings.dataset_prefix = str(self._replay_dataset_prefix or "")
         self._settings.dataset_year = int(self._replay_dataset_year or 0)
-        self._settings.run_mode = self._selected_run_mode()
         self._settings.log_level = self._selected_log_level()
+        self._update_chart_ui_state()
         save_settings(self._settings)
         self._save_run_mode_to_settings()
 
@@ -1892,12 +2727,33 @@ class MainWindow(QWidget):
         try:
             self._ip_whitelist_alerted = False
             self._ensure_report_parent()
+            if str(run_mode).upper() == "LIVE":
+                try:
+                    ensure_live_license_or_raise(base_url=self._license_base_url(), feature_name="LIVE execution")
+                except SystemExit as exc:
+                    self._refresh_license_widgets()
+                    msg = str(exc) or "LIVE execution requires desktop activation."
+                    self._append(f"[ui] LIVE blocked: {msg}\n")
+                    QMessageBox.warning(self, "LIVE blocked", msg)
+                    self.btn_start.setChecked(False)
+                    return
+                except Exception as exc:
+                    self._refresh_license_widgets()
+                    msg = str(exc) or "LIVE execution requires desktop activation."
+                    self._append(f"[ui] LIVE blocked: {msg}\n")
+                    QMessageBox.warning(self, "LIVE blocked", msg)
+                    self.btn_start.setChecked(False)
+                    return
+                self._refresh_license_widgets()
             os.environ["LWF_MODE_OVERRIDE"] = str(run_mode)
             self._append(
                 f"[ui] Starting runner exchange_id={spec.exchange_id} "
                 f"run_mode={run_mode} log_level={spec.log_level} "
                 f"preset={spec.preset} symbol={spec.symbol} report={spec.report_enabled}\n"
             )
+            self._chart_mode_auto_live_candle_applied = False
+            self._last_chart_state_diag_key = None
+            self._poll_live_chart_state()
             self._proc_role = "runner"
             self._close_replay_log_file()
             self._open_live_log_file()
@@ -1955,6 +2811,7 @@ class MainWindow(QWidget):
             else:
                 if int(code) != 0:
                     self._append(f"[ui] last_stderr_saved={stderr_path}\n")
+            self._refresh_result_panel()
         else:
             self._close_live_log_file()
             self._append(f"[ui] Runner exited with code={code}\n")
@@ -1965,16 +2822,3 @@ class MainWindow(QWidget):
         self.btn_run_replay.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pipeline.setEnabled(True)
-
-
-
-
-
-
-
-
-
-
-
-
-

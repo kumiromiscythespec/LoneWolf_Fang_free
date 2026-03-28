@@ -12,3 +12,4 @@ This package is the local installer zip source distribution for `LoneWolf_Fang_f
 - `market_data/` is not bundled.
 - `runtime/` is bundled as skeleton-only directories with `.gitkeep` files.
 - Standard includes additional capabilities beyond free.
+- Chart / result panel / snapshots / Save PNG / Open Folder are available in the free non-live build.

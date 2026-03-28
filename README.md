@@ -267,3 +267,6 @@ This repository is intended to keep the Free edition packaging and local install
 License terms will be provided separately.
 
 ライセンス条件は別途提供予定です。
+### Non-Live Tools
+
+- Chart / result panel / snapshots / Save PNG / Open Folder remain available in PAPER / REPLAY / BACKTEST.

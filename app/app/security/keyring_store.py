@@ -1,4 +1,5 @@
-# BUILD_ID: 2026-03-22_standard_license_core_v1
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
+# BUILD_ID: 2026-03-27_keyring_activation_local_reset_v1
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -11,7 +12,7 @@ from typing import Optional
 import keyring
 
 
-BUILD_ID = "2026-03-22_standard_license_core_v1"
+BUILD_ID = "2026-03-27_keyring_activation_local_reset_v1"
 logger = logging.getLogger(__name__)
 
 
@@ -400,6 +401,19 @@ def save_license_seat_key(seat_key: str) -> None:
 def clear_license_seat_key() -> None:
     ensure_secure_backend()
     _backend_delete_password(_backend_obj(), SERVICE_NAME, ACCOUNT_LICENSE_SEAT_KEY)
+
+
+def clear_license_device_id() -> None:
+    ensure_secure_backend()
+    _backend_delete_password(_backend_obj(), SERVICE_NAME, ACCOUNT_LICENSE_DEVICE_ID)
+
+
+def clear_license_local_test_state() -> None:
+    ensure_secure_backend()
+    backend = _backend_obj()
+    _backend_delete_password(backend, SERVICE_NAME, ACCOUNT_LICENSE_STATE)
+    _backend_delete_password(backend, SERVICE_NAME, ACCOUNT_LICENSE_SEAT_KEY)
+    _backend_delete_password(backend, SERVICE_NAME, ACCOUNT_LICENSE_DEVICE_ID)
 
 
 def load_license_device_id() -> str:

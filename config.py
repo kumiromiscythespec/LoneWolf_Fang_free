@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
 # BUILD_ID: 2026-03-21_runtime_layout_contract_v1
 # BUILD_ID: 2026-03-21_config_user_preset_search_root_v1
@@ -17,7 +18,11 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-03-21_runtime_logs_default_path_v1"
+BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
+
+BUILD_TIER = "FREE"
+FREE_ALLOWED_MODES = ("PAPER", "REPLAY", "BACKTEST")
+FREE_LIVE_SUPPORTED = False
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 

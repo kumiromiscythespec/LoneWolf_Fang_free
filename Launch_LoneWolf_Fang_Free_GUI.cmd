@@ -3,8 +3,6 @@ REM BUILD_ID: 2026-03-25_free_gui_launcher_v1
 setlocal
 
 set "ROOT=%~dp0"
-if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-if "%ROOT:~-1%"==":" set "ROOT=%ROOT%\"
 cd /d "%ROOT%"
 
 title LoneWolf Fang Free GUI

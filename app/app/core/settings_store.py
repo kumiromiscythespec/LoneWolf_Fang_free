@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_settings_collapsible_sections_v1
 # BUILD_ID: 2026-03-27_settings_live_chart_v2_0
@@ -14,7 +15,7 @@ from typing import Any, Dict
 from app.core.paths import ensure_runtime_dirs
 
 
-BUILD_ID = "2026-03-27_settings_collapsible_sections_v1"
+BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
 
 
 _CHART_MODES = {"Equity", "Net", "Max DD", "Trades", "Combined", "Candle"}
@@ -30,6 +31,13 @@ def _normalize_runtime_log_level(raw: str) -> str:
     if value in ("MINIMAL", "OPS", "DEBUG"):
         return value
     return "OPS"
+
+
+def _normalize_ui_language(raw: Any) -> str:
+    value = str(raw or "en").strip().lower()
+    if value in {"ja", "en"}:
+        return value
+    return "en"
 
 
 def _normalize_chart_mode(raw: str) -> str:
@@ -98,6 +106,7 @@ class AppSettings:
     gui_section_api_expanded: bool = False
     gui_section_activation_expanded: bool = False
     gui_section_diagnostics_expanded: bool = False
+    ui_language: str = "en"
 
 
 def load_settings() -> AppSettings:
@@ -152,6 +161,7 @@ def load_settings() -> AppSettings:
             raw.get("gui_section_diagnostics_expanded", s.gui_section_diagnostics_expanded),
             default=False,
         )
+        s.ui_language = _normalize_ui_language(raw.get("ui_language", s.ui_language))
         return s
     except Exception:
         return AppSettings()
@@ -178,6 +188,7 @@ def save_settings(s: AppSettings) -> None:
     data["gui_section_api_expanded"] = _normalize_bool(data.get("gui_section_api_expanded"), default=False)
     data["gui_section_activation_expanded"] = _normalize_bool(data.get("gui_section_activation_expanded"), default=False)
     data["gui_section_diagnostics_expanded"] = _normalize_bool(data.get("gui_section_diagnostics_expanded"), default=False)
+    data["ui_language"] = _normalize_ui_language(data.get("ui_language"))
     with open(p.settings_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 

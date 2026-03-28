@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_result_chart_snapshot_folder_align_v1
 # BUILD_ID: 2026-03-27_result_chart_candle_visual_finish_v2_1_1
@@ -39,7 +40,7 @@ from PySide6.QtWidgets import (
 from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
 
 
-BUILD_ID = "2026-03-27_result_chart_snapshot_folder_align_v1"
+BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
 
 CHART_MODE_EQUITY = "Equity"
 CHART_MODE_NET = "Net"
@@ -55,6 +56,22 @@ CHART_MODES = (
     CHART_MODE_COMBINED,
     CHART_MODE_CANDLE,
 )
+_CHART_MODE_TEXT_KEYS = {
+    CHART_MODE_EQUITY: "chart.mode.equity",
+    CHART_MODE_NET: "chart.mode.net",
+    CHART_MODE_MAX_DD: "chart.mode.max_dd",
+    CHART_MODE_TRADES: "chart.mode.trades",
+    CHART_MODE_COMBINED: "chart.mode.combined",
+    CHART_MODE_CANDLE: "chart.mode.candle",
+}
+_RESULT_EMPTY_MESSAGE_TEXT_KEYS = {
+    "No result data": "result.empty.no_result_data",
+    "No result data yet": "result.empty.no_result_data_yet",
+    "No chart-ready data": "result.empty.no_chart_ready_data",
+    "live/paper chart state parse failed": "result.empty.live_parse_failed",
+    "live/paper chart state present but candles are not ready": "result.empty.live_waiting_ready",
+    "Waiting for live/paper candles...": "result.empty.live_waiting",
+}
 
 _COLOR_BG = QColor("#050608")
 _COLOR_PANEL = QColor("#0c0f12")
@@ -64,6 +81,7 @@ _COLOR_TEXT = QColor("#d7dde3")
 _COLOR_MUTED = QColor("#7f8994")
 _COLOR_EQUITY = QColor("#f2f5f7")
 _COLOR_NET = QColor("#33d17a")
+_COLOR_NET_NEGATIVE = QColor("#ff5c5c")
 _COLOR_DD = QColor("#ff5c5c")
 _COLOR_TRADES = QColor("#4aa3ff")
 _COLOR_CANDLE_UP = QColor("#2dd4bf")
@@ -154,6 +172,8 @@ class ResultChartData:
     first_label: str = ""
     last_label: str = ""
     net_total: float | None = None
+    initial_equity: float | None = None
+    net_return_pct: float | None = None
     max_dd: float | None = None
     trades_count: int | None = None
     equity_points: list[float] = field(default_factory=list)
@@ -270,6 +290,38 @@ class _PriceTagRequest:
 def normalize_chart_mode(mode: str) -> str:
     text = str(mode or "").strip()
     return text if text in CHART_MODES else CHART_MODE_EQUITY
+
+
+def _lookup_ui_text(ui_texts: dict[str, str] | None, key: str, default: str) -> str:
+    if isinstance(ui_texts, dict):
+        value = str(ui_texts.get(key, "") or "")
+        if value:
+            return value
+    return str(default or "")
+
+
+def _display_chart_mode_text(mode: str, ui_texts: dict[str, str] | None = None) -> str:
+    normalized = normalize_chart_mode(mode)
+    key = _CHART_MODE_TEXT_KEYS.get(normalized, "")
+    return _lookup_ui_text(ui_texts, key, normalized) if key else normalized
+
+
+def _translate_result_message(
+    message: str,
+    ui_texts: dict[str, str] | None = None,
+    *,
+    default_key: str = "",
+    default_text: str = "",
+) -> str:
+    text = str(message or "").strip()
+    key = _RESULT_EMPTY_MESSAGE_TEXT_KEYS.get(text, "")
+    if key:
+        return _lookup_ui_text(ui_texts, key, text)
+    if text:
+        return text
+    if default_key:
+        return _lookup_ui_text(ui_texts, default_key, default_text)
+    return str(default_text or "")
 
 
 def _abs_path(path: str) -> str:
@@ -866,6 +918,20 @@ def _load_report_metrics(data: ResultChartData, report_path: str) -> None:
         elif mode:
             data.source_name = mode
     net_total = _safe_float(metrics.get("net_total"))
+    initial_equity = None
+    for raw in (
+        metrics.get("initial_equity"),
+        metrics.get("initial_balance"),
+        metrics.get("start_equity"),
+        metrics.get("starting_equity"),
+        (meta.get("initial_equity") if isinstance(meta, dict) else None),
+        payload.get("initial_equity"),
+        payload.get("initial"),
+    ):
+        initial_equity = _safe_float(raw)
+        if initial_equity is not None:
+            break
+    return_pct = _safe_float(metrics.get("return_pct_of_init"))
     max_dd = _safe_float(metrics.get("max_dd"))
     if max_dd is None:
         max_dd = _safe_float(metrics.get("max_dd_mtm"))
@@ -874,6 +940,12 @@ def _load_report_metrics(data: ResultChartData, report_path: str) -> None:
     trades = _safe_int(metrics.get("trades"))
     if net_total is not None:
         data.net_total = net_total
+    if initial_equity is not None:
+        data.initial_equity = initial_equity
+    if return_pct is None and net_total is not None and initial_equity is not None and abs(float(initial_equity)) > 1e-12:
+        return_pct = (float(net_total) / float(initial_equity)) * 100.0
+    if return_pct is not None:
+        data.net_return_pct = return_pct
     if max_dd is not None:
         data.max_dd = max_dd
     if trades is not None:
@@ -902,6 +974,8 @@ def _load_equity_points(data: ResultChartData, equity_path: str) -> None:
         return
     data.equity_points = points
     baseline = float(points[0])
+    if data.initial_equity is None and abs(float(baseline)) > 1e-12:
+        data.initial_equity = baseline
     data.net_points = [float(value) - baseline for value in points]
     peak = float(points[0])
     drawdowns: list[float] = []
@@ -1061,6 +1135,37 @@ def _format_net_value(value: float | None) -> str:
     return f"{float(value):+,.2f}"
 
 
+def _net_value_color(value: float | None) -> QColor:
+    if value is None:
+        return _COLOR_TEXT
+    numeric = float(value)
+    if abs(numeric) <= 1e-12:
+        return _COLOR_TEXT
+    return _COLOR_NET if numeric > 0.0 else _COLOR_NET_NEGATIVE
+
+
+def _resolve_net_return_pct(data: ResultChartData) -> float | None:
+    if not isinstance(data, ResultChartData):
+        return None
+    if data.net_total is not None and data.initial_equity is not None and abs(float(data.initial_equity)) > 1e-12:
+        return (float(data.net_total) / float(data.initial_equity)) * 100.0
+    if data.net_return_pct is None:
+        return None
+    return float(data.net_return_pct)
+
+
+def _format_net_with_pct(data: ResultChartData) -> str:
+    net_text = _format_net_value(data.net_total)
+    return_pct = _resolve_net_return_pct(data)
+    if return_pct is None:
+        return net_text
+    if abs(float(return_pct)) <= 1e-12:
+        pct_text = "0.0%"
+    else:
+        pct_text = f"{_trim_decimal_text(f'{float(return_pct):+.1f}')}%"
+    return f"{net_text} <span style='font-size:12px; font-weight:600;'>({pct_text})</span>"
+
+
 def _format_drawdown_value(value: float | None) -> str:
     if value is None:
         return "--"
@@ -1187,6 +1292,7 @@ class ResultChartWidget(QWidget):
         super().__init__(parent)
         self._mode = CHART_MODE_EQUITY
         self._data = ResultChartData()
+        self._ui_texts: dict[str, str] = {}
         self._initial_view_state = self._default_view_state_for_mode(self._mode)
         self._view_state = _ChartViewState(
             x_margin_ratio=self._initial_view_state.x_margin_ratio,
@@ -1207,6 +1313,10 @@ class ResultChartWidget(QWidget):
 
     def result_data(self) -> ResultChartData:
         return self._data
+
+    def set_ui_texts(self, texts: dict[str, str] | None) -> None:
+        self._ui_texts = dict(texts or {})
+        self.update()
 
     def set_chart_mode(self, mode: str) -> None:
         self._mode = normalize_chart_mode(mode)
@@ -1262,7 +1372,11 @@ class ResultChartWidget(QWidget):
 
         title_rect = QRectF(outer.left() + 14.0, outer.top() + 10.0, outer.width() - 28.0, 20.0)
         painter.setPen(_COLOR_TEXT)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._mode)
+        painter.drawText(
+            title_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            _display_chart_mode_text(self._mode, self._ui_texts),
+        )
         if self._data.source_name:
             painter.setPen(_COLOR_MUTED)
             painter.drawText(title_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._data.source_name)
@@ -1276,7 +1390,16 @@ class ResultChartWidget(QWidget):
 
         if not series:
             painter.setPen(_COLOR_MUTED)
-            painter.drawText(chart_rect, Qt.AlignmentFlag.AlignCenter, self._data.empty_message or "No result data")
+            painter.drawText(
+                chart_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                _translate_result_message(
+                    self._data.empty_message,
+                    self._ui_texts,
+                    default_key="result.empty.no_result_data",
+                    default_text="No result data",
+                ),
+            )
             self._draw_footer(painter, outer)
             return
 
@@ -1412,27 +1535,27 @@ class ResultChartWidget(QWidget):
     def _series_for_mode(self, mode: str) -> list[_ChartSeries]:
         if mode == CHART_MODE_EQUITY:
             if self._data.equity_points:
-                return [_ChartSeries("Equity", self._data.equity_points, _COLOR_EQUITY)]
+                return [_ChartSeries(_display_chart_mode_text(CHART_MODE_EQUITY, self._ui_texts), self._data.equity_points, _COLOR_EQUITY)]
             return []
         if mode == CHART_MODE_NET:
             if self._data.net_points:
-                return [_ChartSeries("Net", self._data.net_points, _COLOR_NET)]
+                return [_ChartSeries(_display_chart_mode_text(CHART_MODE_NET, self._ui_texts), self._data.net_points, _COLOR_NET)]
             return []
         if mode == CHART_MODE_MAX_DD:
             if self._data.drawdown_points:
-                return [_ChartSeries("Max DD", self._data.drawdown_points, _COLOR_DD, fill=True)]
+                return [_ChartSeries(_display_chart_mode_text(CHART_MODE_MAX_DD, self._ui_texts), self._data.drawdown_points, _COLOR_DD, fill=True)]
             return []
         if mode == CHART_MODE_TRADES:
             if self._data.trade_points:
-                return [_ChartSeries("Trades", self._data.trade_points, _COLOR_TRADES)]
+                return [_ChartSeries(_display_chart_mode_text(CHART_MODE_TRADES, self._ui_texts), self._data.trade_points, _COLOR_TRADES)]
             return []
         combined: list[_ChartSeries] = []
         if self._data.net_points:
-            combined.append(_ChartSeries("Net", _normalized_points(self._data.net_points), _COLOR_NET))
+            combined.append(_ChartSeries(_display_chart_mode_text(CHART_MODE_NET, self._ui_texts), _normalized_points(self._data.net_points), _COLOR_NET))
         if self._data.drawdown_points:
-            combined.append(_ChartSeries("Max DD", _normalized_points(self._data.drawdown_points, absolute=True), _COLOR_DD))
+            combined.append(_ChartSeries(_display_chart_mode_text(CHART_MODE_MAX_DD, self._ui_texts), _normalized_points(self._data.drawdown_points, absolute=True), _COLOR_DD))
         if self._data.trade_points:
-            combined.append(_ChartSeries("Trades", _normalized_points(self._data.trade_points), _COLOR_TRADES))
+            combined.append(_ChartSeries(_display_chart_mode_text(CHART_MODE_TRADES, self._ui_texts), _normalized_points(self._data.trade_points), _COLOR_TRADES))
         return combined
 
     def _range_for_series(self, series: list[_ChartSeries], mode: str) -> tuple[float, float]:
@@ -1487,7 +1610,11 @@ class ResultChartWidget(QWidget):
         state = self._data.live_chart_state if isinstance(self._data.live_chart_state, LiveChartState) else None
         title_rect = QRectF(outer.left() + 14.0, outer.top() + 10.0, outer.width() - 28.0, 20.0)
         painter.setPen(_COLOR_TEXT)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, CHART_MODE_CANDLE)
+        painter.drawText(
+            title_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            _display_chart_mode_text(CHART_MODE_CANDLE, self._ui_texts),
+        )
         if state is not None and state.symbol:
             painter.setPen(_COLOR_MUTED)
             painter.drawText(title_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, state.symbol)
@@ -1500,7 +1627,16 @@ class ResultChartWidget(QWidget):
         candles = list((state.candles if state is not None else [])[-_CANDLE_MAX_BARS:])
         if not candles:
             painter.setPen(_COLOR_MUTED)
-            painter.drawText(chart_rect, Qt.AlignmentFlag.AlignCenter, self._data.empty_message or "Waiting for live/paper candles...")
+            painter.drawText(
+                chart_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                _translate_result_message(
+                    self._data.empty_message,
+                    self._ui_texts,
+                    default_key="result.empty.live_waiting",
+                    default_text="Waiting for live/paper candles...",
+                ),
+            )
             if state is not None:
                 diag_parts: list[str] = []
                 if state.candle_source:
@@ -2052,6 +2188,7 @@ class ResultPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._data = ResultChartData()
+        self._ui_texts: dict[str, str] = {}
         self.setObjectName("ResultPanel")
         self.setMinimumWidth(280)
         self.setStyleSheet(
@@ -2097,8 +2234,7 @@ class ResultPanel(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(list(CHART_MODES))
-        self.mode_combo.setCurrentText(CHART_MODE_EQUITY)
+        self._rebuild_mode_combo()
         _apply_dark_combo_popup(self.mode_combo)
         self.btn_refresh = QPushButton("Refresh")
         self.btn_expand = QPushButton("Expand")
@@ -2129,12 +2265,14 @@ class ResultPanel(QWidget):
         self.chart_widget = ResultChartWidget()
         content_layout.addWidget(self.chart_widget, 1)
 
-        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        self.chart_widget.set_ui_texts(self._ui_texts)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.btn_refresh.clicked.connect(self.refreshRequested.emit)
         self.btn_expand.clicked.connect(self.expandRequested.emit)
         self.btn_open_folder.clicked.connect(self.openFolderRequested.emit)
         self.btn_save.clicked.connect(self.saveRequested.emit)
 
+        self._apply_ui_texts()
         self._refresh_kpis()
 
     def _make_kpi_label(self) -> QLabel:
@@ -2151,10 +2289,52 @@ class ResultPanel(QWidget):
             f"<div style='color:{color.name()}; font-size:16px; font-weight:700;'>{value}</div>"
         )
 
+    def _text(self, key: str, default: str) -> str:
+        return _lookup_ui_text(self._ui_texts, key, default)
+
+    def _rebuild_mode_combo(self) -> None:
+        current = normalize_chart_mode(self.mode_combo.currentData() or self.mode_combo.currentText() or CHART_MODE_EQUITY)
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.clear()
+        for mode in CHART_MODES:
+            self.mode_combo.addItem(_display_chart_mode_text(mode, self._ui_texts), mode)
+        idx = max(0, self.mode_combo.findData(current))
+        self.mode_combo.setCurrentIndex(idx)
+        self.mode_combo.blockSignals(False)
+
+    def _apply_ui_texts(self) -> None:
+        self._rebuild_mode_combo()
+        self.btn_refresh.setText(self._text("action.refresh", "Refresh"))
+        self.btn_expand.setText(self._text("action.expand", "Expand"))
+        self.btn_open_folder.setText(self._text("action.open_folder", "Open Folder"))
+        self.btn_save.setText(self._text("action.save_png", "Save PNG"))
+        self.chart_widget.set_ui_texts(self._ui_texts)
+
+    def set_ui_texts(self, texts: dict[str, str] | None) -> None:
+        self._ui_texts = dict(texts or {})
+        self._apply_ui_texts()
+        self._refresh_kpis()
+        self.update()
+
     def _refresh_kpis(self) -> None:
-        self._set_kpi(self.kpi_net, title="net", value=_format_net_value(self._data.net_total), color=_COLOR_NET)
-        self._set_kpi(self.kpi_max_dd, title="max_dd", value=_format_drawdown_value(self._data.max_dd), color=_COLOR_DD)
-        self._set_kpi(self.kpi_trades, title="trades", value=_format_trades_value(self._data.trades_count), color=_COLOR_TRADES)
+        self._set_kpi(
+            self.kpi_net,
+            title=self._text("result.kpi.net", "net"),
+            value=_format_net_with_pct(self._data),
+            color=_net_value_color(self._data.net_total),
+        )
+        self._set_kpi(
+            self.kpi_max_dd,
+            title=self._text("result.kpi.max_dd", "max_dd"),
+            value=_format_drawdown_value(self._data.max_dd),
+            color=_COLOR_DD,
+        )
+        self._set_kpi(
+            self.kpi_trades,
+            title=self._text("result.kpi.trades", "trades"),
+            value=_format_trades_value(self._data.trades_count),
+            color=_COLOR_TRADES,
+        )
 
     def set_result_data(self, data: ResultChartData) -> None:
         self._data = data if isinstance(data, ResultChartData) else ResultChartData()
@@ -2165,13 +2345,14 @@ class ResultPanel(QWidget):
         return self._data
 
     def chart_mode(self) -> str:
-        return normalize_chart_mode(self.mode_combo.currentText())
+        return normalize_chart_mode(self.mode_combo.currentData() or self.mode_combo.currentText())
 
     def set_chart_mode(self, mode: str) -> None:
         target = normalize_chart_mode(mode)
-        self.mode_combo.setCurrentText(target)
+        idx = self.mode_combo.findData(target)
+        self.mode_combo.setCurrentIndex(max(0, idx))
 
-    def _on_mode_changed(self, mode: str) -> None:
-        current = normalize_chart_mode(mode)
+    def _on_mode_changed(self, _index: int) -> None:
+        current = self.chart_mode()
         self.chart_widget.set_chart_mode(current)
         self.modeChanged.emit(current)

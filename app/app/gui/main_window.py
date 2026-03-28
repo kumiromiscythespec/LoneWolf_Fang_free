@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_main_window_activation_local_reset_v1
 # BUILD_ID: 2026-03-27_main_window_collapsible_sections_v1
@@ -30,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -116,7 +118,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
+BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
 logger = logging.getLogger(__name__)
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
@@ -129,6 +131,151 @@ DEFAULT_SECTION_VERTICAL_SPACING = 8
 COMPACT_SECTION_VERTICAL_SPACING = 6
 DEFAULT_MAIN_WINDOW_WIDTH = 840
 DEFAULT_MAIN_WINDOW_HEIGHT = 620
+_UI_LANGUAGE_OPTIONS = (("ja", "日本語"), ("en", "English"))
+_UI_TEXTS = {
+    "ja": {
+        "window.title": "LoneWolf Fang Free",
+        "label.preset": "プリセット",
+        "label.exchange": "取引所",
+        "label.symbol": "通貨ペア",
+        "label.run_mode": "実行モード",
+        "label.log_level": "ログレベル",
+        "label.language": "表示言語",
+        "label.dataset_root": "データセットルート",
+        "label.tf": "TF",
+        "label.since": "Since",
+        "label.until": "Until",
+        "label.enable_report": "レポートを有効化",
+        "label.report_out": "出力先",
+        "label.resolved": "解決後パス",
+        "label.key": "キー",
+        "label.secret": "シークレット",
+        "label.from": "From",
+        "label.to": "To",
+        "label.force_redownload": "再ダウンロードを強制",
+        "group.replay": "Replay / Backtest / データセット",
+        "group.report": "レポート",
+        "group.api_credentials": "API Credentials",
+        "group.diagnostics_pipeline": "Diagnostics / Pipeline",
+        "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
+        "placeholder.dataset_root": "<PREFIX>_5m と <PREFIX>_1h を含むデータセットルートを選択",
+        "placeholder.api_key": "{exchange} key",
+        "placeholder.api_secret": "{exchange} secret",
+        "placeholder.yyyy_mm": "YYYY-MM",
+        "action.select_replay_data": "Replay Data を選択...",
+        "action.select_dataset_root": "Dataset Root を選択...",
+        "action.start_replay": "Replay 実行",
+        "action.start_backtest": "Backtest 実行",
+        "action.start_paper": "Paper 開始",
+        "action.run_diagnostics": "Diagnostics 実行",
+        "action.create_support_bundle": "Support Bundle 作成",
+        "action.download_precompute": "Download + Precompute",
+        "action.save_settings": "設定を保存",
+        "action.clear_api_keys": "API Keys をクリア",
+        "action.stop": "停止",
+        "action.browse": "参照...",
+        "action.open_folder": "フォルダを開く",
+        "action.save_png": "PNG保存",
+        "action.expand": "拡大",
+        "action.fit_all": "全体表示",
+        "action.reset_view": "表示をリセット",
+        "action.close": "閉じる",
+        "action.refresh": "更新",
+        "chart.mode.equity": "Equity",
+        "chart.mode.net": "Net",
+        "chart.mode.max_dd": "Max DD",
+        "chart.mode.trades": "Trades",
+        "chart.mode.combined": "Combined",
+        "chart.mode.candle": "Candle",
+        "chart.window_title": "Result Chart - {mode}",
+        "result.kpi.net": "net",
+        "result.kpi.max_dd": "max_dd",
+        "result.kpi.trades": "trades",
+        "result.empty.no_result_data": "結果データがありません",
+        "result.empty.no_result_data_yet": "結果データはまだありません",
+        "result.empty.no_chart_ready_data": "チャート表示可能なデータがありません",
+        "result.empty.live_parse_failed": "paper チャート状態の解析に失敗しました",
+        "result.empty.live_waiting_ready": "paper チャート状態はありますが、ローソク足がまだ準備できていません",
+        "result.empty.live_waiting": "paper のローソク足を待機中...",
+        "dialog.missing_api_keys.title": "APIキー不足",
+        "dialog.missing_api_keys.message": "{exchange} の API Key/Secret を入力して Save を押してください。",
+        "dialog.replay_start_failed.title": "Replay起動失敗",
+        "dialog.backtest_start_failed.title": "Backtest起動失敗",
+        "dialog.start_failed.title": "起動失敗",
+        "dialog.save_png.title": "Save PNG",
+    },
+    "en": {
+        "window.title": "LoneWolf Fang Free",
+        "label.preset": "Preset",
+        "label.exchange": "Exchange",
+        "label.symbol": "Symbol",
+        "label.run_mode": "Run Mode",
+        "label.log_level": "Log Level",
+        "label.language": "Language",
+        "label.dataset_root": "Dataset Root",
+        "label.tf": "TF",
+        "label.since": "Since",
+        "label.until": "Until",
+        "label.enable_report": "Enable report",
+        "label.report_out": "Report Out",
+        "label.resolved": "Resolved",
+        "label.key": "Key",
+        "label.secret": "Secret",
+        "label.from": "From",
+        "label.to": "To",
+        "label.force_redownload": "Force re-download",
+        "group.replay": "Replay / Backtest / Dataset",
+        "group.report": "Report",
+        "group.api_credentials": "API Credentials",
+        "group.diagnostics_pipeline": "Diagnostics / Pipeline",
+        "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
+        "placeholder.dataset_root": "Select dataset root containing <PREFIX>_5m and <PREFIX>_1h",
+        "placeholder.api_key": "{exchange} key",
+        "placeholder.api_secret": "{exchange} secret",
+        "placeholder.yyyy_mm": "YYYY-MM",
+        "action.select_replay_data": "Select Replay Data...",
+        "action.select_dataset_root": "Select Dataset Root...",
+        "action.start_replay": "Run Replay",
+        "action.start_backtest": "Run Backtest",
+        "action.start_paper": "Start Paper",
+        "action.run_diagnostics": "Run Diagnostics",
+        "action.create_support_bundle": "Create Support Bundle",
+        "action.download_precompute": "Download + Precompute",
+        "action.save_settings": "Save Settings",
+        "action.clear_api_keys": "Clear API Keys",
+        "action.stop": "Stop",
+        "action.browse": "Browse...",
+        "action.open_folder": "Open Folder",
+        "action.save_png": "Save PNG",
+        "action.expand": "Expand",
+        "action.fit_all": "Fit All",
+        "action.reset_view": "Reset View",
+        "action.close": "Close",
+        "action.refresh": "Refresh",
+        "chart.mode.equity": "Equity",
+        "chart.mode.net": "Net",
+        "chart.mode.max_dd": "Max DD",
+        "chart.mode.trades": "Trades",
+        "chart.mode.combined": "Combined",
+        "chart.mode.candle": "Candle",
+        "chart.window_title": "Result Chart - {mode}",
+        "result.kpi.net": "net",
+        "result.kpi.max_dd": "max_dd",
+        "result.kpi.trades": "trades",
+        "result.empty.no_result_data": "No result data",
+        "result.empty.no_result_data_yet": "No result data yet",
+        "result.empty.no_chart_ready_data": "No chart-ready data",
+        "result.empty.live_parse_failed": "paper chart state parse failed",
+        "result.empty.live_waiting_ready": "paper chart state present but candles are not ready",
+        "result.empty.live_waiting": "Waiting for paper candles...",
+        "dialog.missing_api_keys.title": "Missing API Keys",
+        "dialog.missing_api_keys.message": "Please enter {exchange} API Key/Secret and click Save.",
+        "dialog.replay_start_failed.title": "Replay start failed",
+        "dialog.backtest_start_failed.title": "Backtest start failed",
+        "dialog.start_failed.title": "Start failed",
+        "dialog.save_png.title": "Save PNG",
+    },
+}
 
 
 def _mask_secret(s: str) -> str:
@@ -153,6 +300,13 @@ def _normalize_run_mode(raw: str) -> str:
 def _normalize_runtime_log_level(raw: str) -> str:
     _ = raw
     return "MINIMAL"
+
+
+def _normalize_ui_language(raw: str) -> str:
+    value = str(raw or "en").strip().lower()
+    if value in {"ja", "en"}:
+        return value
+    return "en"
 
 
 def _default_runtime_log_level() -> str:
@@ -180,6 +334,7 @@ class MainWindow(QWidget):
 
         self._proc: Optional[subprocess.Popen] = None
         self._settings: AppSettings = load_settings()
+        self._ui_language: str = _normalize_ui_language(getattr(self._settings, "ui_language", "en"))
         self._chart_ui_state = get_gui_chart_state(self._settings)
         self._exchange_id: str = _normalize_exchange_id(getattr(self._settings, "exchange_id", "coincheck"))
         config_symbols = _config_symbols()
@@ -207,7 +362,12 @@ class MainWindow(QWidget):
         self._live_log_path: str = ""
         self._last_replay_report_path: str = ""
         self._last_replay_trade_log_path: str = ""
+        self._manual_stop_requested: bool = False
+        self._manual_stop_role: str = ""
+        self._manual_stop_requested_at: float = 0.0
+        self._stop_request_in_flight: bool = False
         self._credential_inputs: dict[str, dict[str, QLineEdit]] = {}
+        self._credential_ui_refs: dict[str, dict[str, object]] = {}
         self._credential_page_index: dict[str, int] = {}
         self._titlebar_dark_applied = False
         self._chart_dialog: ChartDialog | None = None
@@ -279,6 +439,12 @@ class MainWindow(QWidget):
         self.log_level = QComboBox()
         self.log_level.addItems(list(_RUNTIME_LOG_LEVEL_VALUES))
         self.log_level.setCurrentText(self._log_level)
+        self.language_label = QLabel("Language")
+        self.language = QComboBox()
+        for code, label in _UI_LANGUAGE_OPTIONS:
+            self.language.addItem(label, code)
+        idx_language = max(0, self.language.findData(self._ui_language))
+        self.language.setCurrentIndex(idx_language)
         top_form.addLayout(self.controls_layout)
 
         self.free_build_note = QLabel(FREE_BUILD_NOTE)
@@ -293,7 +459,8 @@ class MainWindow(QWidget):
 
         row_replay_root = QHBoxLayout()
         row_replay_root.setSpacing(8)
-        row_replay_root.addWidget(QLabel("Dataset Root"))
+        self.replay_data_root_label = QLabel("Dataset Root")
+        row_replay_root.addWidget(self.replay_data_root_label)
         self.replay_data = QLineEdit(self._replay_data_path)
         self.replay_data.setPlaceholderText("Select dataset root containing <PREFIX>_5m and <PREFIX>_1h")
         self.replay_data.setReadOnly(True)
@@ -315,13 +482,17 @@ class MainWindow(QWidget):
         self.replay_until_ym = QLineEdit("2025-12")
         self.replay_until_ym.setPlaceholderText("YYYY-MM")
         self.btn_run_replay = QPushButton("Run Replay")
-        row_replay_controls.addWidget(QLabel("Symbol"))
+        self.replay_symbol_field_label = QLabel("Symbol")
+        row_replay_controls.addWidget(self.replay_symbol_field_label)
         row_replay_controls.addWidget(self.replay_symbol)
-        row_replay_controls.addWidget(QLabel("TF"))
+        self.replay_tf_label = QLabel("TF")
+        row_replay_controls.addWidget(self.replay_tf_label)
         row_replay_controls.addWidget(self.replay_tf)
-        row_replay_controls.addWidget(QLabel("Since"))
+        self.replay_since_label = QLabel("Since")
+        row_replay_controls.addWidget(self.replay_since_label)
         row_replay_controls.addWidget(self.replay_since_ym)
-        row_replay_controls.addWidget(QLabel("Until"))
+        self.replay_until_label = QLabel("Until")
+        row_replay_controls.addWidget(self.replay_until_label)
         row_replay_controls.addWidget(self.replay_until_ym)
         row_replay_controls.addStretch(1)
         row_replay_controls.addWidget(self.btn_run_replay)
@@ -377,7 +548,8 @@ class MainWindow(QWidget):
 
             key_row = QHBoxLayout()
             key_row.setSpacing(8)
-            key_row.addWidget(QLabel("Key"))
+            key_label = QLabel("Key")
+            key_row.addWidget(key_label)
             key_edit = QLineEdit()
             key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
             key_edit.setClearButtonEnabled(True)
@@ -387,7 +559,8 @@ class MainWindow(QWidget):
 
             secret_row = QHBoxLayout()
             secret_row.setSpacing(8)
-            secret_row.addWidget(QLabel("Secret"))
+            secret_label = QLabel("Secret")
+            secret_row.addWidget(secret_label)
             secret_edit = QLineEdit()
             secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
             secret_edit.setClearButtonEnabled(True)
@@ -398,6 +571,13 @@ class MainWindow(QWidget):
             index = self.creds_stack.addWidget(page)
             self._credential_page_index[str(item.id)] = int(index)
             self._credential_inputs[str(item.id)] = {"key": key_edit, "secret": secret_edit}
+            self._credential_ui_refs[str(item.id)] = {
+                "exchange_label": str(item.label),
+                "key_label": key_label,
+                "secret_label": secret_label,
+                "key_edit": key_edit,
+                "secret_edit": secret_edit,
+            }
 
             creds = load_creds(str(item.id))
             if creds is not None:
@@ -520,6 +700,7 @@ class MainWindow(QWidget):
         self.bottom_splitter.setSizes([560, 320])
         self._restore_chart_panel_state()
         self._set_log_minimum_height(bool(self._compact_mode))
+        self._apply_ui_language()
 
         # Signals
         self.btn_save.clicked.connect(self.on_save)
@@ -547,6 +728,7 @@ class MainWindow(QWidget):
         self.symbol.currentTextChanged.connect(self._on_symbol_changed)
         self.run_mode.currentTextChanged.connect(self._on_run_mode_changed)
         self.log_level.currentTextChanged.connect(self._on_log_level_changed)
+        self.language.currentIndexChanged.connect(self._on_ui_language_changed)
         self.report_group.toggled.connect(self.report_container.setVisible)
         self.creds_group.toggled.connect(self.creds_stack.setVisible)
         self.activation_group.toggled.connect(self.activation_container.setVisible)
@@ -618,9 +800,11 @@ class MainWindow(QWidget):
             self.controls_layout.addWidget(self.symbol_label, 0, 4)
             self.controls_layout.addWidget(self.symbol, 0, 5)
             self.controls_layout.addWidget(self.run_mode_label, 1, 0)
-            self.controls_layout.addWidget(self.run_mode, 1, 1, 1, 2)
-            self.controls_layout.addWidget(self.log_level_label, 1, 3)
-            self.controls_layout.addWidget(self.log_level, 1, 4, 1, 2)
+            self.controls_layout.addWidget(self.run_mode, 1, 1)
+            self.controls_layout.addWidget(self.log_level_label, 1, 2)
+            self.controls_layout.addWidget(self.log_level, 1, 3)
+            self.controls_layout.addWidget(self.language_label, 1, 4)
+            self.controls_layout.addWidget(self.language, 1, 5)
             self.controls_layout.setColumnStretch(1, 1)
             self.controls_layout.setColumnStretch(3, 1)
             self.controls_layout.setColumnStretch(5, 1)
@@ -635,12 +819,14 @@ class MainWindow(QWidget):
         self.controls_layout.addWidget(self.run_mode, 0, 7)
         self.controls_layout.addWidget(self.log_level_label, 0, 8)
         self.controls_layout.addWidget(self.log_level, 0, 9)
+        self.controls_layout.addWidget(self.language_label, 0, 10)
+        self.controls_layout.addWidget(self.language, 0, 11)
         self.controls_layout.setColumnStretch(1, 1)
         self.controls_layout.setColumnStretch(3, 1)
         self.controls_layout.setColumnStretch(5, 1)
         self.controls_layout.setColumnStretch(7, 1)
         self.controls_layout.setColumnStretch(9, 1)
-        self.controls_layout.setColumnStretch(10, 1)
+        self.controls_layout.setColumnStretch(11, 1)
 
     def _sync_window_size_settings(self) -> None:
         if not isinstance(self._settings, AppSettings):
@@ -768,6 +954,97 @@ class MainWindow(QWidget):
             self._clear_brand_logo()
             return
         self._refresh_brand_logo(force=True)
+
+    def _ui_text_map(self) -> dict[str, str]:
+        base = dict(_UI_TEXTS.get("en", {}))
+        base.update(_UI_TEXTS.get(self._ui_language, {}))
+        return base
+
+    def tr(self, key: str, **kwargs) -> str:
+        text = str(self._ui_text_map().get(key, key))
+        if kwargs:
+            try:
+                return text.format(**kwargs)
+            except Exception:
+                return text
+        return text
+
+    def _selected_ui_language(self) -> str:
+        try:
+            return _normalize_ui_language(self.language.currentData() or self._ui_language)
+        except Exception:
+            return _normalize_ui_language(self._ui_language)
+
+    def _apply_ui_language(self) -> None:
+        self.setWindowTitle(self.tr("window.title"))
+        self.preset_label.setText(self.tr("label.preset"))
+        self.exchange_label.setText(self.tr("label.exchange"))
+        self.symbol_label.setText(self.tr("label.symbol"))
+        self.run_mode_label.setText(self.tr("label.run_mode"))
+        self.log_level_label.setText(self.tr("label.log_level"))
+        self.language_label.setText(self.tr("label.language"))
+        self.free_build_note.setText(self.tr("note.free_build"))
+        self.replay_group.setTitle(self.tr("group.replay"))
+        self.replay_data_root_label.setText(self.tr("label.dataset_root"))
+        self.replay_data.setPlaceholderText(self.tr("placeholder.dataset_root"))
+        self.btn_select_replay.setText(self.tr("action.select_replay_data"))
+        self.btn_select_replay_dir.setText(self.tr("action.select_dataset_root"))
+        self.replay_symbol_field_label.setText(self.tr("label.symbol"))
+        self.replay_tf_label.setText(self.tr("label.tf"))
+        self.replay_since_label.setText(self.tr("label.since"))
+        self.replay_until_label.setText(self.tr("label.until"))
+        self.replay_since_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
+        self.replay_until_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
+        self.btn_run_replay.setText(self.tr("action.start_replay"))
+        self.report_group.setTitle(self.tr("group.report"))
+        self.report_enabled.setText(self.tr("label.enable_report"))
+        self.report_out_label.setText(self.tr("label.report_out"))
+        self.btn_report_out.setText(self.tr("action.browse"))
+        self.report_resolved_label.setText(self.tr("label.resolved"))
+        self.creds_group.setTitle(self.tr("group.api_credentials"))
+        for exchange_id, refs in self._credential_ui_refs.items():
+            exchange_label = str(refs.get("exchange_label", "") or exchange_id)
+            key_label = refs.get("key_label")
+            secret_label = refs.get("secret_label")
+            key_edit = refs.get("key_edit")
+            secret_edit = refs.get("secret_edit")
+            if isinstance(key_label, QLabel):
+                key_label.setText(self.tr("label.key"))
+            if isinstance(secret_label, QLabel):
+                secret_label.setText(self.tr("label.secret"))
+            if isinstance(key_edit, QLineEdit):
+                key_edit.setPlaceholderText(self.tr("placeholder.api_key", exchange=exchange_label))
+            if isinstance(secret_edit, QLineEdit):
+                secret_edit.setPlaceholderText(self.tr("placeholder.api_secret", exchange=exchange_label))
+        self.tools_group.setTitle(self.tr("group.diagnostics_pipeline"))
+        self.btn_diag.setText(self.tr("action.run_diagnostics"))
+        self.btn_bundle.setText(self.tr("action.create_support_bundle"))
+        self.pipeline_from_label.setText(self.tr("label.from"))
+        self.pipeline_from_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
+        self.pipeline_to_label.setText(self.tr("label.to"))
+        self.pipeline_to_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
+        self.pipeline_force.setText(self.tr("label.force_redownload"))
+        self.btn_pipeline.setText(self.tr("action.download_precompute"))
+        self.btn_save.setText(self.tr("action.save_settings"))
+        self.btn_clear.setText(self.tr("action.clear_api_keys"))
+        self.btn_stop.setText(self.tr("action.stop"))
+        self._sync_mode_ui()
+        self.result_panel.set_ui_texts(self._ui_text_map())
+        if self._chart_dialog is not None:
+            self._chart_dialog.set_ui_texts(self._ui_text_map())
+
+    def _on_ui_language_changed(self, _index: int) -> None:
+        selected = self._selected_ui_language()
+        if selected == self._ui_language:
+            return
+        self._ui_language = selected
+        if not isinstance(self._settings, AppSettings):
+            self._settings = AppSettings()
+        self._settings.ui_language = self._ui_language
+        self._apply_ui_language()
+        self._update_chart_ui_state()
+        save_settings(self._settings)
+        self._save_run_mode_to_settings()
 
     def _license_base_url(self) -> str:
         try:
@@ -1328,20 +1605,24 @@ class MainWindow(QWidget):
         self.creds_group.setVisible(mode == "PAPER")
         self.activation_group.setVisible(False)
         if mode == "REPLAY":
-            self.btn_start.setText("Run Replay")
+            self.btn_start.setText(self.tr("action.start_replay"))
         elif mode == "BACKTEST":
-            self.btn_start.setText("Run Backtest")
+            self.btn_start.setText(self.tr("action.start_backtest"))
         else:
-            self.btn_start.setText("Start Paper")
+            self.btn_start.setText(self.tr("action.start_paper"))
 
     def _on_run_mode_changed(self, _value: str) -> None:
         self._run_mode = self._selected_run_mode()
         self._sync_mode_ui()
+        self._last_chart_state_diag_key = None
+        self._last_chart_state_reader_path = ""
         if self._run_mode != "PAPER":
             self._restore_chart_mode_after_live_candle()
-            self._last_chart_state_diag_key = None
             self._set_live_chart_state(None, auto_prefer_candle=False)
+            self._refresh_result_panel()
             return
+        self._set_live_chart_state(None, auto_prefer_candle=False)
+        self._refresh_result_panel()
         self._poll_live_chart_state()
 
     def _on_log_level_changed(self, _value: str) -> None:
@@ -1457,11 +1738,42 @@ class MainWindow(QWidget):
             self._append(f"[results] summary unavailable (replay report read error: {e})\n")
 
     def _load_result_chart_data(self):
+        run_mode = self._selected_run_mode()
+        if run_mode == "PAPER":
+            return self._build_runtime_result_panel_data(run_mode=run_mode), []
         return load_latest_result_chart_data(
             self._paths.exports_dir,
             repo_root=self._paths.repo_root,
             last_run_payload=self._load_last_run_payload(),
         )
+
+    def _build_runtime_result_panel_data(self, *, run_mode: str = "") -> ResultChartData:
+        mode = str(run_mode or self._selected_run_mode() or "PAPER").strip().upper() or "PAPER"
+        symbol = str(self._selected_symbol() or self._default_symbol or "").strip()
+        source_name = f"{symbol} / {mode}" if symbol else mode
+        return ResultChartData(
+            source_name=source_name,
+            symbol=symbol,
+            net_total=0.0,
+            max_dd=0.0,
+            trades_count=0,
+            empty_message="Waiting for live/paper candles...",
+        )
+
+    def _clear_manual_stop_state(self) -> None:
+        self._manual_stop_requested = False
+        self._manual_stop_role = ""
+        self._manual_stop_requested_at = 0.0
+        self._stop_request_in_flight = False
+
+    def _is_manual_stop_exit(self, role: str) -> bool:
+        if not self._manual_stop_requested:
+            return False
+        expected_role = str(self._manual_stop_role or "").strip()
+        if expected_role and str(role or "").strip() != expected_role:
+            return False
+        age_sec = max(0.0, time.time() - float(self._manual_stop_requested_at or 0.0))
+        return age_sec <= 30.0
 
     def _apply_result_panel_data(self, data: ResultChartData) -> None:
         payload = data if isinstance(data, ResultChartData) else ResultChartData()
@@ -1750,12 +2062,12 @@ class MainWindow(QWidget):
             ok = bool(widget.save_png(path, QSize(1600, 900)))
         except Exception as exc:
             self._append(f"[result] save failed error={exc}\n")
-            QMessageBox.warning(self, "Save PNG", f"Could not save chart PNG.\n{exc}")
+            QMessageBox.warning(self, self.tr("dialog.save_png.title"), f"Could not save chart PNG.\n{exc}")
             return
         if not ok:
             msg = f"Could not save chart PNG.\n{path}"
             self._append(f"[result] save failed path={path}\n")
-            QMessageBox.warning(self, "Save PNG", msg)
+            QMessageBox.warning(self, self.tr("dialog.save_png.title"), msg)
             return
         self._append(f"[result] chart_saved path={path}\n")
 
@@ -1774,6 +2086,7 @@ class MainWindow(QWidget):
 
             dialog.finished.connect(_clear_dialog_ref)
             self._chart_dialog = dialog
+        self._chart_dialog.set_ui_texts(self._ui_text_map())
         self._chart_dialog.set_result_data(self.result_panel.result_data())
         self._chart_dialog.set_chart_mode(self.result_panel.chart_mode())
         self._chart_dialog.show()
@@ -2162,6 +2475,192 @@ class MainWindow(QWidget):
         except Exception:
             return 0
 
+    def _list_matching_csv_paths(self, csv_dir: str, csv_glob: str) -> list[str]:
+        d = str(csv_dir or "").strip()
+        pattern = str(csv_glob or "").strip()
+        if not d or (not os.path.isdir(d)) or (not pattern):
+            return []
+        try:
+            return sorted(str(path) for path in glob.glob(os.path.join(d, pattern)))
+        except Exception:
+            return []
+
+    def _csv_path_month_key(self, csv_path: str) -> int:
+        base = os.path.basename(str(csv_path or "").strip())
+        m = re.search(r"-(\d{4})-(\d{2})\.csv$", base, flags=re.IGNORECASE)
+        if not m:
+            return 0
+        try:
+            year = int(m.group(1))
+            month = int(m.group(2))
+        except Exception:
+            return 0
+        if month < 1 or month > 12:
+            return 0
+        return int((year * 100) + month)
+
+    def _filter_csv_paths_for_range(self, csv_paths: list[str], since_ms: int, until_ms: int) -> list[str]:
+        try:
+            since_key = int(datetime.fromtimestamp(int(since_ms) / 1000.0, tz=timezone.utc).strftime("%Y%m"))
+            until_key = int(datetime.fromtimestamp((int(until_ms) - 1) / 1000.0, tz=timezone.utc).strftime("%Y%m"))
+        except Exception:
+            return []
+        if since_key <= 0 or until_key < since_key:
+            return []
+        out: list[str] = []
+        for path in csv_paths:
+            month_key = self._csv_path_month_key(path)
+            if month_key <= 0:
+                continue
+            if since_key <= month_key <= until_key:
+                out.append(str(path))
+        return out
+
+    def _classify_backtest_guidance(self, reasons: list[str]) -> tuple[str, str]:
+        reason_set = {str(reason or "").strip() for reason in reasons if str(reason or "").strip()}
+        matched: list[str] = []
+        if reason_set & {"dir_5m_missing", "dir_1h_missing"}:
+            matched.append("DATASET_MISSING")
+        if reason_set & {"csv_5m_missing", "csv_1h_missing"}:
+            matched.append("SYMBOL_MISSING_OR_UNAVAILABLE")
+        if reason_set & {"csv_5m_out_of_range", "csv_1h_out_of_range"}:
+            matched.append("RANGE_OUT_OF_DATA")
+        if not matched:
+            return ("", "")
+        primary = matched[0]
+        overall = primary if len(matched) == 1 else "MIXED"
+        return (overall, primary)
+
+    def _focus_backtest_guidance_target(self, primary_category: str) -> None:
+        if primary_category == "DATASET_MISSING":
+            self.tools_group.setChecked(True)
+            self.btn_pipeline.setFocus()
+            return
+        if primary_category == "SYMBOL_MISSING_OR_UNAVAILABLE":
+            self.symbol.setFocus()
+            try:
+                self.symbol.showPopup()
+            except Exception:
+                pass
+            return
+        if primary_category == "RANGE_OUT_OF_DATA":
+            self.replay_since_ym.setFocus()
+            self.replay_since_ym.selectAll()
+
+    def _show_backtest_guidance_dialog(
+        self,
+        *,
+        primary_category: str,
+        symbol: str,
+        dataset_root: str,
+        since_text: str,
+        until_text: str,
+    ) -> None:
+        if primary_category == "DATASET_MISSING":
+            title = "Backtest dataset missing / Backtestデータ不足"
+            message = (
+                "5m / 1h dataset folders for this backtest were not found.\n"
+                "Backtest に必要な 5m / 1h データセットフォルダが見つかりません。\n\n"
+                f"symbol={symbol or self._default_symbol}\n"
+                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
+                "Open Diagnostics / Pipeline and run Download + Precompute.\n"
+                "Diagnostics / Pipeline を開いて Download + Precompute を実行してください。"
+            )
+            action_text = "Open Diagnostics / Pipeline / 診断画面を開く"
+        elif primary_category == "SYMBOL_MISSING_OR_UNAVAILABLE":
+            title = "Symbol missing or unavailable / Symbol不足または未対応"
+            message = (
+                "The selected symbol was not found in the current dataset.\n"
+                "選択中の Symbol が現在のデータセットに見つかりません。\n\n"
+                f"symbol={symbol or self._default_symbol}\n"
+                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
+                "Choose another symbol from the Symbol combo.\n"
+                "Symbol コンボから別の銘柄を選択してください。"
+            )
+            action_text = "Go to Symbol / Symbolへ移動"
+        else:
+            title = "Range out of data / 期間がデータ範囲外"
+            message = (
+                "The selected Since / Until range is outside the available dataset months.\n"
+                "選択した Since / Until が利用可能なデータ範囲外です。\n\n"
+                f"since={since_text}\n"
+                f"until={until_text}\n"
+                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
+                "Adjust Since / Until to match available months.\n"
+                "利用可能な月に合わせて Since / Until を調整してください。"
+            )
+            action_text = "Go to Since / Until / 期間へ移動"
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        action_button = dialog.addButton(action_text, QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton("Close / 閉じる", QMessageBox.ButtonRole.RejectRole)
+        if isinstance(action_button, QPushButton):
+            action_button.setDefault(True)
+        dialog.exec()
+        if dialog.clickedButton() is action_button:
+            self._focus_backtest_guidance_target(primary_category)
+
+    def _validate_backtest_launch_inputs(self, prepared: dict[str, object]) -> bool:
+        symbol = str(prepared.get("symbol", "") or "").strip()
+        dataset_root = str(prepared.get("data_arg", "") or "").strip()
+        dir_5m = str(prepared.get("dir_5m", "") or "").strip()
+        dir_1h = str(prepared.get("dir_1h", "") or "").strip()
+        glob_5m = str(prepared.get("glob_5m", "") or "").strip()
+        glob_1h = str(prepared.get("glob_1h", "") or "").strip()
+        since_ms = int(prepared.get("since_ms", 0) or 0)
+        until_ms = int(prepared.get("until_ms", 0) or 0)
+
+        csv_paths_5m = self._list_matching_csv_paths(dir_5m, glob_5m)
+        csv_paths_1h = self._list_matching_csv_paths(dir_1h, glob_1h)
+        range_paths_5m = self._filter_csv_paths_for_range(csv_paths_5m, since_ms, until_ms)
+        range_paths_1h = self._filter_csv_paths_for_range(csv_paths_1h, since_ms, until_ms)
+
+        reasons: list[str] = []
+        if not os.path.isdir(dir_5m):
+            reasons.append("dir_5m_missing")
+        if not os.path.isdir(dir_1h):
+            reasons.append("dir_1h_missing")
+        if not csv_paths_5m:
+            reasons.append("csv_5m_missing")
+        if not csv_paths_1h:
+            reasons.append("csv_1h_missing")
+        if csv_paths_5m and (not range_paths_5m):
+            reasons.append("csv_5m_out_of_range")
+        if csv_paths_1h and (not range_paths_1h):
+            reasons.append("csv_1h_out_of_range")
+
+        ok = not reasons
+        since_text = str(self.replay_since_ym.text() or "").strip()
+        until_text = str(self.replay_until_ym.text() or "").strip()
+        self._append(
+            f"[backtest] dataset validation symbol={symbol} dataset_root={dataset_root} "
+            f"dir_5m={dir_5m} dir_1h={dir_1h} glob_5m={glob_5m} glob_1h={glob_1h} "
+            f"count_5m={len(csv_paths_5m)} count_1h={len(csv_paths_1h)} "
+            f"in_range_5m={len(range_paths_5m)} in_range_1h={len(range_paths_1h)} "
+            f"since={since_text} until={until_text} result={'ok' if ok else 'ng'}"
+            + (f" reasons={','.join(reasons)}" if reasons else "")
+            + "\n"
+        )
+        if ok:
+            return True
+
+        category, primary_category = self._classify_backtest_guidance(reasons)
+        self._show_backtest_guidance_dialog(
+            primary_category=primary_category or "DATASET_MISSING",
+            symbol=symbol,
+            dataset_root=dataset_root,
+            since_text=since_text,
+            until_text=until_text,
+        )
+        self._append(
+            f"[backtest] launch aborted due to missing data category={category or 'DATASET_MISSING'} "
+            f"primary={primary_category or 'DATASET_MISSING'}\n"
+        )
+        return False
+
     def on_select_replay_data(self) -> None:
         p = get_paths()
         start_dir = p.repo_root
@@ -2354,6 +2853,7 @@ class MainWindow(QWidget):
                 f"[UI] pipeline started exchange_id={exchange_id} symbol={symbol} "
                 f"from={from_ym} to={to_ym} force={env['LWF_PIPELINE_FORCE']}\n"
             )
+            self._clear_manual_stop_state()
             self._proc_role = "pipeline"
             self._close_replay_log_file()
             self._close_live_log_file()
@@ -2382,6 +2882,7 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "Pipeline start failed", str(e))
             self._proc = None
             self._proc_role = "runner"
+            self._clear_manual_stop_state()
             self.btn_pipeline.setEnabled(True)
 
     def _on_run_replay_legacy(self) -> None:
@@ -2472,6 +2973,7 @@ class MainWindow(QWidget):
         try:
             self._last_replay_report_path = ""
             self._last_replay_trade_log_path = ""
+            self._clear_manual_stop_state()
             self._settings.dataset_root = str(data_arg)
             self._settings.dataset_prefix = str(prefix)
             self._settings.dataset_year = int(y or 0)
@@ -2501,9 +3003,10 @@ class MainWindow(QWidget):
             self.btn_stop.setEnabled(True)
             self.btn_pipeline.setEnabled(False)
         except Exception as e:
-            QMessageBox.critical(self, "Replay start failed", str(e))
+            QMessageBox.critical(self, self.tr("dialog.replay_start_failed.title"), str(e))
             self._proc = None
             self._proc_role = "runner"
+            self._clear_manual_stop_state()
             self._close_replay_log_file()
             self._close_live_log_file()
             self.btn_pipeline.setEnabled(True)
@@ -2540,6 +3043,7 @@ class MainWindow(QWidget):
         try:
             self._last_replay_report_path = ""
             self._last_replay_trade_log_path = ""
+            self._clear_manual_stop_state()
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
             self._settings.dataset_year = int(prepared["dataset_year"])
@@ -2569,9 +3073,10 @@ class MainWindow(QWidget):
             self.btn_stop.setEnabled(True)
             self.btn_pipeline.setEnabled(False)
         except Exception as e:
-            QMessageBox.critical(self, "Replay start failed", str(e))
+            QMessageBox.critical(self, self.tr("dialog.replay_start_failed.title"), str(e))
             self._proc = None
             self._proc_role = "runner"
+            self._clear_manual_stop_state()
             self._close_replay_log_file()
             self._close_live_log_file()
             self.btn_pipeline.setEnabled(True)
@@ -2582,6 +3087,8 @@ class MainWindow(QWidget):
             return
         prepared = self._prepare_offline_run_inputs("Backtest")
         if prepared is None:
+            return
+        if not self._validate_backtest_launch_inputs(prepared):
             return
 
         spec = BacktestSpec(
@@ -2603,6 +3110,7 @@ class MainWindow(QWidget):
 
         try:
             self._ensure_report_parent()
+            self._clear_manual_stop_state()
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
             self._settings.dataset_year = int(prepared["dataset_year"])
@@ -2631,9 +3139,10 @@ class MainWindow(QWidget):
             self.btn_stop.setEnabled(True)
             self.btn_pipeline.setEnabled(False)
         except Exception as e:
-            QMessageBox.critical(self, "Backtest start failed", str(e))
+            QMessageBox.critical(self, self.tr("dialog.backtest_start_failed.title"), str(e))
             self._proc = None
             self._proc_role = "runner"
+            self._clear_manual_stop_state()
             self._close_replay_log_file()
             self._close_live_log_file()
             self.btn_pipeline.setEnabled(True)
@@ -2662,6 +3171,7 @@ class MainWindow(QWidget):
         self._settings.dataset_prefix = str(self._replay_dataset_prefix or "")
         self._settings.dataset_year = int(self._replay_dataset_year or 0)
         self._settings.log_level = self._selected_log_level()
+        self._settings.ui_language = self._ui_language
         self._update_chart_ui_state()
         save_settings(self._settings)
         self._save_run_mode_to_settings()
@@ -2689,8 +3199,8 @@ class MainWindow(QWidget):
         if not api_key or not api_secret:
             QMessageBox.warning(
                 self,
-                "Missing API Keys",
-                f"Please enter {exchange_id.upper()} API Key/Secret and click Save.",
+                self.tr("dialog.missing_api_keys.title"),
+                self.tr("dialog.missing_api_keys.message", exchange=exchange_id.upper()),
             )
             return None
 
@@ -2727,6 +3237,7 @@ class MainWindow(QWidget):
         try:
             self._ip_whitelist_alerted = False
             self._ensure_report_parent()
+            self._clear_manual_stop_state()
             if str(run_mode).upper() == "LIVE":
                 try:
                     ensure_live_license_or_raise(base_url=self._license_base_url(), feature_name="LIVE execution")
@@ -2753,6 +3264,8 @@ class MainWindow(QWidget):
             )
             self._chart_mode_auto_live_candle_applied = False
             self._last_chart_state_diag_key = None
+            self._last_chart_state_reader_path = ""
+            self._refresh_result_panel()
             self._poll_live_chart_state()
             self._proc_role = "runner"
             self._close_replay_log_file()
@@ -2769,14 +3282,32 @@ class MainWindow(QWidget):
             self.btn_stop.setEnabled(True)
             self.btn_pipeline.setEnabled(False)
         except Exception as e:
-            QMessageBox.critical(self, "Start failed", str(e))
+            QMessageBox.critical(self, self.tr("dialog.start_failed.title"), str(e))
             self._proc = None
+            self._clear_manual_stop_state()
             self._close_live_log_file()
             self.btn_pipeline.setEnabled(True)
+
+    def _stop_process_worker(self, proc: subprocess.Popen) -> None:
+        try:
+            fallback_used = bool(terminate_process(proc))
+            if fallback_used:
+                self.sig_log.emit("[UI] fallback terminate/kill\n")
+        except Exception as e:
+            self.sig_log.emit(f"[UI] stop request failed: {e}\n")
+        finally:
+            self._stop_request_in_flight = False
 
     def on_stop(self) -> None:
         if self._proc is None:
             return
+        if self._stop_request_in_flight:
+            self._append("[UI] stop already requested; waiting for process exit\n")
+            return
+        self._manual_stop_requested = True
+        self._manual_stop_role = str(self._proc_role or "")
+        self._manual_stop_requested_at = time.time()
+        self._stop_request_in_flight = True
         self._append("[UI] graceful stop requested\n")
         if str(self._proc_role) == "pipeline":
             self._append("[ui] Stopping pipeline...\n")
@@ -2786,9 +3317,7 @@ class MainWindow(QWidget):
             self._append("[ui] Stopping backtest...\n")
         else:
             self._append("[ui] Stopping runner...\n")
-        fallback_used = bool(terminate_process(self._proc))
-        if fallback_used:
-            self._append("[UI] fallback terminate/kill\n")
+        threading.Thread(target=self._stop_process_worker, args=(self._proc,), daemon=True).start()
 
     def _poll_proc(self) -> None:
         if self._proc is None:
@@ -2796,27 +3325,37 @@ class MainWindow(QWidget):
         code = self._proc.poll()
         if code is None:
             return
-        if str(self._proc_role) == "pipeline":
-            if int(code) == 0:
+        role = str(self._proc_role)
+        stopped_by_user = self._is_manual_stop_exit(role)
+        if role == "pipeline":
+            if stopped_by_user:
+                self._append("[UI] pipeline stopped by user\n")
+            elif int(code) == 0:
                 self._append("[UI] pipeline finished\n")
             else:
                 self._append(f"[UI] pipeline error code={code}\n")
-        elif str(self._proc_role) in {"replay", "backtest"}:
-            stderr_path = self._save_last_stderr_tail()
-            role = str(self._proc_role)
+        elif role in {"replay", "backtest"}:
             self._close_replay_log_file()
-            self._append(f"[ui] {role.capitalize()} finished code={code}\n")
-            if int(code) == 0 and role == "replay":
+            if stopped_by_user:
+                self._append(f"[ui] {role.capitalize()} stopped by user\n")
+            else:
+                self._append(f"[ui] {role.capitalize()} finished code={code}\n")
+            if (not stopped_by_user) and int(code) == 0 and role == "replay":
                 self._append_replay_results_summary()
             else:
-                if int(code) != 0:
+                if (not stopped_by_user) and int(code) != 0:
+                    stderr_path = self._save_last_stderr_tail()
                     self._append(f"[ui] last_stderr_saved={stderr_path}\n")
             self._refresh_result_panel()
         else:
             self._close_live_log_file()
-            self._append(f"[ui] Runner exited with code={code}\n")
+            if stopped_by_user:
+                self._append("[ui] Runner stopped by user\n")
+            else:
+                self._append(f"[ui] Runner exited with code={code}\n")
         self._proc = None
         self._proc_role = "runner"
+        self._clear_manual_stop_state()
         self.btn_start.setEnabled(True)
         self.btn_start.setChecked(False)
         self.btn_run_replay.setEnabled(True)

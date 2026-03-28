@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-20_pipeline_precompute_lookback_diag_v1
 # BUILD_ID: 2026-03-20_pipeline_precompute_until_bound_v1
 # BUILD_ID: 2026-03-20_market_data_stage2_chart_path_cleanup_v1
@@ -28,7 +29,7 @@ from app.core.dataset import symbol_to_prefix
 from app.core.paths import get_paths
 
 
-BUILD_ID = "2026-03-20_pipeline_precompute_lookback_diag_v1"
+BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
 
 
 def _parse_yyyy_mm(raw: str) -> tuple[int, int]:
@@ -404,6 +405,27 @@ def _prepare_month_csv_target(path: str, *, tf: str, year: int, month: int, forc
     return (False, int(rows), int(expected))
 
 
+def _format_subprocess_cmd(cmd: list[str]) -> str:
+    parts = [str(x) for x in (cmd or [])]
+    if not parts:
+        return ""
+    try:
+        return str(subprocess.list2cmdline(parts))
+    except Exception:
+        return " ".join(parts)
+
+
+def _summarize_subprocess_text(text: str, *, limit: int = 600) -> str:
+    raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not raw:
+        return ""
+    lines = [line.strip() for line in raw.split("\n") if line.strip()]
+    summary = " | ".join(lines[-4:]) if lines else raw
+    if len(summary) <= int(limit):
+        return summary
+    return "..." + summary[-int(limit):]
+
+
 def _run_jpy_month_csv(repo_root: str, symbol: str, prefix: str, tf: str, year: int, month: int, provider: str) -> str:
     out_dir = os.path.join(_market_data_root(repo_root), f"{prefix}_{tf}_{int(year)}")
     os.makedirs(out_dir, exist_ok=True)
@@ -414,14 +436,16 @@ def _run_jpy_month_csv(repo_root: str, symbol: str, prefix: str, tf: str, year: 
         return out_csv
     since_ymd, until_ymd = _month_to_ymd(int(year), int(month))
     interval = "5min" if str(tf) == "5m" else "1hour" if str(tf) == "1h" else str(tf)
-    script_name = "bitbank_btcjpy_dataset.py" if str(provider).upper() == "BITBANK" else "gmo_btcjpy_dataset.py"
-    script = os.path.join(repo_root, "tools", script_name)
+    run_cwd = os.path.abspath(str(repo_root or "").strip() or os.getcwd())
     tmp_out = out_csv + ".tmp"
     _safe_remove(tmp_out)
     cmd = [
         sys.executable,
         "-u",
-        script,
+        "-m",
+        "app.core.jpy_dataset_downloader",
+        "--provider",
+        str(provider),
         "--pair",
         str(symbol),
         "--interval",
@@ -433,8 +457,45 @@ def _run_jpy_month_csv(repo_root: str, symbol: str, prefix: str, tf: str, year: 
         "--out",
         tmp_out,
     ]
-    cp = subprocess.run(cmd, cwd=repo_root, check=False)
+    cmd_text = _format_subprocess_cmd(cmd)
+    try:
+        cp = subprocess.run(
+            cmd,
+            cwd=run_cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception as e:
+        _safe_remove(tmp_out)
+        print(
+            f"[PIPELINE][ERROR] provider={str(provider).upper()} symbol={symbol} tf={tf} "
+            f"ym={year:04d}-{month:02d} command={cmd_text}",
+            flush=True,
+        )
+        print(
+            f"[PIPELINE][ERROR] cwd={run_cwd} spawn_error={e}",
+            flush=True,
+        )
+        raise RuntimeError(f"{provider} dataset download failed tf={tf} ym={year:04d}-{month:02d} code=spawn")
     if int(cp.returncode) != 0:
+        stdout_summary = _summarize_subprocess_text(str(getattr(cp, "stdout", "") or ""))
+        stderr_summary = _summarize_subprocess_text(str(getattr(cp, "stderr", "") or ""))
+        print(
+            f"[PIPELINE][ERROR] provider={str(provider).upper()} symbol={symbol} tf={tf} "
+            f"ym={year:04d}-{month:02d} command={cmd_text}",
+            flush=True,
+        )
+        print(
+            f"[PIPELINE][ERROR] cwd={run_cwd} returncode={int(cp.returncode)}",
+            flush=True,
+        )
+        if stdout_summary:
+            print(f"[PIPELINE][ERROR] stdout={stdout_summary}", flush=True)
+        if stderr_summary:
+            print(f"[PIPELINE][ERROR] stderr={stderr_summary}", flush=True)
         _safe_remove(tmp_out)
         raise RuntimeError(f"{provider} dataset download failed tf={tf} ym={year:04d}-{month:02d} code={cp.returncode}")
     try:
@@ -446,6 +507,9 @@ def _run_jpy_month_csv(repo_root: str, symbol: str, prefix: str, tf: str, year: 
         _safe_remove(tmp_out)
         _safe_remove(out_csv)
         raise
+    stdout_summary = _summarize_subprocess_text(str(getattr(cp, "stdout", "") or ""))
+    if stdout_summary:
+        print(f"[PIPELINE]{stdout_summary}", flush=True)
     print(
         f"[PIPELINE][{str(provider).upper()}] symbol={symbol} tf={tf} ym={year:04d}-{month:02d} rows={rows} out={out_csv}",
         flush=True,

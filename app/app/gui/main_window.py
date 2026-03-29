@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
@@ -89,8 +90,10 @@ from app.core.launch import (
 from app.core.log_stream import start_log_threads
 from app.core.paths import ensure_runtime_dirs, get_paths
 from app.core.dataset import (
+    DatasetResolutionError,
     build_missing_dataset_message,
     infer_prefix_year_from_source,
+    resolve_dataset,
     resolve_dataset_layout,
     symbol_to_prefix,
 )
@@ -2637,38 +2640,108 @@ class MainWindow(QWidget):
         glob_1h = str(prepared.get("glob_1h", "") or "").strip()
         since_ms = int(prepared.get("since_ms", 0) or 0)
         until_ms = int(prepared.get("until_ms", 0) or 0)
-
-        csv_paths_5m = self._list_matching_csv_paths(dir_5m, glob_5m)
-        csv_paths_1h = self._list_matching_csv_paths(dir_1h, glob_1h)
-        range_paths_5m = self._filter_csv_paths_for_range(csv_paths_5m, since_ms, until_ms)
-        range_paths_1h = self._filter_csv_paths_for_range(csv_paths_1h, since_ms, until_ms)
+        since_year = int(prepared.get("since_year", 0) or 0)
+        until_year = int(prepared.get("until_year", 0) or 0)
+        multi_year = since_year > 0 and until_year > since_year
 
         reasons: list[str] = []
-        if not os.path.isdir(dir_5m):
-            reasons.append("dir_5m_missing")
-        if not os.path.isdir(dir_1h):
-            reasons.append("dir_1h_missing")
-        if not csv_paths_5m:
-            reasons.append("csv_5m_missing")
-        if not csv_paths_1h:
-            reasons.append("csv_1h_missing")
-        if csv_paths_5m and (not range_paths_5m):
-            reasons.append("csv_5m_out_of_range")
-        if csv_paths_1h and (not range_paths_1h):
-            reasons.append("csv_1h_out_of_range")
+        years_loaded: list[int] = []
+        if multi_year:
+            dataset_diag: dict[str, object] = {}
+            csv_paths_5m: list[str] = []
+            csv_paths_1h: list[str] = []
+            try:
+                dataset_spec = resolve_dataset(
+                    dataset_root=dataset_root,
+                    prefix=str(prepared.get("prefix", "") or symbol_to_prefix(symbol)),
+                    year=None,
+                    years=list(range(since_year, until_year + 1)),
+                    tf_dirs=("5m", "1h"),
+                    runtime_symbol=symbol,
+                    context="BACKTEST",
+                )
+                dataset_diag = dict(dataset_spec.diagnostics or {})
+                dir_5m = str(dataset_spec.dir_5m or dir_5m)
+                dir_1h = str(dataset_spec.dir_1h or dir_1h)
+                glob_5m = str(dataset_diag.get("glob_5m", glob_5m) or glob_5m)
+                glob_1h = str(dataset_diag.get("glob_1h", glob_1h) or glob_1h)
+                csv_paths_5m = [str(path) for path in list(dataset_spec.paths_5m)]
+                csv_paths_1h = [str(path) for path in list(dataset_spec.paths_1h)]
+            except DatasetResolutionError as e:
+                dataset_diag = dict(e.diagnostics or {})
+                searched_5m = [str(path) for path in list(dataset_diag.get("searched_paths_5m", []) or [])]
+                searched_1h = [str(path) for path in list(dataset_diag.get("searched_paths_1h", []) or [])]
+                dir_5m = str(dataset_diag.get("dir_5m", "") or (searched_5m[0] if searched_5m else dir_5m))
+                dir_1h = str(dataset_diag.get("dir_1h", "") or (searched_1h[0] if searched_1h else dir_1h))
+                glob_5m = str(dataset_diag.get("glob_5m", glob_5m) or glob_5m)
+                glob_1h = str(dataset_diag.get("glob_1h", glob_1h) or glob_1h)
+                csv_paths_5m = [str(path) for path in list(dataset_diag.get("paths_5m", []) or [])]
+                csv_paths_1h = [str(path) for path in list(dataset_diag.get("paths_1h", []) or [])]
+                mismatch_reasons = list(dataset_diag.get("mismatch_reasons", []) or [])
+                if mismatch_reasons:
+                    if not csv_paths_5m:
+                        reasons.append("csv_5m_missing")
+                    if not csv_paths_1h:
+                        reasons.append("csv_1h_missing")
+                else:
+                    if (not csv_paths_5m) or list(dataset_diag.get("missing_years_5m", []) or []):
+                        reasons.append("dir_5m_missing")
+                    if (not csv_paths_1h) or list(dataset_diag.get("missing_years_1h", []) or []):
+                        reasons.append("dir_1h_missing")
+
+            prepared["dir_5m"] = str(dir_5m)
+            prepared["dir_1h"] = str(dir_1h)
+            prepared["glob_5m"] = str(glob_5m)
+            prepared["glob_1h"] = str(glob_1h)
+            years_loaded = [int(y) for y in list(dataset_diag.get("years_loaded", []) or []) if str(y).strip()]
+            range_paths_5m = self._filter_csv_paths_for_range(csv_paths_5m, since_ms, until_ms)
+            range_paths_1h = self._filter_csv_paths_for_range(csv_paths_1h, since_ms, until_ms)
+            if csv_paths_5m and (not range_paths_5m):
+                reasons.append("csv_5m_out_of_range")
+            if csv_paths_1h and (not range_paths_1h):
+                reasons.append("csv_1h_out_of_range")
+        else:
+            csv_paths_5m = self._list_matching_csv_paths(dir_5m, glob_5m)
+            csv_paths_1h = self._list_matching_csv_paths(dir_1h, glob_1h)
+            range_paths_5m = self._filter_csv_paths_for_range(csv_paths_5m, since_ms, until_ms)
+            range_paths_1h = self._filter_csv_paths_for_range(csv_paths_1h, since_ms, until_ms)
+            if not os.path.isdir(dir_5m):
+                reasons.append("dir_5m_missing")
+            if not os.path.isdir(dir_1h):
+                reasons.append("dir_1h_missing")
+            if not csv_paths_5m:
+                reasons.append("csv_5m_missing")
+            if not csv_paths_1h:
+                reasons.append("csv_1h_missing")
+            if csv_paths_5m and (not range_paths_5m):
+                reasons.append("csv_5m_out_of_range")
+            if csv_paths_1h and (not range_paths_1h):
+                reasons.append("csv_1h_out_of_range")
 
         ok = not reasons
         since_text = str(self.replay_since_ym.text() or "").strip()
         until_text = str(self.replay_until_ym.text() or "").strip()
-        self._append(
-            f"[backtest] dataset validation symbol={symbol} dataset_root={dataset_root} "
-            f"dir_5m={dir_5m} dir_1h={dir_1h} glob_5m={glob_5m} glob_1h={glob_1h} "
-            f"count_5m={len(csv_paths_5m)} count_1h={len(csv_paths_1h)} "
-            f"in_range_5m={len(range_paths_5m)} in_range_1h={len(range_paths_1h)} "
-            f"since={since_text} until={until_text} result={'ok' if ok else 'ng'}"
-            + (f" reasons={','.join(reasons)}" if reasons else "")
-            + "\n"
-        )
+        if multi_year:
+            self._append(
+                f"[backtest] dataset validation symbol={symbol} dataset_root={dataset_root} "
+                f"dir_5m={dir_5m} dir_1h={dir_1h} glob_5m={glob_5m} glob_1h={glob_1h} "
+                f"years_requested={since_year}..{until_year} years_loaded={years_loaded} "
+                f"count_5m={len(csv_paths_5m)} count_1h={len(csv_paths_1h)} "
+                f"in_range_5m={len(range_paths_5m)} in_range_1h={len(range_paths_1h)} "
+                f"since={since_text} until={until_text} result={'ok' if ok else 'ng'}"
+                + (f" reasons={','.join(reasons)}" if reasons else "")
+                + "\n"
+            )
+        else:
+            self._append(
+                f"[backtest] dataset validation symbol={symbol} dataset_root={dataset_root} "
+                f"dir_5m={dir_5m} dir_1h={dir_1h} glob_5m={glob_5m} glob_1h={glob_1h} "
+                f"count_5m={len(csv_paths_5m)} count_1h={len(csv_paths_1h)} "
+                f"in_range_5m={len(range_paths_5m)} in_range_1h={len(range_paths_1h)} "
+                f"since={since_text} until={until_text} result={'ok' if ok else 'ng'}"
+                + (f" reasons={','.join(reasons)}" if reasons else "")
+                + "\n"
+            )
         if ok:
             return True
 
@@ -2772,6 +2845,42 @@ class MainWindow(QWidget):
         data_path = str(self.replay_data.text() or "").strip() or str(self._replay_data_path or self._default_dataset_root)
         symbol = str(self._selected_replay_symbol() or self._default_symbol)
         timeframe = str(self.replay_tf.currentText() or "5m")
+        multi_year_backtest = tag == "backtest" and int(since_year or 0) > 0 and int(until_year or 0) > int(since_year or 0)
+        if multi_year_backtest:
+            prefix, data_arg, _, _, _, _, resolve_reason, _ = self._resolve_replay_dataset_paths(
+                data_path,
+                symbol,
+                selected_csv_source=self._selected_replay_csv_source,
+            )
+            self._replay_data_path = str(data_arg)
+            self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
+            self._replay_dataset_year = 0
+            self.replay_data.setText(self._replay_data_path)
+            self._append(
+                f"[{tag}] resolved continuous years: {int(since_year)}..{int(until_year)} "
+                f"root={data_arg} prefix={prefix} (reason={resolve_reason})\n"
+            )
+            if int(until_ms) <= int(since_ms):
+                QMessageBox.warning(self, f"{title} range invalid", self.tr("dialog.until_month_invalid.message"))
+                return None
+            return {
+                "symbol": str(symbol),
+                "timeframe": str(timeframe),
+                "since_ms": int(since_ms),
+                "until_ms": int(until_ms),
+                "since_ymd": str(since_ymd),
+                "until_ymd": str(until_ymd),
+                "data_arg": str(data_arg),
+                "prefix": str(prefix),
+                "dir_5m": "",
+                "dir_1h": "",
+                "glob_5m": "",
+                "glob_1h": "",
+                "dataset_year": 0,
+                "since_year": int(since_year),
+                "until_year": int(until_year),
+                "continuous_years": f"{int(since_year)}..{int(until_year)}",
+            }
         prev_dataset_year = int(self._replay_dataset_year or 0)
         range_year_hint = int(since_year) if int(since_year) == int(until_year) else 0
         prefix, data_arg, dir_5m, dir_1h, glob_5m, glob_1h, resolve_reason, year = self._resolve_replay_dataset_paths(
@@ -3123,6 +3232,8 @@ class MainWindow(QWidget):
             entry_timeframe=str(prepared["timeframe"]),
             since_ymd=str(prepared["since_ymd"]),
             until_ymd=str(prepared["until_ymd"]),
+            backtest_since_year=(int(prepared["since_year"]) if int(prepared.get("since_year", 0) or 0) > 0 else None),
+            backtest_until_year=(int(prepared["until_year"]) if int(prepared.get("until_year", 0) or 0) > 0 else None),
             report_enabled=bool(self.report_enabled.isChecked()),
             report_out=self._report_out_value(),
             backtest_csv_dir_5m=str(prepared["dir_5m"]),
@@ -3146,11 +3257,18 @@ class MainWindow(QWidget):
             self._proc_role = "backtest"
             self._close_live_log_file()
             self._open_replay_log_file(prefix="backtest")
+            continuous_years = str(prepared.get("continuous_years", "") or "").strip()
+            launch_dataset_text = (
+                f"prefix={prepared['prefix']} continuous_years={continuous_years} "
+                if continuous_years
+                else f"dir_5m={prepared['dir_5m']} dir_1h={prepared['dir_1h']} dataset_year={spec.backtest_dataset_year} "
+            )
             self._append(
                 f"[ui] Starting backtest preset={spec.preset} symbol={spec.symbol} tf={spec.entry_timeframe} "
                 f"since={self.replay_since_ym.text().strip()} until={self.replay_until_ym.text().strip()} "
                 f"since_ymd={spec.since_ymd} until_ymd={spec.until_ymd} data={prepared['data_arg']} "
-                f"dir_5m={prepared['dir_5m']} dir_1h={prepared['dir_1h']} dataset_year={spec.backtest_dataset_year} "
+                + launch_dataset_text
+                +
                 f"report={spec.report_enabled}\n"
             )
             self._proc = launch_backtest(spec)

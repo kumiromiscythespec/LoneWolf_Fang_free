@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-25_free_launch_boundary_v1
 from __future__ import annotations
@@ -102,6 +103,8 @@ class BacktestSpec:
     entry_timeframe: str = "5m"
     since_ymd: str = ""
     until_ymd: str = ""
+    backtest_since_year: Optional[int] = None
+    backtest_until_year: Optional[int] = None
     report_enabled: bool = False
     report_out: str = ""
     backtest_csv_dir_5m: str = ""
@@ -357,14 +360,22 @@ def _build_backtest_env(spec: BacktestSpec) -> Dict[str, str]:
             timeframe=str(spec.entry_timeframe or "5m"),
         )
     )
+    use_continuous_years = (
+        spec.backtest_since_year is not None
+        and spec.backtest_until_year is not None
+    )
     env["LWF_ENTRY_TF"] = str(spec.entry_timeframe or "")
     env["BACKTEST_DATASET_ROOT"] = str(spec.backtest_dataset_root or "")
     env["BACKTEST_DATASET_PREFIX"] = str(spec.backtest_dataset_prefix or "")
-    env["BACKTEST_DATASET_YEAR"] = str(int(spec.backtest_dataset_year or 0) if int(spec.backtest_dataset_year or 0) > 0 else "")
-    env["BACKTEST_CSV_DIR_5M"] = str(spec.backtest_csv_dir_5m or "")
-    env["BACKTEST_CSV_DIR_1H"] = str(spec.backtest_csv_dir_1h or "")
-    env["BACKTEST_CSV_GLOB_5M"] = str(spec.backtest_csv_glob_5m or "")
-    env["BACKTEST_CSV_GLOB_1H"] = str(spec.backtest_csv_glob_1h or "")
+    env["BACKTEST_DATASET_YEAR"] = (
+        ""
+        if use_continuous_years
+        else str(int(spec.backtest_dataset_year or 0) if int(spec.backtest_dataset_year or 0) > 0 else "")
+    )
+    env["BACKTEST_CSV_DIR_5M"] = "" if use_continuous_years else str(spec.backtest_csv_dir_5m or "")
+    env["BACKTEST_CSV_DIR_1H"] = "" if use_continuous_years else str(spec.backtest_csv_dir_1h or "")
+    env["BACKTEST_CSV_GLOB_5M"] = "" if use_continuous_years else str(spec.backtest_csv_glob_5m or "")
+    env["BACKTEST_CSV_GLOB_1H"] = "" if use_continuous_years else str(spec.backtest_csv_glob_1h or "")
     if bool(spec.report_enabled):
         env["BOT_REPORT"] = "1"
         if str(spec.report_out or "").strip():
@@ -592,6 +603,15 @@ def launch_backtest(spec: BacktestSpec) -> subprocess.Popen:
         "--entry-tf",
         str(spec.entry_timeframe or "5m"),
     ]
+    if spec.backtest_since_year is not None and spec.backtest_until_year is not None:
+        cmd.extend(
+            [
+                "--since-year",
+                str(int(spec.backtest_since_year)),
+                "--until-year",
+                str(int(spec.backtest_until_year)),
+            ]
+        )
     if bool(spec.report_enabled):
         cmd.append("--report")
         if report_out:

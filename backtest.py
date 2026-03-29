@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-21_backtest_final_residual_comment_cleanup_v1
 # BUILD_ID: 2026-03-20_backtest_ethusdc_size_sizing_diag_v1
@@ -2643,14 +2644,11 @@ def run_backtest(
                 "--since-year/--until-year cannot be combined with dataset_year. "
                 "Use either single-year dataset_year or a multi-year range."
             )
-        if (since_ms is not None) or (until_ms is not None):
-            raise ValueError(
-                "--since-year/--until-year cannot be combined with since_ms/until_ms. "
-                "Use one time-range method."
-            )
         dataset_years = list(range(sy, uy + 1))
-        since_ms = int(datetime(sy, 1, 1, tzinfo=timezone.utc).timestamp() * 1000.0)
-        until_ms = int(datetime(uy + 1, 1, 1, tzinfo=timezone.utc).timestamp() * 1000.0)
+        if since_ms is None:
+            since_ms = int(datetime(sy, 1, 1, tzinfo=timezone.utc).timestamp() * 1000.0)
+        if until_ms is None:
+            until_ms = int(datetime(uy + 1, 1, 1, tzinfo=timezone.utc).timestamp() * 1000.0)
         logger.info(
             "[BACKTEST][DATASET_RANGE] continuous_years=%s..%s symbols=%s since_ms=%s until_ms=%s",
             sy,
@@ -7333,6 +7331,8 @@ def main() -> int:
     parser.add_argument("--symbols", type=str, default="", help="Comma-separated symbols. Empty uses config.SYMBOLS")
     parser.add_argument("--since", type=str, default="", help="YYYY-MM-DD (UTC) inclusive. Empty -> recent-only mode")
     parser.add_argument("--until", type=str, default="", help="YYYY-MM-DD (UTC) inclusive day; internally treated as next-day exclusive")
+    parser.add_argument("--since-year", type=int, default=0, help="Continuous dataset range start year (inclusive).")
+    parser.add_argument("--until-year", type=int, default=0, help="Continuous dataset range end year (inclusive).")
     parser.add_argument("--entry-tf", type=str, default=str(getattr(C, "ENTRY_TF", getattr(C, "TIMEFRAME_ENTRY", "1m"))))
     parser.add_argument("--filter-tf", type=str, default=str(getattr(C, "FILTER_TF", getattr(C, "TIMEFRAME_FILTER", "1h"))))
 
@@ -7376,6 +7376,8 @@ def main() -> int:
         since_ms = _parse_yyyy_mm_dd_to_ms(args.since.strip(), end_of_day_exclusive=False)
     if args.until.strip():
         until_ms = _parse_yyyy_mm_dd_to_ms(args.until.strip(), end_of_day_exclusive=True)
+    since_year = int(getattr(args, "since_year", 0) or 0)
+    until_year = int(getattr(args, "until_year", 0) or 0)
 
 
     recent_entry = int(args.recent_entry) if int(args.recent_entry) > 0 else None
@@ -7389,6 +7391,8 @@ def main() -> int:
         filter_tf=str(args.filter_tf),
         warmup_bars=int(args.warmup),
         initial_equity=float(args.initial),
+        since_year=(since_year if since_year > 0 else None),
+        until_year=(until_year if until_year > 0 else None),
         export_csv=(not bool(args.no_csv)),
         recent_bars_entry=recent_entry,
         recent_bars_filter=recent_filter,

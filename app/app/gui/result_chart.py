@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_gui_responsiveness_fix_v1
 # BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
@@ -42,7 +43,7 @@ from PySide6.QtWidgets import (
 from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
 
 
-BUILD_ID = "2026-03-29_free_final_polish_v1"
+BUILD_ID = "2026-03-29_free_gui_responsiveness_fix_v1"
 
 CHART_MODE_EQUITY = "Equity"
 CHART_MODE_NET = "Net"
@@ -1298,6 +1299,16 @@ class ResultChartWidget(QWidget):
         self._mode = CHART_MODE_EQUITY
         self._data = ResultChartData()
         self._ui_texts: dict[str, str] = {}
+        self._diag_counters: dict[str, int] = {
+            "set_result_data_calls": 0,
+            "set_result_data_skips": 0,
+            "set_ui_texts_calls": 0,
+            "set_ui_texts_skips": 0,
+            "set_chart_mode_calls": 0,
+            "set_chart_mode_skips": 0,
+            "update_requests": 0,
+            "paint_calls": 0,
+        }
         self._initial_view_state = self._default_view_state_for_mode(self._mode)
         self._view_state = _ChartViewState(
             x_margin_ratio=self._initial_view_state.x_margin_ratio,
@@ -1313,34 +1324,63 @@ class ResultChartWidget(QWidget):
         return QSize(_CHART_MIN_WIDTH, _CHART_MIN_HEIGHT)
 
     def set_result_data(self, data: ResultChartData) -> None:
-        self._data = data if isinstance(data, ResultChartData) else ResultChartData()
+        self._diag_counters["set_result_data_calls"] += 1
+        next_data = data if isinstance(data, ResultChartData) else ResultChartData()
+        if next_data == self._data:
+            self._diag_counters["set_result_data_skips"] += 1
+            return
+        self._data = next_data
+        self._diag_counters["update_requests"] += 1
         self.update()
 
     def result_data(self) -> ResultChartData:
         return self._data
 
     def set_ui_texts(self, texts: dict[str, str] | None) -> None:
-        self._ui_texts = dict(texts or {})
+        self._diag_counters["set_ui_texts_calls"] += 1
+        next_texts = dict(texts or {})
+        if next_texts == self._ui_texts:
+            self._diag_counters["set_ui_texts_skips"] += 1
+            return
+        self._ui_texts = next_texts
+        self._diag_counters["update_requests"] += 1
         self.update()
 
     def set_chart_mode(self, mode: str) -> None:
-        self._mode = normalize_chart_mode(mode)
+        self._diag_counters["set_chart_mode_calls"] += 1
+        next_mode = normalize_chart_mode(mode)
+        if next_mode == self._mode:
+            self._diag_counters["set_chart_mode_skips"] += 1
+            return
+        self._mode = next_mode
         self._reset_view_state_for_mode()
+        self._diag_counters["update_requests"] += 1
         self.update()
 
     def chart_mode(self) -> str:
         return self._mode
 
     def fit_all(self) -> None:
-        self._view_state = _ChartViewState(x_margin_ratio=0.0, y_padding_ratio=0.03)
+        next_view_state = _ChartViewState(x_margin_ratio=0.0, y_padding_ratio=0.03)
+        if next_view_state == self._view_state:
+            return
+        self._view_state = next_view_state
+        self._diag_counters["update_requests"] += 1
         self.update()
 
     def reset_view(self) -> None:
-        self._view_state = _ChartViewState(
+        next_view_state = _ChartViewState(
             x_margin_ratio=self._initial_view_state.x_margin_ratio,
             y_padding_ratio=self._initial_view_state.y_padding_ratio,
         )
+        if next_view_state == self._view_state:
+            return
+        self._view_state = next_view_state
+        self._diag_counters["update_requests"] += 1
         self.update()
+
+    def diagnostic_counters(self) -> dict[str, int]:
+        return dict(self._diag_counters)
 
     def save_png(self, path: str, size: QSize | None = None) -> bool:
         target = _abs_path(path)
@@ -1358,6 +1398,7 @@ class ResultChartWidget(QWidget):
         return bool(image.save(target, "PNG"))
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
+        self._diag_counters["paint_calls"] += 1
         painter = QPainter(self)
         try:
             self._render_chart(painter, QRectF(self.rect()))
@@ -2278,10 +2319,13 @@ class ResultPanel(QWidget):
         return label
 
     def _set_kpi(self, label: QLabel, *, title: str, value: str, color: QColor) -> None:
-        label.setText(
+        html = (
             f"<div style='color:{_COLOR_MUTED.name()}; font-size:11px;'>{title}</div>"
             f"<div style='color:{color.name()}; font-size:16px; font-weight:700;'>{value}</div>"
         )
+        if label.text() == html:
+            return
+        label.setText(html)
 
     def _text(self, key: str, default: str) -> str:
         return _lookup_ui_text(self._ui_texts, key, default)
@@ -2305,7 +2349,10 @@ class ResultPanel(QWidget):
         self.chart_widget.set_ui_texts(self._ui_texts)
 
     def set_ui_texts(self, texts: dict[str, str] | None) -> None:
-        self._ui_texts = dict(texts or {})
+        next_texts = dict(texts or {})
+        if next_texts == self._ui_texts:
+            return
+        self._ui_texts = next_texts
         self._apply_ui_texts()
         self._refresh_kpis()
         self.update()
@@ -2331,7 +2378,10 @@ class ResultPanel(QWidget):
         )
 
     def set_result_data(self, data: ResultChartData) -> None:
-        self._data = data if isinstance(data, ResultChartData) else ResultChartData()
+        next_data = data if isinstance(data, ResultChartData) else ResultChartData()
+        if next_data == self._data:
+            return
+        self._data = next_data
         self.chart_widget.set_result_data(self._data)
         self._refresh_kpis()
 
@@ -2343,6 +2393,8 @@ class ResultPanel(QWidget):
 
     def set_chart_mode(self, mode: str) -> None:
         target = normalize_chart_mode(mode)
+        if target == self.chart_mode():
+            return
         idx = self.mode_combo.findData(target)
         self.mode_combo.setCurrentIndex(max(0, idx))
 

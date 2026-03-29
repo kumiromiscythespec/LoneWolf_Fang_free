@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_gui_responsiveness_fix_v1
 # BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
@@ -123,7 +124,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-03-29_free_final_polish_v1"
+BUILD_ID = "2026-03-29_free_gui_responsiveness_fix_v1"
 logger = logging.getLogger(__name__)
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
@@ -136,6 +137,12 @@ DEFAULT_SECTION_VERTICAL_SPACING = 8
 COMPACT_SECTION_VERTICAL_SPACING = 6
 DEFAULT_MAIN_WINDOW_WIDTH = 840
 DEFAULT_MAIN_WINDOW_HEIGHT = 620
+PROC_POLL_ACTIVE_INTERVAL_MS = 500
+PROC_POLL_IDLE_INTERVAL_MS = 1500
+LIVE_CHART_POLL_INTERVAL_MS = 1500
+LIVE_CHART_STALE_SEC = 120.0
+BRAND_LOGO_REFRESH_DEBOUNCE_MS = 90
+BRAND_LOGO_SIZE_STEP_PX = 8
 _UI_LANGUAGE_OPTIONS = (("ja", "日本語"), ("en", "English"))
 _UI_TEXTS = {
     "ja": {
@@ -417,12 +424,29 @@ class MainWindow(QWidget):
         self._suppress_chart_mode_user_lock: bool = False
         self._last_chart_state_diag_key: tuple[str, int, int, str] | None = None
         self._last_chart_state_reader_path: str = ""
+        self._last_live_chart_poll_signature: tuple[str, str, str, bool, bool, int, int, bool] | None = None
         self._logo_asset: LogoAsset | None = load_logo_asset(self._paths.repo_root)
         if self._logo_asset is not None:
             self.setWindowIcon(QIcon(str(self._logo_asset.source_path)))
         self._last_logo_box: tuple[int, int] = (0, 0)
+        self._last_logo_device_ratio_key: int = 0
         self._logo_label = QLabel()
         self._compact_mode: bool | None = None
+        self._pending_brand_logo_force: bool = False
+        self._gui_perf_counters: dict[str, int] = {
+            "proc_poll_calls": 0,
+            "proc_poll_idle_skips": 0,
+            "live_chart_poll_calls": 0,
+            "live_chart_poll_skips": 0,
+            "result_refresh_calls": 0,
+            "result_refresh_skips": 0,
+            "brand_logo_refresh_calls": 0,
+            "brand_logo_refresh_skips": 0,
+        }
+        self._logo_refresh_timer = QTimer(self)
+        self._logo_refresh_timer.setSingleShot(True)
+        self._logo_refresh_timer.setInterval(BRAND_LOGO_REFRESH_DEBOUNCE_MS)
+        self._logo_refresh_timer.timeout.connect(self._flush_brand_logo_refresh)
         self.setMinimumSize(DEFAULT_MAIN_WINDOW_WIDTH, DEFAULT_MAIN_WINDOW_HEIGHT)
         initial_width = int(getattr(self._settings, "main_window_width", DEFAULT_MAIN_WINDOW_WIDTH) or DEFAULT_MAIN_WINDOW_WIDTH)
         initial_height = int(getattr(self._settings, "main_window_height", DEFAULT_MAIN_WINDOW_HEIGHT) or DEFAULT_MAIN_WINDOW_HEIGHT)
@@ -781,18 +805,17 @@ class MainWindow(QWidget):
 
         # Timer to poll process exit
         self._timer = QTimer(self)
-        self._timer.setInterval(500)
+        self._timer.setInterval(PROC_POLL_IDLE_INTERVAL_MS)
         self._timer.timeout.connect(self._poll_proc)
         self._timer.start()
         self._live_chart_timer = QTimer(self)
-        self._live_chart_timer.setInterval(1500)
+        self._live_chart_timer.setInterval(LIVE_CHART_POLL_INTERVAL_MS)
         self._live_chart_timer.timeout.connect(self._poll_live_chart_state)
         self._live_chart_timer.start()
 
         self._refresh_license_widgets()
         self._append("[ui] Ready.\n")
-        QTimer.singleShot(0, self._refresh_result_panel)
-        QTimer.singleShot(0, self._poll_live_chart_state)
+        QTimer.singleShot(0, self._run_initial_gui_refresh)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -806,7 +829,7 @@ class MainWindow(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive_layout()
-        self._refresh_brand_logo()
+        self._schedule_brand_logo_refresh()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         try:
@@ -1350,23 +1373,45 @@ class MainWindow(QWidget):
     def _logo_box_size(self) -> tuple[int, int]:
         max_width = max(44, min(120, int(round(self.width() * 0.10))))
         max_height = max(44, min(96, int(round(self.height() * 0.10))))
-        return (max_width, max_height)
+        step = max(1, int(BRAND_LOGO_SIZE_STEP_PX))
+        box_width = max(44, min(120, int(round(max_width / step)) * step))
+        box_height = max(44, min(96, int(round(max_height / step)) * step))
+        return (box_width, box_height)
 
     def _clear_brand_logo(self) -> None:
         self._last_logo_box = (0, 0)
+        self._last_logo_device_ratio_key = 0
         self._logo_label.clear()
         self._logo_label.setToolTip("")
         self._logo_label.setVisible(False)
 
-    def _refresh_brand_logo(self, *, force: bool = False) -> None:
+    def _schedule_brand_logo_refresh(self, *, force: bool = False) -> None:
         if bool(self._compact_mode):
+            self._logo_refresh_timer.stop()
+            self._pending_brand_logo_force = False
+            return
+        self._pending_brand_logo_force = bool(self._pending_brand_logo_force or force)
+        self._logo_refresh_timer.start()
+
+    def _flush_brand_logo_refresh(self) -> None:
+        force = bool(self._pending_brand_logo_force)
+        self._pending_brand_logo_force = False
+        self._refresh_brand_logo(force=force)
+
+    def _refresh_brand_logo(self, *, force: bool = False) -> None:
+        self._gui_perf_counters["brand_logo_refresh_calls"] += 1
+        if bool(self._compact_mode):
+            self._gui_perf_counters["brand_logo_refresh_skips"] += 1
             self._clear_brand_logo()
             return
         if self._logo_asset is None:
+            self._gui_perf_counters["brand_logo_refresh_skips"] += 1
             self._clear_brand_logo()
             return
         box_width, box_height = self._logo_box_size()
-        if (not force) and (self._last_logo_box == (box_width, box_height)):
+        device_ratio_key = max(100, int(round(self.devicePixelRatioF() * 100.0)))
+        if (not force) and (self._last_logo_box == (box_width, box_height)) and (self._last_logo_device_ratio_key == device_ratio_key):
+            self._gui_perf_counters["brand_logo_refresh_skips"] += 1
             return
         pixmap = render_logo_pixmap(
             self._logo_asset,
@@ -1375,9 +1420,11 @@ class MainWindow(QWidget):
             device_pixel_ratio=self.devicePixelRatioF(),
         )
         if pixmap is None:
+            self._gui_perf_counters["brand_logo_refresh_skips"] += 1
             self._clear_brand_logo()
             return
         self._last_logo_box = (box_width, box_height)
+        self._last_logo_device_ratio_key = device_ratio_key
         device_ratio = max(1.0, float(pixmap.devicePixelRatio()))
         logical_size = QSize(
             max(1, int(round(pixmap.width() / device_ratio))),
@@ -1651,8 +1698,7 @@ class MainWindow(QWidget):
     def _on_run_mode_changed(self, _value: str) -> None:
         self._run_mode = self._selected_run_mode()
         self._sync_mode_ui()
-        self._last_chart_state_diag_key = None
-        self._last_chart_state_reader_path = ""
+        self._reset_live_chart_poll_tracking()
         if self._run_mode != "PAPER":
             self._restore_chart_mode_after_live_candle()
             self._set_live_chart_state(None, auto_prefer_candle=False)
@@ -1852,6 +1898,21 @@ class MainWindow(QWidget):
             state_present=bool(state_present),
         )
 
+    def _run_initial_gui_refresh(self) -> None:
+        self._refresh_result_panel()
+        if self._selected_run_mode() == "PAPER":
+            self._poll_live_chart_state()
+
+    def _set_proc_poll_activity(self, active: bool) -> None:
+        target = PROC_POLL_ACTIVE_INTERVAL_MS if active else PROC_POLL_IDLE_INTERVAL_MS
+        if self._timer.interval() != target:
+            self._timer.setInterval(target)
+
+    def _reset_live_chart_poll_tracking(self) -> None:
+        self._last_chart_state_diag_key = None
+        self._last_chart_state_reader_path = ""
+        self._last_live_chart_poll_signature = None
+
     def _log_live_chart_reader_path(self, state: LiveChartState | None) -> None:
         path_text = str(getattr(state, "path", "") or "").strip()
         if not path_text:
@@ -1921,26 +1982,45 @@ class MainWindow(QWidget):
             self._chart_mode_auto_live_candle_applied = True
 
     def _poll_live_chart_state(self) -> None:
+        self._gui_perf_counters["live_chart_poll_calls"] += 1
         run_mode = self._selected_run_mode()
         if run_mode not in {"PAPER"}:
-            self._last_chart_state_diag_key = None
-            self._last_chart_state_reader_path = ""
-            self._set_live_chart_state(None, auto_prefer_candle=False)
+            if self._live_chart_state is not None or self._last_live_chart_poll_signature is not None:
+                self._reset_live_chart_poll_tracking()
+                self._set_live_chart_state(None, auto_prefer_candle=False)
+            else:
+                self._gui_perf_counters["live_chart_poll_skips"] += 1
             return
+        exchange_id = self._selected_exchange_id()
+        symbol = self._selected_symbol()
+        chart_state_path = build_chart_state_path(self._paths.state_dir, exchange_id, run_mode, symbol)
+        is_runner_active = self._proc is not None and self._proc.poll() is None and str(self._proc_role) == "runner"
+        state_exists = os.path.isfile(chart_state_path)
+        mtime_ns = 0
+        size = 0
+        stale = False
+        if state_exists:
+            try:
+                stat_result = os.stat(chart_state_path)
+                mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
+                size = int(stat_result.st_size)
+                if not is_runner_active:
+                    stale = max(0.0, time.time() - float(stat_result.st_mtime)) > LIVE_CHART_STALE_SEC
+            except Exception:
+                pass
+        poll_signature = (exchange_id, run_mode, symbol, bool(is_runner_active), bool(state_exists), int(mtime_ns), int(size), bool(stale))
+        if poll_signature == self._last_live_chart_poll_signature:
+            self._gui_perf_counters["live_chart_poll_skips"] += 1
+            return
+        self._last_live_chart_poll_signature = poll_signature
         try:
-            chart_state = load_live_chart_state_for_runtime(
-                self._paths.state_dir,
-                self._selected_exchange_id(),
-                run_mode,
-                self._selected_symbol(),
-            )
+            chart_state = load_live_chart_state_for_runtime(self._paths.state_dir, exchange_id, run_mode, symbol)
         except Exception:
-            chart_state = self._build_waiting_live_chart_state(reason="state_load_failed")
+            chart_state = self._build_waiting_live_chart_state(reason="state_load_failed", path=chart_state_path)
         try:
-            is_runner_active = self._proc is not None and self._proc.poll() is None and str(self._proc_role) == "runner"
             if (not is_runner_active) and chart_state.path:
                 age_sec = max(0.0, time.time() - os.path.getmtime(chart_state.path))
-                if age_sec > 120.0:
+                if age_sec > LIVE_CHART_STALE_SEC:
                     chart_state = self._build_waiting_live_chart_state(
                         reason="state_stale",
                         path=str(chart_state.path or ""),
@@ -2064,6 +2144,7 @@ class MainWindow(QWidget):
         self._append(f"[result] open_folder failed path={folder}\n")
 
     def _refresh_result_panel(self, *, announce: bool = False) -> None:
+        self._gui_perf_counters["result_refresh_calls"] += 1
         try:
             data, messages = self._load_result_chart_data()
         except Exception as exc:
@@ -2071,7 +2152,18 @@ class MainWindow(QWidget):
             self._set_live_chart_state(self._live_chart_state, auto_prefer_candle=False)
             self._append(f"[result] refresh failed error={exc}\n")
             return
-        self._base_result_data = data if isinstance(data, ResultChartData) else ResultChartData()
+        next_data = data if isinstance(data, ResultChartData) else ResultChartData()
+        if (next_data == self._base_result_data) and (not messages):
+            self._gui_perf_counters["result_refresh_skips"] += 1
+            if announce:
+                shown = self.result_panel.result_data()
+                if shown.has_any_result:
+                    location = shown.export_dir or self._last_run_export_dir() or self._result_export_folder_path(shown)
+                    self._append(f"[result] refreshed export_dir={location}\n")
+                else:
+                    self._append("[result] No result data\n")
+            return
+        self._base_result_data = next_data
         self._set_live_chart_state(self._live_chart_state, auto_prefer_candle=False)
         for msg in messages:
             self._append(f"[result] {msg}\n")
@@ -3003,6 +3095,7 @@ class MainWindow(QWidget):
                 universal_newlines=True,
                 creationflags=creationflags,
             )
+            self._set_proc_poll_activity(active=self._proc is not None)
             start_log_threads(
                 stdout=self._proc.stdout,
                 stderr=self._proc.stderr,
@@ -3127,6 +3220,7 @@ class MainWindow(QWidget):
                 "report=from_replay_output\n"
             )
             self._proc = launch_replay(spec)
+            self._set_proc_poll_activity(active=self._proc is not None)
             start_log_threads(
                 stdout=self._proc.stdout,
                 stderr=self._proc.stderr,
@@ -3197,6 +3291,7 @@ class MainWindow(QWidget):
                 "report=from_replay_output\n"
             )
             self._proc = launch_replay(spec)
+            self._set_proc_poll_activity(active=self._proc is not None)
             start_log_threads(
                 stdout=self._proc.stdout,
                 stderr=self._proc.stderr,
@@ -3272,6 +3367,7 @@ class MainWindow(QWidget):
                 f"report={spec.report_enabled}\n"
             )
             self._proc = launch_backtest(spec)
+            self._set_proc_poll_activity(active=self._proc is not None)
             start_log_threads(
                 stdout=self._proc.stdout,
                 stderr=self._proc.stderr,
@@ -3407,14 +3503,14 @@ class MainWindow(QWidget):
                 f"preset={spec.preset} symbol={spec.symbol} report={spec.report_enabled}\n"
             )
             self._chart_mode_auto_live_candle_applied = False
-            self._last_chart_state_diag_key = None
-            self._last_chart_state_reader_path = ""
+            self._reset_live_chart_poll_tracking()
             self._refresh_result_panel()
             self._poll_live_chart_state()
             self._proc_role = "runner"
             self._close_replay_log_file()
             self._open_live_log_file()
             self._proc = launch_runner(spec)
+            self._set_proc_poll_activity(active=self._proc is not None)
             start_log_threads(
                 stdout=self._proc.stdout,
                 stderr=self._proc.stderr,
@@ -3464,8 +3560,12 @@ class MainWindow(QWidget):
         threading.Thread(target=self._stop_process_worker, args=(self._proc,), daemon=True).start()
 
     def _poll_proc(self) -> None:
+        self._gui_perf_counters["proc_poll_calls"] += 1
         if self._proc is None:
+            self._gui_perf_counters["proc_poll_idle_skips"] += 1
+            self._set_proc_poll_activity(False)
             return
+        self._set_proc_poll_activity(True)
         code = self._proc.poll()
         if code is None:
             return
@@ -3498,6 +3598,7 @@ class MainWindow(QWidget):
             else:
                 self._append(f"[ui] Runner exited with code={code}\n")
         self._proc = None
+        self._set_proc_poll_activity(False)
         self._proc_role = "runner"
         self._clear_manual_stop_state()
         self.btn_start.setEnabled(True)
@@ -3505,3 +3606,10 @@ class MainWindow(QWidget):
         self.btn_run_replay.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pipeline.setEnabled(True)
+
+    def gui_perf_counters(self) -> dict[str, object]:
+        counters = dict(self._gui_perf_counters)
+        counters["proc_poll_interval_ms"] = int(self._timer.interval()) if hasattr(self, "_timer") else 0
+        counters["live_chart_poll_interval_ms"] = int(self._live_chart_timer.interval()) if hasattr(self, "_live_chart_timer") else 0
+        counters["result_panel_chart"] = self.result_panel.chart_widget.diagnostic_counters() if hasattr(self, "result_panel") else {}
+        return counters

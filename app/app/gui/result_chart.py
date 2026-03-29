@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
@@ -1641,17 +1642,6 @@ class ResultChartWidget(QWidget):
                     default_text="Waiting for live/paper candles...",
                 ),
             )
-            if state is not None:
-                diag_parts: list[str] = []
-                if state.candle_source:
-                    diag_parts.append(f"source={state.candle_source}")
-                diag_parts.append(f"candles={int(state.candles_count)}")
-                if state.chart_state_reason:
-                    diag_parts.append(f"reason={state.chart_state_reason}")
-                diag_text = "  ".join(diag_parts)
-                if diag_text:
-                    diag_rect = QRectF(chart_rect.left(), chart_rect.center().y() + 18.0, chart_rect.width(), 18.0)
-                    painter.drawText(diag_rect, Qt.AlignmentFlag.AlignCenter, diag_text)
             self._draw_candle_footer(painter, outer, state, candles)
             return
 

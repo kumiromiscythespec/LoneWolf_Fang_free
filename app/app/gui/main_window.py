@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
@@ -211,6 +212,15 @@ _UI_TEXTS = {
         "dialog.period_yyyy_mm.message": "Since/Until は YYYY-MM で指定してください。\n{detail}",
         "dialog.data_empty.message": "解決後の {tag} データセットフォルダ配下に CSV ファイルが見つかりませんでした。",
         "dialog.until_month_invalid.message": "Until month は Since month 以上である必要があります。",
+        "dialog.backtest_guidance.dataset_missing.title": "Backtest データ不足",
+        "dialog.backtest_guidance.dataset_missing.message": "この Backtest に必要な 5m / 1h データセットフォルダが見つかりません。\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nDiagnostics / Pipeline を開いて Download + Precompute を実行してください。",
+        "dialog.backtest_guidance.dataset_missing.action": "Diagnostics / Pipeline を開く",
+        "dialog.backtest_guidance.symbol_missing.title": "Symbol 不足または未対応",
+        "dialog.backtest_guidance.symbol_missing.message": "選択中の Symbol が現在のデータセットに見つかりません。\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nSymbol コンボから別の銘柄を選択してください。",
+        "dialog.backtest_guidance.symbol_missing.action": "Symbol へ移動",
+        "dialog.backtest_guidance.range_out_of_data.title": "期間がデータ範囲外",
+        "dialog.backtest_guidance.range_out_of_data.message": "選択した Since / Until が利用可能なデータ範囲外です。\n\nsince={since}\nuntil={until}\ndataset_root={dataset_root}\n\n利用可能な月に合わせて Since / Until を調整してください。",
+        "dialog.backtest_guidance.range_out_of_data.action": "Since / Until へ移動",
     },
     "en": {
         "window.title": "LoneWolf Fang Free",
@@ -289,6 +299,15 @@ _UI_TEXTS = {
         "dialog.period_yyyy_mm.message": "Since/Until must be YYYY-MM.\n{detail}",
         "dialog.data_empty.message": "No CSV files were found under the resolved {tag} dataset folders.",
         "dialog.until_month_invalid.message": "Until month must be greater than or equal to since month.",
+        "dialog.backtest_guidance.dataset_missing.title": "Backtest dataset missing",
+        "dialog.backtest_guidance.dataset_missing.message": "5m / 1h dataset folders for this backtest were not found.\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nOpen Diagnostics / Pipeline and run Download + Precompute.",
+        "dialog.backtest_guidance.dataset_missing.action": "Open Diagnostics / Pipeline",
+        "dialog.backtest_guidance.symbol_missing.title": "Symbol missing or unavailable",
+        "dialog.backtest_guidance.symbol_missing.message": "The selected symbol was not found in the current dataset.\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nChoose another symbol from the Symbol combo.",
+        "dialog.backtest_guidance.symbol_missing.action": "Go to Symbol",
+        "dialog.backtest_guidance.range_out_of_data.title": "Range out of data",
+        "dialog.backtest_guidance.range_out_of_data.message": "The selected Since / Until range is outside the available dataset months.\n\nsince={since}\nuntil={until}\ndataset_root={dataset_root}\n\nAdjust Since / Until to match available months.",
+        "dialog.backtest_guidance.range_out_of_data.action": "Go to Since / Until",
     },
 }
 
@@ -2571,47 +2590,38 @@ class MainWindow(QWidget):
         since_text: str,
         until_text: str,
     ) -> None:
+        resolved_symbol = symbol or self._default_symbol
+        resolved_dataset_root = dataset_root or self._default_dataset_root
         if primary_category == "DATASET_MISSING":
-            title = "Backtest dataset missing / Backtestデータ不足"
-            message = (
-                "5m / 1h dataset folders for this backtest were not found.\n"
-                "Backtest に必要な 5m / 1h データセットフォルダが見つかりません。\n\n"
-                f"symbol={symbol or self._default_symbol}\n"
-                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
-                "Open Diagnostics / Pipeline and run Download + Precompute.\n"
-                "Diagnostics / Pipeline を開いて Download + Precompute を実行してください。"
-            )
-            action_text = "Open Diagnostics / Pipeline / 診断画面を開く"
+            guidance_key = "dataset_missing"
+            message_kwargs = {
+                "symbol": resolved_symbol,
+                "dataset_root": resolved_dataset_root,
+            }
         elif primary_category == "SYMBOL_MISSING_OR_UNAVAILABLE":
-            title = "Symbol missing or unavailable / Symbol不足または未対応"
-            message = (
-                "The selected symbol was not found in the current dataset.\n"
-                "選択中の Symbol が現在のデータセットに見つかりません。\n\n"
-                f"symbol={symbol or self._default_symbol}\n"
-                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
-                "Choose another symbol from the Symbol combo.\n"
-                "Symbol コンボから別の銘柄を選択してください。"
-            )
-            action_text = "Go to Symbol / Symbolへ移動"
+            guidance_key = "symbol_missing"
+            message_kwargs = {
+                "symbol": resolved_symbol,
+                "dataset_root": resolved_dataset_root,
+            }
         else:
-            title = "Range out of data / 期間がデータ範囲外"
-            message = (
-                "The selected Since / Until range is outside the available dataset months.\n"
-                "選択した Since / Until が利用可能なデータ範囲外です。\n\n"
-                f"since={since_text}\n"
-                f"until={until_text}\n"
-                f"dataset_root={dataset_root or self._default_dataset_root}\n\n"
-                "Adjust Since / Until to match available months.\n"
-                "利用可能な月に合わせて Since / Until を調整してください。"
-            )
-            action_text = "Go to Since / Until / 期間へ移動"
+            guidance_key = "range_out_of_data"
+            message_kwargs = {
+                "since": since_text,
+                "until": until_text,
+                "dataset_root": resolved_dataset_root,
+            }
+
+        title = self.tr(f"dialog.backtest_guidance.{guidance_key}.title")
+        message = self.tr(f"dialog.backtest_guidance.{guidance_key}.message", **message_kwargs)
+        action_text = self.tr(f"dialog.backtest_guidance.{guidance_key}.action")
 
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Icon.Warning)
         dialog.setWindowTitle(title)
         dialog.setText(message)
         action_button = dialog.addButton(action_text, QMessageBox.ButtonRole.ActionRole)
-        dialog.addButton("Close / 閉じる", QMessageBox.ButtonRole.RejectRole)
+        dialog.addButton(self.tr("action.close"), QMessageBox.ButtonRole.RejectRole)
         if isinstance(action_button, QPushButton):
             action_button.setDefault(True)
         dialog.exec()

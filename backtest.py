@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-21_backtest_final_residual_comment_cleanup_v1
 # BUILD_ID: 2026-03-20_backtest_ethusdc_size_sizing_diag_v1
 # BUILD_ID: 2026-03-20_backtest_ethusdc_open_cost_diag_v1
@@ -125,7 +126,7 @@ from app.core.export_paths import (
     write_last_run_json,
 )
 
-BUILD_ID = "2026-03-21_backtest_final_residual_comment_cleanup_v1"
+BUILD_ID = "2026-03-29_free_final_polish_v1"
 
 OPEN_COST_DIAG_LIMIT_DEFAULT = 8
 _CURRENT_EXPORT_DIR = ""
@@ -1915,6 +1916,16 @@ def _load_precomputed_indicator_series_fast(
     _validate_series_nan(name, out, warmup_bars, strict)
     return out
 
+
+def _resolve_precomputed_root(path: str) -> str:
+    raw = str(path or "").strip() or os.path.join("exports", "precomputed_indicators")
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    if os.path.isabs(expanded):
+        return os.path.abspath(expanded)
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(repo_root, expanded))
+
+
 def _resolve_precomputed_indicator_path(
     out_root: str,
     symbol: str,
@@ -1929,7 +1940,7 @@ def _resolve_precomputed_indicator_path(
     """
     # Normalize symbol for filesystem: "ETH/USDT" -> "ETHUSDT"
     symbol_fs = str(symbol).replace("/", "").replace(":", "").replace("-", "")
-    out_root_abs = os.path.abspath(out_root)
+    out_root_abs = _resolve_precomputed_root(out_root)
     alt_root_abs = os.path.join(out_root_abs, "precomputed_indicators")
     symbol_raw = str(symbol).strip()
     candidate_dirs = [
@@ -3465,7 +3476,9 @@ def run_backtest(
 
         # entry-side indicators
         pre_enabled = bool(getattr(C, "PRECOMPUTED_INDICATORS_ENABLED", False))
-        pre_root = str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
+        pre_root = _resolve_precomputed_root(
+            str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
+        )
         pre_strict = bool(getattr(C, "PRECOMPUTED_INDICATORS_STRICT", True))
         # Use run_backtest() arg to keep CLI/config overrides consistent
         warmup_bars_pre = int(warmup_bars or 0)

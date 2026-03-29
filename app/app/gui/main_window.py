@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_main_window_activation_local_reset_v1
@@ -118,7 +119,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
+BUILD_ID = "2026-03-29_free_final_polish_v1"
 logger = logging.getLogger(__name__)
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
@@ -181,16 +182,16 @@ _UI_TEXTS = {
         "action.reset_view": "表示をリセット",
         "action.close": "閉じる",
         "action.refresh": "更新",
-        "chart.mode.equity": "Equity",
-        "chart.mode.net": "Net",
-        "chart.mode.max_dd": "Max DD",
-        "chart.mode.trades": "Trades",
-        "chart.mode.combined": "Combined",
-        "chart.mode.candle": "Candle",
-        "chart.window_title": "Result Chart - {mode}",
-        "result.kpi.net": "net",
-        "result.kpi.max_dd": "max_dd",
-        "result.kpi.trades": "trades",
+        "chart.mode.equity": "エクイティ",
+        "chart.mode.net": "純損益",
+        "chart.mode.max_dd": "最大DD",
+        "chart.mode.trades": "取引数",
+        "chart.mode.combined": "複合",
+        "chart.mode.candle": "ローソク足",
+        "chart.window_title": "結果チャート - {mode}",
+        "result.kpi.net": "純損益",
+        "result.kpi.max_dd": "最大DD",
+        "result.kpi.trades": "取引数",
         "result.empty.no_result_data": "結果データがありません",
         "result.empty.no_result_data_yet": "結果データはまだありません",
         "result.empty.no_chart_ready_data": "チャート表示可能なデータがありません",
@@ -203,6 +204,13 @@ _UI_TEXTS = {
         "dialog.backtest_start_failed.title": "Backtest起動失敗",
         "dialog.start_failed.title": "起動失敗",
         "dialog.save_png.title": "Save PNG",
+        "dialog.already_running.title": "実行中",
+        "dialog.already_running.message": "Bot はすでに実行中です。",
+        "dialog.invalid_period.title": "期間エラー",
+        "dialog.invalid_period.message": "From/To は YYYY-MM で指定してください。",
+        "dialog.period_yyyy_mm.message": "Since/Until は YYYY-MM で指定してください。\n{detail}",
+        "dialog.data_empty.message": "解決後の {tag} データセットフォルダ配下に CSV ファイルが見つかりませんでした。",
+        "dialog.until_month_invalid.message": "Until month は Since month 以上である必要があります。",
     },
     "en": {
         "window.title": "LoneWolf Fang Free",
@@ -274,6 +282,13 @@ _UI_TEXTS = {
         "dialog.backtest_start_failed.title": "Backtest start failed",
         "dialog.start_failed.title": "Start failed",
         "dialog.save_png.title": "Save PNG",
+        "dialog.already_running.title": "Already running",
+        "dialog.already_running.message": "Bot is already running.",
+        "dialog.invalid_period.title": "Invalid period",
+        "dialog.invalid_period.message": "From/To must be YYYY-MM.",
+        "dialog.period_yyyy_mm.message": "Since/Until must be YYYY-MM.\n{detail}",
+        "dialog.data_empty.message": "No CSV files were found under the resolved {tag} dataset folders.",
+        "dialog.until_month_invalid.message": "Until month must be greater than or equal to since month.",
     },
 }
 
@@ -2742,7 +2757,7 @@ class MainWindow(QWidget):
             until_year, _ = self._parse_yyyy_mm(self.replay_until_ym.text())
             since_ymd, until_ymd = self._month_range_cli_ymd_from_ms(int(since_ms), int(until_ms))
         except Exception as e:
-            QMessageBox.warning(self, f"{title} range invalid", f"Since/Until must be YYYY-MM.\n{e}")
+            QMessageBox.warning(self, f"{title} range invalid", self.tr("dialog.period_yyyy_mm.message", detail=str(e)))
             return None
         data_path = str(self.replay_data.text() or "").strip() or str(self._replay_data_path or self._default_dataset_root)
         symbol = str(self._selected_replay_symbol() or self._default_symbol)
@@ -2759,7 +2774,8 @@ class MainWindow(QWidget):
         self._replay_dataset_prefix = str(prefix or self._replay_dataset_prefix)
         self._replay_dataset_year = int(year or 0)
         self.replay_data.setText(self._replay_data_path)
-        if (not os.path.isdir(dir_5m)) or (not os.path.isdir(dir_1h)):
+        dir_missing = (not os.path.isdir(dir_5m)) or (not os.path.isdir(dir_1h))
+        if dir_missing and tag != "backtest":
             msg = build_missing_dataset_message(
                 context=f"GUI_{title.upper()}",
                 tf="5m/1h",
@@ -2786,15 +2802,15 @@ class MainWindow(QWidget):
             f"[{tag}] data check: 5m_dir={dir_5m} count={cnt_5m} "
             f"1h_dir={dir_1h} count={cnt_1h} total={cnt_total}\n"
         )
-        if cnt_total <= 0:
+        if cnt_total <= 0 and not (tag == "backtest" and dir_missing):
             QMessageBox.warning(
                 self,
                 f"{title} data empty",
-                f"No CSV files were found under the resolved {tag} dataset folders.",
+                self.tr("dialog.data_empty.message", tag=tag),
             )
             return None
         if int(until_ms) <= int(since_ms):
-            QMessageBox.warning(self, f"{title} range invalid", "Until month must be greater than or equal to since month.")
+            QMessageBox.warning(self, f"{title} range invalid", self.tr("dialog.until_month_invalid.message"))
             return None
         return {
             "symbol": str(symbol),

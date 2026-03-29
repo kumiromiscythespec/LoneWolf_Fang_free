@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_result_chart_snapshot_folder_align_v1
@@ -40,7 +41,7 @@ from PySide6.QtWidgets import (
 from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
 
 
-BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
+BUILD_ID = "2026-03-29_free_final_polish_v1"
 
 CHART_MODE_EQUITY = "Equity"
 CHART_MODE_NET = "Net"
@@ -69,8 +70,11 @@ _RESULT_EMPTY_MESSAGE_TEXT_KEYS = {
     "No result data yet": "result.empty.no_result_data_yet",
     "No chart-ready data": "result.empty.no_chart_ready_data",
     "live/paper chart state parse failed": "result.empty.live_parse_failed",
+    "paper chart state parse failed": "result.empty.live_parse_failed",
     "live/paper chart state present but candles are not ready": "result.empty.live_waiting_ready",
+    "paper chart state present but candles are not ready": "result.empty.live_waiting_ready",
     "Waiting for live/paper candles...": "result.empty.live_waiting",
+    "Waiting for paper candles...": "result.empty.live_waiting",
 }
 
 _COLOR_BG = QColor("#050608")

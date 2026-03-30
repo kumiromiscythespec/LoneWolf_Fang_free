@@ -17,6 +17,7 @@ runtime/state/*
 packaging/staging/
 packaging/dist/
 packaging/test_desktop/
+packaging_backup/
 
 # python cache
 __pycache__/
@@ -30,3 +31,9 @@ market_data/
 
 # local venv
 .venv/
+
+# native launcher build outputs
+launcher_native/bin/
+launcher_native/obj/
+setup_bootstrap/bin/
+setup_bootstrap/obj/

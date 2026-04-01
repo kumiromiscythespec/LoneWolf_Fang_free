@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
+# BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
 # BUILD_ID: 2026-03-21_runtime_layout_contract_v1
 # BUILD_ID: 2026-03-21_config_user_preset_search_root_v1
@@ -18,11 +18,7 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
-
-BUILD_TIER = "FREE"
-FREE_ALLOWED_MODES = ("PAPER", "REPLAY", "BACKTEST")
-FREE_LIVE_SUPPORTED = False
+BUILD_ID = "2026-03-31_config_symbol_preset_selector_map_fix_v1"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -110,11 +106,19 @@ def _first_symbol_from_raw(raw: str) -> str:
 _symbol_preset_env_raw = str(os.getenv("LWF_SYMBOL_PRESET") or "").strip()
 _SYMBOL_PRESET_DEFAULT_SYMBOLS = {
     "BTCJPY": "BTC/JPY",
+    "BTCUSDT": "BTC/USDT",
+    "BTCUSDC": "BTC/USDC",
+    "ETHUSDT": "ETH/USDT",
     "ETHUSDC": "ETH/USDC",
+    "ETHJPY": "ETH/JPY",
 }
 _SYMBOL_PRESET_DEFAULT_EXCHANGE_IDS = {
     "BTCJPY": "coincheck",
+    "BTCUSDT": "mexc",
+    "BTCUSDC": "mexc",
+    "ETHUSDT": "binance",
     "ETHUSDC": "mexc",
+    "ETHJPY": "coincheck",
 }
 _symbol_preset_env_symbol = _first_symbol_from_raw(_symbol_preset_env_raw)
 _symbol_preset_env_key = _symbol_to_prefix(_symbol_preset_env_symbol)
@@ -137,11 +141,16 @@ elif _registry_symbols:
 else:
     SYMBOLS = [str(_default_symbol)]
 
-# Canonical shipped presets live under configs/; configs/user/ is reserved for future user presets.
+# Symbol preset search roots:
+# 1) configs/user   : user-managed overrides
+# 2) repo root      : chat-pasted / local preset files next to config.py
+# 3) configs/       : canonical shipped presets
+_SYMBOL_PRESET_LOCAL_DIR = os.path.dirname(__file__)
 _SYMBOL_PRESET_CANONICAL_DIR = os.path.join(os.path.dirname(__file__), "configs")
 _SYMBOL_PRESET_USER_DIR = os.path.join(_SYMBOL_PRESET_CANONICAL_DIR, "user")
 _SYMBOL_PRESET_SEARCH_DIRS = (
     _SYMBOL_PRESET_USER_DIR,
+    _SYMBOL_PRESET_LOCAL_DIR,
     _SYMBOL_PRESET_CANONICAL_DIR,
 )
 
@@ -235,6 +244,17 @@ PAIR_REGISTRY = {
         "account_ccy": "JPY",
         "settlement_ccy": "JPY",
         "visible": True,
+    },
+    "coincheck:ETH/JPY": {
+        "exchange_id": "coincheck",
+        "symbol": "ETH/JPY",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "JPY",
+        "account_ccy": "JPY",
+        "settlement_ccy": "JPY",
+        "visible": False,
+        "experimental": True,
     },
     "mexc:BTC/USDT": {
         "exchange_id": "mexc",
@@ -502,14 +522,14 @@ EMA_SLOW = 50
 # =========================
 BACKTEST_DISABLE_BE = True
 BE_ENABLED = False  # Standard baseline: BE is hard-disabled in runner/replay.
-RANGE_ATR_TP_MULT = 0.88423
-RANGE_ATR_SL_MULT = 0.00625
+RANGE_ATR_TP_MULT = 0.90
+RANGE_ATR_SL_MULT = 0.045
 
 # Minimum EMA9 distance for range entry.
 RANGE_MIN_E9_DIST_BPS = 0.0
-RANGE_ENTRY_MIN_ATR_BPS = 0.0  # Standard range baseline: require ATR/price*1e4 >= this before entering
-RANGE_RSI_BUY_MAX = 71.0
-RANGE_ENTRY_MAX_EMA21_DIST_BPS = 999.0  # 0 disables the gate.
+RANGE_ENTRY_MIN_ATR_BPS = 12.0  # BTC/USDT stable preset baseline.
+RANGE_RSI_BUY_MAX = 74.0
+RANGE_ENTRY_MAX_EMA21_DIST_BPS = 85.0
 
 # =========================
 # Range quality filters (entry gate)
@@ -620,6 +640,7 @@ SL_SPREAD_MULT = 1.0
 # =========================
 # Range timeout
 RANGE_TIMEOUT_BARS = 24
+RANGE_UNFAV_EXIT_COOLDOWN_BARS = 12
 RANGE_TIMEOUT_MIN_PROFIT_BPS = -5.0
 
 # Range exits (early-loss protection)
@@ -830,7 +851,7 @@ BE_DYNAMIC_FEE_MULT = 9.0
 RANGE_MIN_RR_ENTRY = 0.00
 RANGE_EARLY_LOSS_ATR = 0.8
 RANGE_EMA21_BUF_BPS = 0.0
-RANGE_EMA9_MIN_LOSS_BPS = 10.0
+RANGE_EMA9_MIN_LOSS_BPS = 11.0
 MIN_LOSS_BPS = RANGE_EMA9_MIN_LOSS_BPS
 RANGE_EMA9_CROSS_EXIT_MIN_LOSS_BPS = RANGE_EMA9_MIN_LOSS_BPS
 RANGE_ATR_EXPAND_N = 20
@@ -845,8 +866,8 @@ RANGE_EMA21_BREAK = RANGE_EXIT_ON_EMA21_BREAK
 RANGE_EMA9_CROSS = RANGE_EXIT_ON_EMA9_CROSS
 EMA9_MIN_LOSS_BPS = RANGE_EMA9_MIN_LOSS_BPS
 RANGE_EXIT_EMA21_BUF_BPS = RANGE_EXIT_EMA21_BUFFER_BPS
-RANGE_TRAIL_START_R = 0.90
-RANGE_TRAIL_BPS_FROM_HIGH = 8.0
+RANGE_TRAIL_START_R = 1.0
+RANGE_TRAIL_BPS_FROM_HIGH = 14.0
 TP1_TRIGGER_R = RANGE_TP1_TRIGGER_R
 TP1_QTY_PCT = RANGE_TP1_QTY_PCT
 export_diff_trace=True
@@ -860,3 +881,29 @@ RANGE_NEAR_LOW_ATR_MULT = 7.5
 RANGE_ENTRY_MIN_EMA9_GAP_BPS = 0.0
 
 _apply_symbol_preset(_ACTIVE_SYMBOL_PRESET)
+
+# ----------------------------------------------------------------------
+# BTC/USDT stable preset operational notes
+# ----------------------------------------------------------------------
+# Fixed from BTC/USDT stable preset exploration:
+# - RANGE_ATR_TP_MULT = 0.90
+# - RANGE_ATR_SL_MULT = 0.045
+# - RANGE_ENTRY_MIN_ATR_BPS = 12.0
+# - RANGE_RSI_BUY_MAX = 74.0
+# - RANGE_ENTRY_MAX_EMA21_DIST_BPS = 85.0
+# - RANGE_TIMEOUT_BARS = 24
+# - RANGE_TIMEOUT_MIN_PROFIT_BPS = -5.0
+# - RANGE_EARLY_EXIT_LOSS_ATR_MULT = 0.80
+# - RANGE_TP1_TRIGGER_R = 10.0
+# - RANGE_TP1_QTY_PCT = 0.0
+# - RANGE_TRAIL_START_R = 1.0
+# - RANGE_TRAIL_BPS_FROM_HIGH = 14.0
+#
+# Proxy execution holdout summary:
+# - Acceptable proxy holdout zone: SLIPPAGE_BPS <= 7
+# - Danger zone begins around: SLIPPAGE_BPS >= 8
+#
+# Operational reminder:
+# Monitor real spread and realized slippage continuously before taking
+# this preset into paper/live operation, and define a stop condition for
+# degraded execution quality.

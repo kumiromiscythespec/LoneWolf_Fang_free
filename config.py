@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
 # BUILD_ID: 2026-03-21_runtime_layout_contract_v1
@@ -18,7 +19,7 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-03-31_config_symbol_preset_selector_map_fix_v1"
+BUILD_ID = "2026-04-02_config_standard_continuity_hardening_v1"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -440,21 +441,26 @@ WARMUP_BARS = 200
 # Also (NEW): stop taking NEW entries for the rest of the week when:
 # - weekly net PnL <= -RISK_WEEKLY_STOP_LOSS (pct or absolute JPY)
 RISK_CONTROLS_ENABLED = True
-RISK_DAILY_STOP_LOSS_PCT = 2.0      # % of INITIAL_EQUITY (used if *_JPY is None)
+RISK_DAILY_STOP_LOSS_PCT = 1.0      # % of INITIAL_EQUITY (used if *_JPY is None)
 RISK_DAILY_STOP_LOSS_JPY = None     # absolute JPY (overrides pct when set)
 RISK_MAX_CONSECUTIVE_LOSSES = 3     #3 # block new entries after N losses in a row (same day)
-RISK_WEEKLY_STOP_LOSS_PCT = 4.0     # % of INITIAL_EQUITY (used if *_JPY is None, 0 disables)
+RISK_WEEKLY_STOP_LOSS_PCT = 2.5     # % of INITIAL_EQUITY (used if *_JPY is None, 0 disables)
 RISK_WEEKLY_STOP_LOSS_JPY = None    # absolute JPY (overrides pct when set)
 # Kill Switch (opt-in, default OFF; backward compatible)
-KILL_SWITCH_ENABLED = False
+KILL_SWITCH_ENABLED = True
 KILL_SWITCH_MODE = "HALT_NEW_ENTRIES"  # "HALT_NEW_ENTRIES" or "EXIT_PROCESS"
-KILL_MAX_DD_PCT = 0.0
-KILL_MAX_DAILY_LOSS_PCT = 0.0
-KILL_MAX_CONSEC_LOSSES = 0
-KILL_MAX_SPREAD_BPS = 0.0
+KILL_MAX_DD_PCT = 0.02
+KILL_MAX_DAILY_LOSS_PCT = 0.01
+KILL_MAX_CONSEC_LOSSES = 4
+KILL_MAX_SPREAD_BPS = 8.0
 KILL_MIN_EQUITY = 0.0
-KILL_COOLDOWN_DAYS = 0
+KILL_COOLDOWN_DAYS = 2
 KILL_DEBUG_LOG_ENABLED = False
+# Continuity hardening defaults (2026-04-02)
+# - tighten daily/weekly stop and consecutive-loss stop
+# - enable kill switch in HALT_NEW_ENTRIES mode
+# - tighten spread gate and slightly reduce size expansion
+# - raise minimum TP / loss floor to reduce low-edge trades
 # Report (opt-in, default OFF; backward compatible)
 REPORT_ENABLED = False
 REPORT_OUT_PATH = _runtime_exports_path("report.json")
@@ -552,7 +558,7 @@ TIME_WINDOW_ENABLED = False
 MAX_RISK_PCT = 0.01
 POSITION_SIZING_MODE = "LEGACY_COMPOUND"  # Compatibility default.
 BASE_RISK_PCT = 0.01
-MAX_POSITION_PCT_OF_EQUITY = 0.15
+MAX_POSITION_PCT_OF_EQUITY = 0.12
 MAX_POSITION_NOTIONAL_PCT = MAX_POSITION_PCT_OF_EQUITY
 DD_DELEVER_THRESHOLD = 0.02
 DD_DELEVER_MIN_MULT = 0.25
@@ -569,10 +575,10 @@ LEGACY_COMPOUND_PROFIT_W_RAMP_MIN_G = 0.0
 LEGACY_COMPOUND_ALPHA = 0.5
 LEGACY_COMPOUND_MULT_CAP = 2.5
 SIZE_MIN_BUMP_ENABLED = True
-SIZE_MIN_BUMP_MAX_PCT_OF_CAP = 0.45
+SIZE_MIN_BUMP_MAX_PCT_OF_CAP = 0.35
 SIZE_CAP_RAMP_ENABLED = True
 SIZE_CAP_RAMP_K = 1.25
-SIZE_CAP_RAMP_MAX_PCT = 0.22
+SIZE_CAP_RAMP_MAX_PCT = 0.18
 SIZE_SIZING_DEBUG_LOG_ENABLED = False
 PRESETS: dict[str, dict[str, Any]] = {
     "OFF": {},
@@ -625,7 +631,7 @@ MIN_RR_ENTRY_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_SHORT = 1.50
 MIN_TP_COST_MULT = 3.0
-MIN_TP_BPS = 10.0
+MIN_TP_BPS = 12.0
 MIN_STOP_BPS = 4.0
 MAX_STOP_BPS = 30.0  # cap SL distance; trades needing wider SL are skipped
 RANGE_MAX_STOP_BPS = 80.0  # disable hard cap so RANGE_ATR_SL_MULT can actually affect stop distance
@@ -851,7 +857,7 @@ BE_DYNAMIC_FEE_MULT = 9.0
 RANGE_MIN_RR_ENTRY = 0.00
 RANGE_EARLY_LOSS_ATR = 0.8
 RANGE_EMA21_BUF_BPS = 0.0
-RANGE_EMA9_MIN_LOSS_BPS = 11.0
+RANGE_EMA9_MIN_LOSS_BPS = 12.0
 MIN_LOSS_BPS = RANGE_EMA9_MIN_LOSS_BPS
 RANGE_EMA9_CROSS_EXIT_MIN_LOSS_BPS = RANGE_EMA9_MIN_LOSS_BPS
 RANGE_ATR_EXPAND_N = 20
@@ -876,7 +882,7 @@ diff_trace_source="live"
 
 MAKER_TTL_SEC = 1.0
 TTL_STATS_LOG_INTERVAL_SEC = 60
-MAX_SPREAD_BPS = 5.0
+MAX_SPREAD_BPS = 4.0
 RANGE_NEAR_LOW_ATR_MULT = 7.5
 RANGE_ENTRY_MIN_EMA9_GAP_BPS = 0.0
 

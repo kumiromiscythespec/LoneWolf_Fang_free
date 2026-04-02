@@ -1,347 +1,78 @@
-{
-  "build_id": "2026-03-25_free_package_manifest_v1",
-  "manifest_version": 2,
+﻿{
+  "build_id": "2026-04-02_free_package_manifest_user_scope_installer_v1",
+  "manifest_version": 3,
   "product": "LoneWolf_Fang_free",
   "package_root_name": "LoneWolf_Fang_free",
   "packaging_stage": "zip_ready_local_installer",
-  "source_of_truth": "latest_local_working_tree",
+  "source_of_truth": "codex_snapshots_and_local_working_tree",
   "scope": {
     "tier": "free",
-    "initial_symbol": "BTC/JPY",
-    "include_paper": true,
-    "include_replay": true,
-    "include_backtest": true,
-    "include_live": false,
-    "include_eth_usdc": false,
-    "include_aggressive": false,
-    "include_30day_test": false,
-    "bundle_dataset": false,
-    "bundle_runtime_outputs": false,
-    "bundle_support_bundle": false,
+    "include_gui": true,
     "bundle_local_installer": true,
-    "bundle_online_installer": false,
-    "bundle_exe": false,
-    "include_advanced_tools": false,
-    "include_gui": true
+    "bundle_exe": true
   },
   "include_core": [
-    {
-      "path": "app",
-      "type": "directory",
-      "copy_mode": "recursive",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "config.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "runner.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "backtest.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "exchange.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "safety.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "state_store.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "precompute_indicators.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime"
-    },
-    {
-      "path": "strategy.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_dependency"
-    },
-    {
-      "path": "risk.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_dependency"
-    },
-    {
-      "path": "indicators.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_dependency"
-    },
-    {
-      "path": "trace_bar_policy.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_dependency"
-    },
-    {
-      "path": "requirements.txt",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_support"
-    },
-    {
-      "path": "README.md",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "core_runtime_support"
-    }
+    { "path": "app", "type": "directory", "copy_mode": "recursive", "required": true, "group": "core_runtime" },
+    { "path": "config.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "runner.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "backtest.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "exchange.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "safety.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "state_store.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "precompute_indicators.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime" },
+    { "path": "strategy.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_dependency" },
+    { "path": "risk.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_dependency" },
+    { "path": "indicators.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_dependency" },
+    { "path": "trace_bar_policy.py", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_dependency" },
+    { "path": "requirements.txt", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_support" },
+    { "path": "README.md", "type": "file", "copy_mode": "file", "required": true, "group": "core_runtime_support" }
   ],
   "include_configs": [
-    {
-      "path": "configs/__init__.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "config"
-    },
-    {
-      "path": "configs/config_standard_BTCJPY.py",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "config"
-    },
-    {
-      "path": "configs/user/.gitkeep",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "config_skeleton"
-    }
+    { "path": "configs/__init__.py", "type": "file", "copy_mode": "file", "required": true, "group": "config" },
+    { "path": "configs/config_standard_BTCJPY.py", "type": "file", "copy_mode": "file", "required": true, "group": "config" },
+    { "path": "configs/user/.gitkeep", "type": "file", "copy_mode": "file", "required": true, "group": "config_skeleton" }
   ],
   "include_launchers": [
-    {
-      "path": "Install_LoneWolf_Fang_Free.cmd",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "installer_entry"
-    },
-    {
-      "path": "Launch_LoneWolf_Fang_Free_GUI.cmd",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "launcher"
-    },
-    {
-      "path": "Launch_LoneWolf_Fang_Free_GUI.vbs",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "launcher"
-    },
-    {
-      "path": "Launch_LoneWolf_Fang_Free_Shell.cmd",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "launcher"
-    },
-    {
-      "path": "packaging/install_free_local.ps1",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "installer_support"
-    },
-    {
-      "path": "packaging/install_config_free.json",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "installer_support"
-    }
+    { "path": "Install_LoneWolf_Fang_Free.cmd", "type": "file", "copy_mode": "file", "required": true, "group": "installer_entry" },
+    { "path": "Launch_LoneWolf_Fang_Free_GUI.cmd", "type": "file", "copy_mode": "file", "required": true, "group": "launcher" },
+    { "path": "Launch_LoneWolf_Fang_Free_GUI.ps1", "type": "file", "copy_mode": "file", "required": true, "group": "launcher" },
+    { "path": "Launch_LoneWolf_Fang_Free_GUI.vbs", "type": "file", "copy_mode": "file", "required": true, "group": "launcher" },
+    { "path": "Launch_LoneWolf_Fang_Free_Shell.cmd", "type": "file", "copy_mode": "file", "required": true, "group": "launcher" },
+    { "path": "packaging/install_free_local.ps1", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" },
+    { "path": "packaging/install_config_free.json", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" },
+    { "path": "packaging/install_shared.ps1", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" },
+    { "path": "packaging/package_common.ps1", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" },
+    { "path": "packaging/package_manifest_free.json", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" },
+    { "path": "packaging/requirements_free_runtime.txt", "type": "file", "copy_mode": "file", "required": true, "group": "installer_support" }
+  ],
+  "include_native_artifacts": [
+    { "path": "LoneWolfFangFreeLauncher.exe", "source_candidates": ["LoneWolfFangFreeLauncher.exe", "launcher_native/bin/Release/net8.0-windows/publish/win-x64-single-file/LoneWolfFangFreeLauncher.exe"], "type": "file_if_present", "copy_mode": "file", "required": false, "group": "native_launcher", "role": "gui_entrypoint", "signing_scope": "package_root_only" },
+    { "path": "LoneWolf_Fang_Free_Setup.exe", "source_candidates": ["LoneWolf_Fang_Free_Setup.exe", "setup_bootstrap/bin/Release/net8.0-windows/publish/win-x64-single-file/LoneWolf_Fang_Free_Setup.exe"], "type": "file_if_present", "copy_mode": "file", "required": false, "group": "native_setup_bootstrap", "role": "install_update_entrypoint", "signing_scope": "package_root_only" }
   ],
   "include_docs": [
-    {
-      "path": "packaging/README_free_package.md",
-      "type": "file",
-      "copy_mode": "file",
-      "required": true,
-      "group": "docs"
-    }
+    { "path": "packaging/README_free_package.md", "type": "file", "copy_mode": "file", "required": true, "group": "docs" }
   ],
   "include_advanced_tools": [],
-  "runtime_skeleton": [
-    "runtime",
-    "runtime/archives",
-    "runtime/exports",
-    "runtime/exports/runs",
-    "runtime/logs",
-    "runtime/state",
-    "configs/user"
-  ],
-  "reinclude_after_exclude": [
-    "runtime/.gitkeep",
-    "runtime/archives/.gitkeep",
-    "runtime/exports/.gitkeep",
-    "runtime/exports/runs/.gitkeep",
-    "runtime/logs/.gitkeep",
-    "runtime/state/.gitkeep"
-  ],
+  "runtime_skeleton": ["runtime", "runtime/archives", "runtime/exports", "runtime/exports/runs", "runtime/logs", "runtime/state", "configs/user"],
+  "reinclude_after_exclude": ["runtime/.gitkeep", "runtime/archives/.gitkeep", "runtime/exports/.gitkeep", "runtime/exports/runs/.gitkeep", "runtime/logs/.gitkeep", "runtime/state/.gitkeep"],
   "exclude": [
-    {
-      "pattern": "runtime/archives/*",
-      "reason": "runtime archives are operational outputs and are not bundled except for skeleton keep files"
-    },
-    {
-      "pattern": "runtime/exports/*",
-      "reason": "runtime exports are generated after operation and are not bundled except for skeleton keep files"
-    },
-    {
-      "pattern": "runtime/exports/runs/*",
-      "reason": "run export payloads are operational outputs and are not bundled except for skeleton keep files"
-    },
-    {
-      "pattern": "runtime/logs/*",
-      "reason": "runtime logs are operational outputs and are not bundled except for skeleton keep files"
-    },
-    {
-      "pattern": "runtime/state/*",
-      "reason": "runtime state is writable runtime data and is not bundled except for skeleton keep files"
-    },
-    {
-      "pattern": "market_data/*",
-      "reason": "dataset content is acquired separately and is not bundled"
-    },
-    {
-      "pattern": "patched/*",
-      "reason": "local patch artifacts are not bundled"
-    },
-    {
-      "pattern": ".git/*",
-      "reason": "git metadata is not bundled"
-    },
-    {
-      "pattern": "*__pycache__*",
-      "reason": "bytecode caches are not bundled"
-    },
-    {
-      "pattern": "*.pyc",
-      "reason": "bytecode caches are not bundled"
-    },
-    {
-      "pattern": "packaging/staging/*",
-      "reason": "staging outputs are local packaging artifacts and are not bundled"
-    },
-    {
-      "pattern": "packaging/dist/*",
-      "reason": "dist outputs are local packaging artifacts and are not bundled"
-    },
-    {
-      "pattern": "packaging/server_templates/*",
-      "reason": "standard online installer server templates are outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/README_standard_package.md",
-      "reason": "standard package documentation is outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/install_runtime.ps1",
-      "reason": "standard online installer runtime downloader is outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/install_config_standard.json",
-      "reason": "standard online installer config is outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/installer_manifest_url.txt",
-      "reason": "standard online installer manifest endpoint is outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/package_manifest_standard.json",
-      "reason": "standard package manifest is outside the free package boundary"
-    },
-    {
-      "pattern": "packaging/package_manifest_app_payload_standard.json",
-      "reason": "standard app payload manifest is outside the free package boundary"
-    },
-    {
-      "pattern": "Install_LoneWolf_Fang_Standard.cmd",
-      "reason": "standard online installer entrypoint is outside the free package boundary"
-    },
-    {
-      "pattern": "Launch_LoneWolf_Fang_GUI.cmd",
-      "reason": "legacy standard GUI launcher name is outside the free package boundary"
-    },
-    {
-      "pattern": "Launch_LoneWolf_Fang_GUI.vbs",
-      "reason": "legacy standard GUI launcher name is outside the free package boundary"
-    },
-    {
-      "pattern": "Launch_Advanced_Shell.cmd",
-      "reason": "legacy shell launcher name is outside the free package boundary"
-    },
-    {
-      "pattern": "sweep.py",
-      "reason": "advanced sweep tooling is excluded from free v1 package"
-    },
-    {
-      "pattern": "sweep_presets.py",
-      "reason": "advanced sweep tooling is excluded from free v1 package"
-    },
-    {
-      "pattern": "sweep_presets_local.py",
-      "reason": "local-only sweep preset overlay is excluded from free v1 package"
-    },
-    {
-      "pattern": "sweep_presets_local.py.example",
-      "reason": "advanced sweep preset example is excluded from free v1 package"
-    },
-    {
-      "pattern": "docs/internal/*",
-      "reason": "internal docs are excluded from the end-user free package"
-    },
-    {
-      "pattern": "verify_*",
-      "reason": "verification helpers are not bundled"
-    }
+    { "pattern": "runtime/archives/*", "reason": "runtime archives are writable outputs" },
+    { "pattern": "runtime/exports/*", "reason": "runtime exports are writable outputs" },
+    { "pattern": "runtime/exports/runs/*", "reason": "runtime run exports are writable outputs" },
+    { "pattern": "runtime/logs/*", "reason": "runtime logs are writable outputs" },
+    { "pattern": "runtime/state/*", "reason": "runtime state is writable output" },
+    { "pattern": "market_data/*", "reason": "datasets are not bundled" },
+    { "pattern": "patched/*", "reason": "patch artifacts are not bundled" },
+    { "pattern": ".git/*", "reason": "git metadata is not bundled" },
+    { "pattern": "*__pycache__*", "reason": "bytecode caches are not bundled" },
+    { "pattern": "*.pyc", "reason": "bytecode caches are not bundled" },
+    { "pattern": "packaging/staging/*", "reason": "staging outputs are not bundled" },
+    { "pattern": "packaging/dist/*", "reason": "dist outputs are not bundled" }
   ],
   "notes": [
-    "free v1 is a local-installer zip package, not an online installer package.",
-    "free v1 includes GUI, PAPER, REPLAY, and BACKTEST, but excludes LIVE.",
-    "The free package creates a desktop shortcut to the GUI VBS launcher during local install.",
-    "Datasets are not bundled; market_data is acquired separately.",
-    "runtime directories are shipped as skeleton only via .gitkeep reinclude entries.",
-    "configs/config_standard_BTCJPY.py is intentionally retained because config.py currently resolves config_standard_<symbol>.py."
+    "free uses shared base Python plus a product-specific venv under %LocalAppData%\\LoneWolfFang\\venvs\\free.",
+    "launcher compatibility shims stay in the package root and the runtime data root is user-scope.",
+    "native launcher and native setup bootstrap remain optional package artifacts.",
+    "datasets are not bundled."
   ]
 }

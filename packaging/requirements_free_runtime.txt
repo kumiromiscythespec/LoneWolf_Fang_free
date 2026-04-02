@@ -1,0 +1,5 @@
+﻿# BUILD_ID: 2026-04-02_free_runtime_requirements_v1
+keyring
+pywin32
+PySide6
+setuptools

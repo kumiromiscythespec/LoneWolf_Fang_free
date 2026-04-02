@@ -1,6 +1,8 @@
 ﻿// BUILD_ID: 2026-03-30_free_native_setup_bootstrap_dotnet8_v1
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -9,7 +11,7 @@ namespace LoneWolfFangFreeSetup;
 
 internal static class Program
 {
-    private const string BuildId = "2026-03-30_free_native_setup_bootstrap_dotnet8_v1";
+    private const string BuildId = "2026-04-02_free_online_setup_latest_release_v1";
     private const string InstallerScriptRelativePath = @"packaging\install_free_local.ps1";
     private const string InstallConfigRelativePath = @"packaging\install_config_free.json";
     private const string InstallerCompatCmdRelativePath = @"Install_LoneWolf_Fang_Free.cmd";
@@ -19,6 +21,11 @@ internal static class Program
     private const string DesktopShortcutFileName = "LoneWolf Fang Free GUI.lnk";
     private const string LogFileName = "setup_bootstrap_free.log";
     private const string MessageBoxTitle = "LoneWolf Fang Free Setup";
+    private const string ProductCode = "free";
+    private const string PackageAssetFileName = "LoneWolf_Fang_Free_Package.zip";
+    private const string LatestPackageUrl = "https://github.com/kumiromiscythespec/LoneWolf_Fang_free/releases/latest/download/LoneWolf_Fang_Free_Package.zip";
+    private const string CommonPackageUrlEnvName = "LWF_SETUP_PACKAGE_URL";
+    private const string ProductPackageUrlEnvName = "LWF_FREE_SETUP_PACKAGE_URL";
     private const uint MbOk = 0x00000000;
     private const uint MbIconError = 0x00000010;
 
@@ -30,6 +37,7 @@ internal static class Program
         var exitCode = (int)SetupExitCode.Success;
         string? packageRoot = null;
         string? installerScriptPath = null;
+        PackageAcquisition? packageAcquisition = null;
 
         logger.Info($"setup_bootstrap start BUILD_ID={BuildId}");
         logger.Info($"raw_args={FormatArguments(args)}");
@@ -49,23 +57,27 @@ internal static class Program
 
             var exeDirectory = Path.GetDirectoryName(exePath)
                 ?? throw SetupException.RootUnresolved(
-                    "Setup could not resolve its executable directory. Please extract the full package and try again.",
+                    "Setup could not resolve its executable directory.",
                     $"Unable to resolve executable directory from: {exePath}");
 
-            packageRoot = TryResolvePackageRoot(exeDirectory)
-                ?? throw SetupException.RootUnresolved(
-                    "Setup could not find the installer package. Please extract the full package and try again.",
-                    $"Unable to resolve package root from: {exeDirectory}");
+            packageAcquisition = ResolvePackageAcquisition(exeDirectory, options, logger);
+            packageRoot = packageAcquisition.PackageRoot;
 
             installerScriptPath = Path.Combine(packageRoot, InstallerScriptRelativePath);
             if (!File.Exists(installerScriptPath))
             {
                 throw SetupException.InstallerScriptMissing(
-                    "Setup could not find the installer script. Please extract the full package and try again.",
+                    $"Setup could not find the installer script. Check {logger.LogPath} for details.",
                     $"Missing installer script: {installerScriptPath}");
             }
 
             var compatCmdPath = Path.Combine(packageRoot, InstallerCompatCmdRelativePath);
+            logger.Info($"package_source={packageAcquisition.Source}");
+            logger.Info($"package_url_source={packageAcquisition.PackageUrlSource}");
+            logger.Info($"requested_download_url={packageAcquisition.RequestedDownloadUrl ?? "<none>"}");
+            logger.Info($"resolved_download_url={packageAcquisition.ResolvedDownloadUrl ?? "<none>"}");
+            logger.Info($"downloaded_asset_path={packageAcquisition.DownloadedAssetPath ?? "<none>"}");
+            logger.Info($"extract_dir={packageAcquisition.ExtractDirectory ?? "<none>"}");
             logger.Info($"app_root={packageRoot}");
             logger.Info($"installer_script_path={installerScriptPath}");
             logger.Info($"compat_cmd_path={compatCmdPath}");
@@ -107,7 +119,7 @@ internal static class Program
             if (installerExitCode != 0)
             {
                 throw SetupException.InstallFailed(
-                    "Setup failed. Please review the installer window and setup_bootstrap.log.",
+                    $"Setup failed. Check {logger.LogPath} for details.",
                     $"Installer exited with code {installerExitCode}.",
                     installerExitCode);
             }
@@ -130,6 +142,9 @@ internal static class Program
         {
             logger.Info($"app_root={(string.IsNullOrWhiteSpace(packageRoot) ? "<unresolved>" : packageRoot)}");
             logger.Info($"installer_script_path={(string.IsNullOrWhiteSpace(installerScriptPath) ? "<unresolved>" : installerScriptPath)}");
+            logger.Info($"requested_download_url={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.RequestedDownloadUrl ?? "<none>")}");
+            logger.Info($"downloaded_asset_path={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.DownloadedAssetPath ?? "<none>")}");
+            logger.Info($"extract_dir={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.ExtractDirectory ?? "<none>")}");
             logger.Error($"setup_result=failed category={ToLogCategory(ex.Kind)} reason={SanitizeForLog(ex.LogDetails)}");
             if (ex.InstallerExitCode.HasValue)
             {
@@ -148,12 +163,15 @@ internal static class Program
         {
             logger.Info($"app_root={(string.IsNullOrWhiteSpace(packageRoot) ? "<unresolved>" : packageRoot)}");
             logger.Info($"installer_script_path={(string.IsNullOrWhiteSpace(installerScriptPath) ? "<unresolved>" : installerScriptPath)}");
+            logger.Info($"requested_download_url={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.RequestedDownloadUrl ?? "<none>")}");
+            logger.Info($"downloaded_asset_path={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.DownloadedAssetPath ?? "<none>")}");
+            logger.Info($"extract_dir={(packageAcquisition is null ? "<unresolved>" : packageAcquisition.ExtractDirectory ?? "<none>")}");
             logger.Error($"setup_result=failed category=unexpected_failure reason={SanitizeForLog(ex.Message)}");
 
             exitCode = (int)SetupExitCode.UnexpectedFailure;
             if (!options.CheckOnly && !options.DryRun)
             {
-                ShowFailure("Setup failed unexpectedly. Please review setup_bootstrap.log.");
+                ShowFailure($"Setup failed unexpectedly. Check {logger.LogPath} for details.");
             }
 
             return exitCode;
@@ -255,7 +273,7 @@ internal static class Program
             if (process is null)
             {
                 throw SetupException.InstallFailed(
-                    "Setup failed. Please review the installer window and setup_bootstrap.log.",
+                    "Setup failed. Check %LocalAppData%\\LoneWolfFang\\logs\\setup_bootstrap_free.log.",
                     "Process.Start returned null for the installer process.");
             }
 
@@ -269,13 +287,13 @@ internal static class Program
         catch (Win32Exception ex)
         {
             throw SetupException.InstallFailed(
-                "Setup failed. Please review the installer window and setup_bootstrap.log.",
+                "Setup failed. Check %LocalAppData%\\LoneWolfFang\\logs\\setup_bootstrap_free.log.",
                 ex.Message);
         }
         catch (InvalidOperationException ex)
         {
             throw SetupException.InstallFailed(
-                "Setup failed. Please review the installer window and setup_bootstrap.log.",
+                "Setup failed. Check %LocalAppData%\\LoneWolfFang\\logs\\setup_bootstrap_free.log.",
                 ex.Message);
         }
     }
@@ -378,6 +396,189 @@ internal static class Program
         }
 
         return null;
+    }
+
+    private static PackageAcquisition ResolvePackageAcquisition(
+        string exeDirectory,
+        SetupOptions options,
+        FileLogger logger)
+    {
+        var packageUrlSelection = ResolvePackageUrlSelection(options);
+        var localPackageRoot = TryResolvePackageRoot(exeDirectory);
+
+        if (!packageUrlSelection.IsOverride && !string.IsNullOrWhiteSpace(localPackageRoot))
+        {
+            return new PackageAcquisition(
+                localPackageRoot,
+                "local_package_root",
+                "local",
+                null,
+                null,
+                null,
+                null);
+        }
+
+        return DownloadAndExtractPackage(packageUrlSelection, logger);
+    }
+
+    private static PackageUrlSelection ResolvePackageUrlSelection(SetupOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.PackageUrl))
+        {
+            return new PackageUrlSelection(options.PackageUrl, "argument", true);
+        }
+
+        var productOverride = Environment.GetEnvironmentVariable(ProductPackageUrlEnvName);
+        if (!string.IsNullOrWhiteSpace(productOverride))
+        {
+            return new PackageUrlSelection(productOverride, "env_product", true);
+        }
+
+        var commonOverride = Environment.GetEnvironmentVariable(CommonPackageUrlEnvName);
+        if (!string.IsNullOrWhiteSpace(commonOverride))
+        {
+            return new PackageUrlSelection(commonOverride, "env_common", true);
+        }
+
+        return new PackageUrlSelection(LatestPackageUrl, "default_latest_release", false);
+    }
+
+    private static PackageAcquisition DownloadAndExtractPackage(
+        PackageUrlSelection packageUrlSelection,
+        FileLogger logger)
+    {
+        var bootstrapRoot = CreateBootstrapTempRoot();
+        var downloadedAssetPath = Path.Combine(
+            bootstrapRoot,
+            "download",
+            ResolvePackageArchiveFileName(packageUrlSelection.Url));
+        var extractDirectory = Path.Combine(bootstrapRoot, "extract");
+        var resolvedDownloadUrl = packageUrlSelection.Url;
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(downloadedAssetPath) ?? bootstrapRoot);
+
+            using var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = true,
+            };
+            using var client = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromMinutes(15),
+            };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("LoneWolfFangFreeSetup/" + BuildId);
+
+            using var response = client.GetAsync(
+                packageUrlSelection.Url,
+                HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+
+            resolvedDownloadUrl = response.RequestMessage?.RequestUri?.AbsoluteUri ?? packageUrlSelection.Url;
+            response.EnsureSuccessStatusCode();
+
+            using var responseStream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+            using var outputStream = new FileStream(
+                downloadedAssetPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None);
+            responseStream.CopyTo(outputStream);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or TaskCanceledException)
+        {
+            throw SetupException.PackageDownloadFailed(
+                $"Setup could not download the free package. Check {logger.LogPath} for details.",
+                $"requested_url={packageUrlSelection.Url} resolved_url={resolvedDownloadUrl} error={ex.Message}");
+        }
+
+        try
+        {
+            Directory.CreateDirectory(extractDirectory);
+            ZipFile.ExtractToDirectory(downloadedAssetPath, extractDirectory, true);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw SetupException.PackageExtractFailed(
+                $"Setup could not extract the downloaded free package. Check {logger.LogPath} for details.",
+                $"downloaded_asset_path={downloadedAssetPath} extract_dir={extractDirectory} error={ex.Message}");
+        }
+
+        var extractedPackageRoot = TryResolveExtractedPackageRoot(extractDirectory);
+        if (string.IsNullOrWhiteSpace(extractedPackageRoot))
+        {
+            throw SetupException.DownloadedPackageInvalid(
+                $"Setup could not locate installer files inside the downloaded free package. Check {logger.LogPath} for details.",
+                $"requested_url={packageUrlSelection.Url} downloaded_asset_path={downloadedAssetPath} extract_dir={extractDirectory}");
+        }
+
+        return new PackageAcquisition(
+            extractedPackageRoot,
+            "downloaded_package",
+            packageUrlSelection.Source,
+            packageUrlSelection.Url,
+            resolvedDownloadUrl,
+            downloadedAssetPath,
+            extractDirectory);
+    }
+
+    private static string CreateBootstrapTempRoot()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var parent = string.IsNullOrWhiteSpace(localAppData)
+            ? Path.GetTempPath()
+            : Path.Combine(localAppData, "LoneWolfFang", "temp", "setup", ProductCode);
+        var runId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}";
+        var root = Path.Combine(parent, runId);
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static string ResolvePackageArchiveFileName(string packageUrl)
+    {
+        if (Uri.TryCreate(packageUrl, UriKind.Absolute, out var uri))
+        {
+            var fileName = Path.GetFileName(uri.LocalPath);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                return fileName;
+            }
+        }
+
+        return PackageAssetFileName;
+    }
+
+    private static string? TryResolveExtractedPackageRoot(string extractDirectory)
+    {
+        var pending = new Queue<(string Path, int Depth)>();
+        pending.Enqueue((extractDirectory, 0));
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            if (IsPackageRootCandidate(current.Path))
+            {
+                return Path.GetFullPath(current.Path);
+            }
+
+            if (current.Depth >= 2)
+            {
+                continue;
+            }
+
+            foreach (var child in Directory.EnumerateDirectories(current.Path))
+            {
+                pending.Enqueue((child, current.Depth + 1));
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsPackageRootCandidate(string candidateRoot)
+    {
+        return File.Exists(Path.Combine(candidateRoot, InstallerScriptRelativePath))
+            && File.Exists(Path.Combine(candidateRoot, InstallerCompatCmdRelativePath))
+            && File.Exists(Path.Combine(candidateRoot, InstallConfigRelativePath));
     }
 
     private static string? TryResolvePowerShellPath()
@@ -493,7 +694,7 @@ internal static class Program
         }
 
         throw SetupException.RootUnresolved(
-            "Setup could not resolve its executable path. Please extract the full package and try again.",
+            "Setup could not resolve its executable path.",
             "Unable to resolve the setup executable path.");
     }
 
@@ -586,6 +787,7 @@ internal static class Program
         bool Force,
         DesktopShortcutMode DesktopShortcutMode,
         string? InstallDirectory,
+        string? PackageUrl,
         bool IsValid,
         string InvalidReason)
     {
@@ -597,6 +799,7 @@ internal static class Program
             var force = false;
             var desktopShortcutMode = DesktopShortcutMode.Auto;
             string? installDirectory = null;
+            string? packageUrl = null;
 
             for (var index = 0; index < args.Length; index++)
             {
@@ -636,6 +839,7 @@ internal static class Program
                             force,
                             desktopShortcutMode,
                             installDirectory,
+                            packageUrl,
                             "Missing value for --install-dir.");
                     }
 
@@ -654,9 +858,67 @@ internal static class Program
                             force,
                             desktopShortcutMode,
                             installDirectory,
+                            packageUrl,
                             $"Unsupported --desktop-shortcut value: {shortcutModeValue}");
                     }
 
+                    continue;
+                }
+
+                if (TryReadOptionValue(args, ref index, argument, "--package-url", out var packageUrlValue))
+                {
+                    if (string.IsNullOrWhiteSpace(packageUrlValue))
+                    {
+                        return Invalid(
+                            checkOnly,
+                            dryRun,
+                            startAfterInstall,
+                            force,
+                            desktopShortcutMode,
+                            installDirectory,
+                            packageUrl,
+                            "Missing value for --package-url.");
+                    }
+
+                    packageUrl = packageUrlValue;
+                    continue;
+                }
+
+                if (TryReadOptionValue(args, ref index, argument, "-InstallRoot", out var legacyInstallRootValue))
+                {
+                    if (string.IsNullOrWhiteSpace(legacyInstallRootValue))
+                    {
+                        return Invalid(
+                            checkOnly,
+                            dryRun,
+                            startAfterInstall,
+                            force,
+                            desktopShortcutMode,
+                            installDirectory,
+                            packageUrl,
+                            "Missing value for -InstallRoot.");
+                    }
+
+                    installDirectory = legacyInstallRootValue;
+                    continue;
+                }
+
+                if (TryReadOptionValue(args, ref index, argument, "-PackageUrl", out var legacyPackageUrlValue))
+                {
+                    if (string.IsNullOrWhiteSpace(legacyPackageUrlValue))
+                    {
+                        return Invalid(
+                            checkOnly,
+                            dryRun,
+                            startAfterInstall,
+                            force,
+                            desktopShortcutMode,
+                            installDirectory,
+                            packageUrl,
+                            "Missing value for -PackageUrl.");
+                    }
+
+                    packageUrl = legacyPackageUrlValue;
                     continue;
                 }
 
@@ -667,6 +929,7 @@ internal static class Program
                     force,
                     desktopShortcutMode,
                     installDirectory,
+                    packageUrl,
                     $"Unsupported argument: {argument}");
             }
 
@@ -677,6 +940,7 @@ internal static class Program
                 force,
                 desktopShortcutMode,
                 installDirectory,
+                packageUrl,
                 true,
                 string.Empty);
         }
@@ -688,6 +952,7 @@ internal static class Program
             bool force,
             DesktopShortcutMode desktopShortcutMode,
             string? installDirectory,
+            string? packageUrl,
             string reason)
         {
             return new SetupOptions(
@@ -697,6 +962,7 @@ internal static class Program
                 force,
                 desktopShortcutMode,
                 installDirectory,
+                packageUrl,
                 false,
                 reason);
         }
@@ -750,6 +1016,20 @@ internal static class Program
             return false;
         }
     }
+
+    private sealed record PackageUrlSelection(
+        string Url,
+        string Source,
+        bool IsOverride);
+
+    private sealed record PackageAcquisition(
+        string PackageRoot,
+        string Source,
+        string PackageUrlSource,
+        string? RequestedDownloadUrl,
+        string? ResolvedDownloadUrl,
+        string? DownloadedAssetPath,
+        string? ExtractDirectory);
 
     private sealed class FileLogger
     {
@@ -852,6 +1132,21 @@ internal static class Program
             return new SetupException(SetupExitCode.UnsupportedArguments, userMessage, logDetails);
         }
 
+        public static SetupException PackageDownloadFailed(string userMessage, string logDetails)
+        {
+            return new SetupException(SetupExitCode.PackageDownloadFailed, userMessage, logDetails);
+        }
+
+        public static SetupException PackageExtractFailed(string userMessage, string logDetails)
+        {
+            return new SetupException(SetupExitCode.PackageExtractFailed, userMessage, logDetails);
+        }
+
+        public static SetupException DownloadedPackageInvalid(string userMessage, string logDetails)
+        {
+            return new SetupException(SetupExitCode.DownloadedPackageInvalid, userMessage, logDetails);
+        }
+
         public static SetupException InstallFailed(string userMessage, string logDetails, int? installerExitCode = null)
         {
             return new SetupException(SetupExitCode.InstallFailed, userMessage, logDetails, installerExitCode);
@@ -879,6 +1174,9 @@ internal static class Program
         InstallFailed = 6,
         StartAfterInstallFailed = 7,
         UnexpectedFailure = 8,
+        PackageDownloadFailed = 9,
+        PackageExtractFailed = 10,
+        DownloadedPackageInvalid = 11,
     }
 
     private static string ToLogCategory(SetupExitCode code)
@@ -892,6 +1190,9 @@ internal static class Program
             SetupExitCode.InstallFailed => "install_failed",
             SetupExitCode.StartAfterInstallFailed => "start_after_install_failed",
             SetupExitCode.UnexpectedFailure => "unexpected_failure",
+            SetupExitCode.PackageDownloadFailed => "package_download_failed",
+            SetupExitCode.PackageExtractFailed => "package_extract_failed",
+            SetupExitCode.DownloadedPackageInvalid => "downloaded_package_invalid",
             _ => "success",
         };
     }

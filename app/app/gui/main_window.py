@@ -65,6 +65,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.settings_store import AppSettings, get_gui_chart_state, load_settings, save_settings, set_gui_chart_state
+from app.core.valuation_preview import (
+    PREVIEW_ONLY_NOTE,
+    SUPPORTED_ACCOUNT_CCYS,
+    SUPPORTED_PREVIEW_MODES,
+    ValuationPreviewRequest,
+    calculate_valuation_preview,
+    format_jpy_value,
+)
 from app.core.chart_state_path import build_chart_state_path
 from app.security.keyring_store import (
     clear_creds,
@@ -588,6 +596,70 @@ class MainWindow(QWidget):
         report_layout.addWidget(self.report_container)
         root.addWidget(self.report_group)
 
+        self.valuation_group = QGroupBox("Valuation Settings")
+        self.valuation_group.setCheckable(True)
+        valuation_expanded = bool(getattr(self._settings, "gui_section_valuation_expanded", True))
+        self.valuation_group.setChecked(valuation_expanded)
+        valuation_layout = QVBoxLayout()
+        valuation_layout.setContentsMargins(12, 10, 12, 12)
+        valuation_layout.setSpacing(8)
+        self.valuation_group.setLayout(valuation_layout)
+        self.valuation_container = QWidget()
+        self.valuation_container.setVisible(valuation_expanded)
+        self.valuation_container_layout = QGridLayout()
+        self.valuation_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.valuation_container_layout.setHorizontalSpacing(8)
+        self.valuation_container_layout.setVerticalSpacing(8)
+        self.valuation_container.setLayout(self.valuation_container_layout)
+
+        self.valuation_mode_label = QLabel("Preview Mode")
+        self.valuation_mode = QComboBox()
+        self.valuation_mode.addItems(list(SUPPORTED_PREVIEW_MODES))
+        self.valuation_mode.setCurrentText(str(getattr(self._settings, "preview_mode", "Manual JPY") or "Manual JPY"))
+        self.valuation_account_ccy_label = QLabel("Account Currency")
+        self.valuation_account_ccy = QComboBox()
+        self.valuation_account_ccy.addItems(list(SUPPORTED_ACCOUNT_CCYS))
+        valuation_account_ccy = str(getattr(self._settings, "account_ccy", "JPY") or "JPY")
+        idx_valuation_ccy = max(0, self.valuation_account_ccy.findText(valuation_account_ccy))
+        self.valuation_account_ccy.setCurrentIndex(idx_valuation_ccy)
+
+        self.valuation_native_balance_label = QLabel("Native Balance")
+        self.valuation_native_balance = QLineEdit(str(getattr(self._settings, "native_balance", "300000") or "300000"))
+        self.valuation_native_balance.setClearButtonEnabled(True)
+        self.valuation_manual_jpy_balance_label = QLabel("Manual JPY Balance")
+        self.valuation_manual_jpy_balance = QLineEdit(
+            str(getattr(self._settings, "manual_jpy_balance", "300000") or "300000")
+        )
+        self.valuation_manual_jpy_balance.setClearButtonEnabled(True)
+
+        self.valuation_usdjpy_label = QLabel("USDJPY")
+        self.valuation_usdjpy = QLineEdit(str(getattr(self._settings, "usdjpy", "") or ""))
+        self.valuation_usdjpy.setClearButtonEnabled(True)
+        self.valuation_usdtjpy_label = QLabel("USDTJPY")
+        self.valuation_usdtjpy = QLineEdit(str(getattr(self._settings, "usdtjpy", "") or ""))
+        self.valuation_usdtjpy.setClearButtonEnabled(True)
+        self.valuation_usdcjpy_label = QLabel("USDCJPY")
+        self.valuation_usdcjpy = QLineEdit(str(getattr(self._settings, "usdcjpy", "") or ""))
+        self.valuation_usdcjpy.setClearButtonEnabled(True)
+
+        self.valuation_preview_jpy_label = QLabel("Preview JPY Valuation")
+        self.valuation_preview_jpy = QLineEdit()
+        self.valuation_preview_jpy.setReadOnly(True)
+        self.valuation_fx_source_label = QLabel("FX Source")
+        self.valuation_fx_source = QLineEdit()
+        self.valuation_fx_source.setReadOnly(True)
+        self.valuation_estimated_band_label = QLabel("Estimated Band")
+        self.valuation_estimated_band = QLineEdit()
+        self.valuation_estimated_band.setReadOnly(True)
+        self.valuation_note = QLabel(PREVIEW_ONLY_NOTE)
+        self.valuation_note.setWordWrap(True)
+        self.valuation_note.setStyleSheet("color: #9aa4af;")
+        self.valuation_error = QLabel("")
+        self.valuation_error.setWordWrap(True)
+        self.valuation_error.setStyleSheet("color: #c0392b;")
+        valuation_layout.addWidget(self.valuation_container)
+        root.addWidget(self.valuation_group)
+
         self.creds_group = QGroupBox("API Credentials")
         self.creds_group.setCheckable(True)
         creds_expanded = bool(getattr(self._settings, "gui_section_api_expanded", False))
@@ -739,6 +811,7 @@ class MainWindow(QWidget):
         self.api_secret = first_inputs.get("secret")
         self._sync_exchange_fields()
         self._refresh_report_preview()
+        self._refresh_valuation_preview()
         self._sync_mode_ui()
         self._apply_responsive_layout(force=True)
 
@@ -791,14 +864,23 @@ class MainWindow(QWidget):
         self.log_level.currentTextChanged.connect(self._on_log_level_changed)
         self.language.currentIndexChanged.connect(self._on_ui_language_changed)
         self.report_group.toggled.connect(self.report_container.setVisible)
+        self.valuation_group.toggled.connect(self.valuation_container.setVisible)
         self.creds_group.toggled.connect(self.creds_stack.setVisible)
         self.activation_group.toggled.connect(self.activation_container.setVisible)
         self.tools_group.toggled.connect(self.tools_container.setVisible)
+        self.valuation_group.toggled.connect(self._on_collapsible_sections_changed)
         self.creds_group.toggled.connect(self._on_collapsible_sections_changed)
         self.activation_group.toggled.connect(self._on_collapsible_sections_changed)
         self.tools_group.toggled.connect(self._on_collapsible_sections_changed)
         self.report_out.textChanged.connect(self._refresh_report_preview)
         self.report_enabled.toggled.connect(self._refresh_report_preview)
+        self.valuation_mode.currentTextChanged.connect(self._on_valuation_input_changed)
+        self.valuation_account_ccy.currentTextChanged.connect(self._on_valuation_input_changed)
+        self.valuation_native_balance.textChanged.connect(self._on_valuation_input_changed)
+        self.valuation_manual_jpy_balance.textChanged.connect(self._on_valuation_input_changed)
+        self.valuation_usdjpy.textChanged.connect(self._on_valuation_input_changed)
+        self.valuation_usdtjpy.textChanged.connect(self._on_valuation_input_changed)
+        self.valuation_usdcjpy.textChanged.connect(self._on_valuation_input_changed)
         self.replay_since_ym.textEdited.connect(self._on_replay_range_edited)
         self.replay_until_ym.textEdited.connect(self._on_replay_range_edited)
         self.sig_log.connect(self._append)
@@ -896,6 +978,9 @@ class MainWindow(QWidget):
 
     def _section_ui_state(self) -> dict[str, bool]:
         return {
+            "gui_section_valuation_expanded": (
+                bool(self.valuation_group.isChecked()) if hasattr(self, "valuation_group") else True
+            ),
             "gui_section_api_expanded": bool(self.creds_group.isChecked()) if hasattr(self, "creds_group") else False,
             "gui_section_activation_expanded": (
                 bool(self.activation_group.isChecked()) if hasattr(self, "activation_group") else False
@@ -907,12 +992,70 @@ class MainWindow(QWidget):
         if not isinstance(self._settings, AppSettings):
             self._settings = AppSettings()
         section_state = self._section_ui_state()
+        self._settings.gui_section_valuation_expanded = bool(section_state["gui_section_valuation_expanded"])
         self._settings.gui_section_api_expanded = bool(section_state["gui_section_api_expanded"])
         self._settings.gui_section_activation_expanded = bool(section_state["gui_section_activation_expanded"])
         self._settings.gui_section_diagnostics_expanded = bool(section_state["gui_section_diagnostics_expanded"])
 
     def _on_collapsible_sections_changed(self, _checked: bool) -> None:
         self._sync_collapsible_section_settings()
+
+    def _sync_valuation_settings_from_inputs(self) -> None:
+        if not isinstance(self._settings, AppSettings):
+            self._settings = AppSettings()
+        self._settings.preview_mode = str(self.valuation_mode.currentText() or "Manual JPY")
+        self._settings.account_ccy = str(self.valuation_account_ccy.currentText() or "JPY")
+        self._settings.native_balance = str(self.valuation_native_balance.text() or "").strip() or "300000"
+        self._settings.manual_jpy_balance = str(self.valuation_manual_jpy_balance.text() or "").strip() or "300000"
+        self._settings.usdjpy = str(self.valuation_usdjpy.text() or "").strip()
+        self._settings.usdtjpy = str(self.valuation_usdtjpy.text() or "").strip()
+        self._settings.usdcjpy = str(self.valuation_usdcjpy.text() or "").strip()
+
+    def _valuation_preview_request(self) -> ValuationPreviewRequest:
+        return ValuationPreviewRequest(
+            preview_mode=str(self.valuation_mode.currentText() or "Manual JPY"),
+            account_ccy=str(self.valuation_account_ccy.currentText() or "JPY"),
+            native_balance=str(self.valuation_native_balance.text() or "").strip(),
+            manual_jpy_balance=str(self.valuation_manual_jpy_balance.text() or "").strip(),
+            usdjpy=str(self.valuation_usdjpy.text() or "").strip(),
+            usdtjpy=str(self.valuation_usdtjpy.text() or "").strip(),
+            usdcjpy=str(self.valuation_usdcjpy.text() or "").strip(),
+            exchange_id=self._selected_exchange_id(),
+            symbol=self._selected_symbol() or self._default_symbol,
+            run_mode=self._selected_run_mode(),
+        )
+
+    def _refresh_valuation_preview(self) -> None:
+        if not hasattr(self, "valuation_mode"):
+            return
+        try:
+            result = calculate_valuation_preview(self._valuation_preview_request())
+        except Exception as exc:
+            self.valuation_preview_jpy.setText("")
+            self.valuation_fx_source.setText("preview_error")
+            self.valuation_fx_source.setToolTip("")
+            self.valuation_estimated_band.setText("")
+            self.valuation_note.setText(PREVIEW_ONLY_NOTE)
+            self.valuation_error.setText(f"Preview error: {str(exc) or 'unknown error'}")
+            return
+
+        self.valuation_preview_jpy.setText(format_jpy_value(result.raw_balance_jpy))
+        self.valuation_preview_jpy.setToolTip(
+            f"native_balance={result.native_balance:g} {result.account_ccy} fx_rate_to_jpy={result.fx_rate_to_jpy:g}"
+        )
+        self.valuation_fx_source.setText(str(result.fx_source or ""))
+        tooltip_parts: list[str] = []
+        if result.native_balance_source:
+            tooltip_parts.append(f"native_balance_source={result.native_balance_source}")
+        if result.state_db_path:
+            tooltip_parts.append(f"state_db={result.state_db_path}")
+        self.valuation_fx_source.setToolTip("\n".join(tooltip_parts))
+        self.valuation_estimated_band.setText(str(result.estimated_band or ""))
+        self.valuation_note.setText(PREVIEW_ONLY_NOTE)
+        self.valuation_error.setText("")
+
+    def _on_valuation_input_changed(self, *_args: object) -> None:
+        self._refresh_valuation_preview()
 
     def _apply_report_layout(self, compact: bool) -> None:
         self._reset_grid_layout(self.report_container_layout)
@@ -936,6 +1079,62 @@ class MainWindow(QWidget):
         self.report_container_layout.addWidget(self.report_resolved_label, 1, 0)
         self.report_container_layout.addWidget(self.report_preview, 1, 1, 1, 3)
         self.report_container_layout.setColumnStretch(2, 1)
+
+    def _apply_valuation_layout(self, compact: bool) -> None:
+        self._reset_grid_layout(self.valuation_container_layout)
+        self.valuation_container_layout.setVerticalSpacing(
+            COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
+        )
+        if compact:
+            self.valuation_container_layout.addWidget(self.valuation_mode_label, 0, 0)
+            self.valuation_container_layout.addWidget(self.valuation_mode, 0, 1)
+            self.valuation_container_layout.addWidget(self.valuation_account_ccy_label, 0, 2)
+            self.valuation_container_layout.addWidget(self.valuation_account_ccy, 0, 3)
+            self.valuation_container_layout.addWidget(self.valuation_native_balance_label, 1, 0)
+            self.valuation_container_layout.addWidget(self.valuation_native_balance, 1, 1)
+            self.valuation_container_layout.addWidget(self.valuation_manual_jpy_balance_label, 1, 2)
+            self.valuation_container_layout.addWidget(self.valuation_manual_jpy_balance, 1, 3)
+            self.valuation_container_layout.addWidget(self.valuation_usdjpy_label, 2, 0)
+            self.valuation_container_layout.addWidget(self.valuation_usdjpy, 2, 1)
+            self.valuation_container_layout.addWidget(self.valuation_usdtjpy_label, 2, 2)
+            self.valuation_container_layout.addWidget(self.valuation_usdtjpy, 2, 3)
+            self.valuation_container_layout.addWidget(self.valuation_usdcjpy_label, 3, 0)
+            self.valuation_container_layout.addWidget(self.valuation_usdcjpy, 3, 1, 1, 3)
+            self.valuation_container_layout.addWidget(self.valuation_preview_jpy_label, 4, 0)
+            self.valuation_container_layout.addWidget(self.valuation_preview_jpy, 4, 1, 1, 3)
+            self.valuation_container_layout.addWidget(self.valuation_fx_source_label, 5, 0)
+            self.valuation_container_layout.addWidget(self.valuation_fx_source, 5, 1, 1, 3)
+            self.valuation_container_layout.addWidget(self.valuation_estimated_band_label, 6, 0)
+            self.valuation_container_layout.addWidget(self.valuation_estimated_band, 6, 1, 1, 3)
+            self.valuation_container_layout.addWidget(self.valuation_note, 7, 0, 1, 4)
+            self.valuation_container_layout.addWidget(self.valuation_error, 8, 0, 1, 4)
+            self.valuation_container_layout.setColumnStretch(1, 1)
+            self.valuation_container_layout.setColumnStretch(3, 1)
+            return
+        self.valuation_container_layout.addWidget(self.valuation_mode_label, 0, 0)
+        self.valuation_container_layout.addWidget(self.valuation_mode, 0, 1)
+        self.valuation_container_layout.addWidget(self.valuation_account_ccy_label, 0, 2)
+        self.valuation_container_layout.addWidget(self.valuation_account_ccy, 0, 3)
+        self.valuation_container_layout.addWidget(self.valuation_native_balance_label, 1, 0)
+        self.valuation_container_layout.addWidget(self.valuation_native_balance, 1, 1)
+        self.valuation_container_layout.addWidget(self.valuation_manual_jpy_balance_label, 1, 2)
+        self.valuation_container_layout.addWidget(self.valuation_manual_jpy_balance, 1, 3)
+        self.valuation_container_layout.addWidget(self.valuation_usdjpy_label, 2, 0)
+        self.valuation_container_layout.addWidget(self.valuation_usdjpy, 2, 1)
+        self.valuation_container_layout.addWidget(self.valuation_usdtjpy_label, 2, 2)
+        self.valuation_container_layout.addWidget(self.valuation_usdtjpy, 2, 3)
+        self.valuation_container_layout.addWidget(self.valuation_usdcjpy_label, 3, 0)
+        self.valuation_container_layout.addWidget(self.valuation_usdcjpy, 3, 1)
+        self.valuation_container_layout.addWidget(self.valuation_preview_jpy_label, 3, 2)
+        self.valuation_container_layout.addWidget(self.valuation_preview_jpy, 3, 3)
+        self.valuation_container_layout.addWidget(self.valuation_fx_source_label, 4, 0)
+        self.valuation_container_layout.addWidget(self.valuation_fx_source, 4, 1)
+        self.valuation_container_layout.addWidget(self.valuation_estimated_band_label, 4, 2)
+        self.valuation_container_layout.addWidget(self.valuation_estimated_band, 4, 3)
+        self.valuation_container_layout.addWidget(self.valuation_note, 5, 0, 1, 4)
+        self.valuation_container_layout.addWidget(self.valuation_error, 6, 0, 1, 4)
+        self.valuation_container_layout.setColumnStretch(1, 1)
+        self.valuation_container_layout.setColumnStretch(3, 1)
 
     def _apply_activation_layout(self, compact: bool) -> None:
         self._reset_grid_layout(self.activation_container_layout)
@@ -1007,6 +1206,7 @@ class MainWindow(QWidget):
         self._compact_mode = mode
         self._apply_controls_layout(mode)
         self._apply_report_layout(mode)
+        self._apply_valuation_layout(mode)
         self._apply_activation_layout(mode)
         self._apply_tools_layout(mode)
         self._set_log_minimum_height(mode)
@@ -1061,6 +1261,18 @@ class MainWindow(QWidget):
         self.report_out_label.setText(self.tr("label.report_out"))
         self.btn_report_out.setText(self.tr("action.browse"))
         self.report_resolved_label.setText(self.tr("label.resolved"))
+        self.valuation_group.setTitle("Valuation Settings")
+        self.valuation_mode_label.setText("Preview Mode")
+        self.valuation_account_ccy_label.setText("Account Currency")
+        self.valuation_native_balance_label.setText("Native Balance")
+        self.valuation_manual_jpy_balance_label.setText("Manual JPY Balance")
+        self.valuation_usdjpy_label.setText("USDJPY")
+        self.valuation_usdtjpy_label.setText("USDTJPY")
+        self.valuation_usdcjpy_label.setText("USDCJPY")
+        self.valuation_preview_jpy_label.setText("Preview JPY Valuation")
+        self.valuation_fx_source_label.setText("FX Source")
+        self.valuation_estimated_band_label.setText("Estimated Band")
+        self.valuation_note.setText(PREVIEW_ONLY_NOTE)
         self.creds_group.setTitle(self.tr("group.api_credentials"))
         for exchange_id, refs in self._credential_ui_refs.items():
             exchange_label = str(refs.get("exchange_label", "") or exchange_id)
@@ -1676,11 +1888,13 @@ class MainWindow(QWidget):
 
     def _on_exchange_changed(self, _value: str) -> None:
         self._sync_exchange_fields()
+        self._refresh_valuation_preview()
         self._poll_live_chart_state()
 
     def _on_symbol_changed(self, _value: str) -> None:
         self._default_symbol = self._selected_symbol()
         self._refresh_replay_symbol_options(preferred=self._default_symbol)
+        self._refresh_valuation_preview()
         self._poll_live_chart_state()
 
     def _sync_mode_ui(self) -> None:
@@ -1698,6 +1912,7 @@ class MainWindow(QWidget):
     def _on_run_mode_changed(self, _value: str) -> None:
         self._run_mode = self._selected_run_mode()
         self._sync_mode_ui()
+        self._refresh_valuation_preview()
         self._reset_live_chart_poll_tracking()
         if self._run_mode != "PAPER":
             self._restore_chart_mode_after_live_candle()
@@ -3412,6 +3627,7 @@ class MainWindow(QWidget):
         self._settings.dataset_year = int(self._replay_dataset_year or 0)
         self._settings.log_level = self._selected_log_level()
         self._settings.ui_language = self._ui_language
+        self._sync_valuation_settings_from_inputs()
         self._update_chart_ui_state()
         save_settings(self._settings)
         self._save_run_mode_to_settings()

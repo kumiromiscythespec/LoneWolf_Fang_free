@@ -40,6 +40,29 @@ def _normalize_ui_language(raw: Any) -> str:
     return "en"
 
 
+def _normalize_preview_mode(raw: Any) -> str:
+    value = str(raw or "Manual JPY").strip()
+    if value in {"Manual JPY", "Manual FX", "Auto"}:
+        return value
+    return "Manual JPY"
+
+
+def _normalize_account_ccy(raw: Any) -> str:
+    value = str(raw or "JPY").strip().upper()
+    if value in {"JPY", "USD", "USDT", "USDC"}:
+        return value
+    return "JPY"
+
+
+def _normalize_text_setting(raw: Any, *, default: str = "") -> str:
+    if raw is None:
+        return str(default)
+    if isinstance(raw, (dict, list, tuple, set)):
+        return str(default)
+    text = str(raw).strip()
+    return text if text else str(default)
+
+
 def _normalize_chart_mode(raw: str) -> str:
     value = str(raw or "").strip()
     if value in _CHART_MODES:
@@ -106,7 +129,15 @@ class AppSettings:
     gui_section_api_expanded: bool = False
     gui_section_activation_expanded: bool = False
     gui_section_diagnostics_expanded: bool = False
+    gui_section_valuation_expanded: bool = True
     ui_language: str = "en"
+    preview_mode: str = "Manual JPY"
+    account_ccy: str = "JPY"
+    native_balance: str = "300000"
+    manual_jpy_balance: str = "300000"
+    usdjpy: str = ""
+    usdtjpy: str = ""
+    usdcjpy: str = ""
 
 
 def load_settings() -> AppSettings:
@@ -161,7 +192,21 @@ def load_settings() -> AppSettings:
             raw.get("gui_section_diagnostics_expanded", s.gui_section_diagnostics_expanded),
             default=False,
         )
+        s.gui_section_valuation_expanded = _normalize_bool(
+            raw.get("gui_section_valuation_expanded", s.gui_section_valuation_expanded),
+            default=True,
+        )
         s.ui_language = _normalize_ui_language(raw.get("ui_language", s.ui_language))
+        s.preview_mode = _normalize_preview_mode(raw.get("preview_mode", s.preview_mode))
+        s.account_ccy = _normalize_account_ccy(raw.get("account_ccy", s.account_ccy))
+        s.native_balance = _normalize_text_setting(raw.get("native_balance", s.native_balance), default="300000")
+        s.manual_jpy_balance = _normalize_text_setting(
+            raw.get("manual_jpy_balance", s.manual_jpy_balance),
+            default="300000",
+        )
+        s.usdjpy = _normalize_text_setting(raw.get("usdjpy", s.usdjpy))
+        s.usdtjpy = _normalize_text_setting(raw.get("usdtjpy", s.usdtjpy))
+        s.usdcjpy = _normalize_text_setting(raw.get("usdcjpy", s.usdcjpy))
         return s
     except Exception:
         return AppSettings()
@@ -188,7 +233,15 @@ def save_settings(s: AppSettings) -> None:
     data["gui_section_api_expanded"] = _normalize_bool(data.get("gui_section_api_expanded"), default=False)
     data["gui_section_activation_expanded"] = _normalize_bool(data.get("gui_section_activation_expanded"), default=False)
     data["gui_section_diagnostics_expanded"] = _normalize_bool(data.get("gui_section_diagnostics_expanded"), default=False)
+    data["gui_section_valuation_expanded"] = _normalize_bool(data.get("gui_section_valuation_expanded"), default=True)
     data["ui_language"] = _normalize_ui_language(data.get("ui_language"))
+    data["preview_mode"] = _normalize_preview_mode(data.get("preview_mode"))
+    data["account_ccy"] = _normalize_account_ccy(data.get("account_ccy"))
+    data["native_balance"] = _normalize_text_setting(data.get("native_balance"), default="300000")
+    data["manual_jpy_balance"] = _normalize_text_setting(data.get("manual_jpy_balance"), default="300000")
+    data["usdjpy"] = _normalize_text_setting(data.get("usdjpy"))
+    data["usdtjpy"] = _normalize_text_setting(data.get("usdtjpy"))
+    data["usdcjpy"] = _normalize_text_setting(data.get("usdcjpy"))
     with open(p.settings_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 

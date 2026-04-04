@@ -1,0 +1,2 @@
+LoneWolfFangFreeLauncher.exe filter=lfs diff=lfs merge=lfs -text
+LoneWolf_Fang_Free_Setup.exe filter=lfs diff=lfs merge=lfs -text

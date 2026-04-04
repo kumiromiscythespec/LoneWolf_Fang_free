@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-03_free_launch_salesafe_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-25_free_launch_boundary_v1
@@ -33,11 +34,12 @@ from app.security.license_client import (
 )
 
 
-BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
+BUILD_ID = "2026-04-03_free_launch_salesafe_defaults_release_prep_v1"
 
 _RUNTIME_LOG_LEVELS = {"MINIMAL", "OPS", "DEBUG"}
 _FREE_RUN_MODES = {"PAPER", "REPLAY", "BACKTEST"}
 _FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
+_DEFAULT_PRESET = str(getattr(C, "DEFAULT_PRESET", "SELL_SAFE") or "SELL_SAFE").strip().upper() or "SELL_SAFE"
 
 
 def _is_free_build() -> bool:
@@ -79,7 +81,7 @@ class LaunchSpec:
 
 @dataclass
 class ReplaySpec:
-    preset: str = "OFF"
+    preset: str = _DEFAULT_PRESET
     replay_data_path: str = ""
     symbol: str = "BTC/JPY"
     timeframe: str = "5m"
@@ -98,7 +100,7 @@ class ReplaySpec:
 
 @dataclass
 class BacktestSpec:
-    preset: str = "OFF"
+    preset: str = _DEFAULT_PRESET
     symbol: str = "BTC/JPY"
     entry_timeframe: str = "5m"
     since_ymd: str = ""
@@ -284,7 +286,7 @@ def _build_env(spec: LaunchSpec) -> Dict[str, str]:
     env = dict(os.environ)
 
     # Preset precedence: ENV BOT_PRESET is respected by project policy.
-    env["BOT_PRESET"] = str(spec.preset or "OFF")
+    env["BOT_PRESET"] = str(spec.preset or _DEFAULT_PRESET)
 
     exchange_id = str(spec.exchange_id or "").strip().lower() or "coincheck"
     if exchange_id not in ("coincheck", "mexc", "binance"):
@@ -337,7 +339,7 @@ def _build_env(spec: LaunchSpec) -> Dict[str, str]:
 def _build_replay_env(spec: ReplaySpec) -> Dict[str, str]:
     p = ensure_runtime_dirs()
     env = dict(os.environ)
-    env["BOT_PRESET"] = str(spec.preset or "OFF")
+    env["BOT_PRESET"] = str(spec.preset or _DEFAULT_PRESET)
     env.setdefault("EXPORTS_DIR", p.exports_dir)
     env.setdefault("BOT_SYMBOL", str(spec.symbol or "BTC/JPY"))
     exchange_id = (os.getenv("LWF_EXCHANGE_ID") or getattr(C, "EXCHANGE_ID", "coincheck")).strip().lower() or "coincheck"
@@ -355,7 +357,7 @@ def _build_replay_env(spec: ReplaySpec) -> Dict[str, str]:
 def _build_backtest_env(spec: BacktestSpec) -> Dict[str, str]:
     env = _build_replay_env(
         ReplaySpec(
-            preset=str(spec.preset or "OFF"),
+            preset=str(spec.preset or _DEFAULT_PRESET),
             symbol=str(spec.symbol or "BTC/JPY"),
             timeframe=str(spec.entry_timeframe or "5m"),
         )

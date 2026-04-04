@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-03-30_free_package_build_native_artifacts_v1
+﻿# BUILD_ID: 2026-04-03_free_setup_bootstrap_gui_package_integration_v1
 [CmdletBinding()]
 param(
     [string]$ManifestPath = "",
@@ -12,8 +12,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$BUILD_ID = '2026-04-02_free_package_fixed_release_asset_v1'
+$BUILD_ID = '2026-04-03_free_setup_bootstrap_gui_package_integration_v1'
 $ReleaseAssetName = 'LoneWolf_Fang_Free_Package.zip'
+$OfficialSetupFileName = 'LoneWolf_Fang_Free_Setup.exe'
+$OfficialSetupPublishRelativePath = 'setup_bootstrap/bin/Release/net8.0-windows/publish/win-x64-single-file/LoneWolf_Fang_Free_Setup.exe'
+$PublishCommandHint = 'dotnet publish .\\setup_bootstrap\\LoneWolfFangFreeSetup.csproj -c Release -p:PublishProfile=Properties\\PublishProfiles\\win-x64-single-file.pubxml'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 . (Join-Path $PSScriptRoot 'package_common.ps1')
@@ -79,19 +82,39 @@ if (($NativeArtifactsPolicy -eq 'warn') -and (@($nativeArtifactStatus.missing_so
     Write-Warning ('Native artifacts were not resolved from any supported source candidate and were not bundled: {0}' -f $missingNativeArtifactText)
 }
 
+$officialSetupArtifact = @(
+    $nativeArtifactStatus.artifacts |
+        Where-Object { $_.package_path -eq $OfficialSetupFileName } |
+        Select-Object -First 1
+)
+if (-not $officialSetupArtifact) {
+    throw ('Cannot build free package because the official setup bootstrap entry was not found in native artifact validation. Expected {0}.' -f $OfficialSetupFileName)
+}
+if (-not $officialSetupArtifact.exists_in_package_root) {
+    throw ('Cannot build free package because the official setup bootstrap is missing from the staged package root: {0}. Expected repo-root artifact `{1}` or publish output `{2}`. Publish with: {3}' -f `
+        $OfficialSetupFileName, `
+        $OfficialSetupFileName, `
+        $OfficialSetupPublishRelativePath, `
+        $PublishCommandHint)
+}
+if (-not $officialSetupArtifact.exists_in_zip) {
+    throw ('Cannot build free package because the official setup bootstrap is missing from the final zip: {0}' -f $OfficialSetupFileName)
+}
+
 Copy-Item -LiteralPath $resolvedZipPath -Destination $releaseAssetPath -Force
 
 Write-Host '== Free Package Build =='
-Write-Host ('BUILD_ID            : {0}' -f $BUILD_ID)
-Write-Host ('Manifest            : {0}' -f $plan.manifest_path)
-Write-Host ('Repo Root           : {0}' -f $plan.repo_root)
-Write-Host ('Staging Path        : {0}' -f $stage.stage_path)
-Write-Host ('Package Root        : {0}' -f $stage.package_root_path)
-Write-Host ('Zip Path            : {0}' -f $resolvedZipPath)
-Write-Host ('Release Asset       : {0}' -f $releaseAssetPath)
-Write-Host ('Native Policy       : {0}' -f $NativeArtifactsPolicy)
-Write-Host ('Native Artifacts    : {0}/{1} resolved' -f $nativeArtifactStatus.resolved_count, $nativeArtifactStatus.total_count)
-Write-Host ('Materialized Root   : {0}' -f $nativeArtifactSync.materialized_count)
+Write-Host ('BUILD_ID              : {0}' -f $BUILD_ID)
+Write-Host ('Manifest              : {0}' -f $plan.manifest_path)
+Write-Host ('Repo Root             : {0}' -f $plan.repo_root)
+Write-Host ('Official Setup        : {0}' -f (Join-Path $RepoRoot $OfficialSetupFileName))
+Write-Host ('Staging Path          : {0}' -f $stage.stage_path)
+Write-Host ('Package Root          : {0}' -f $stage.package_root_path)
+Write-Host ('Zip Path              : {0}' -f $resolvedZipPath)
+Write-Host ('Release Asset         : {0}' -f $releaseAssetPath)
+Write-Host ('Native Policy         : {0}' -f $NativeArtifactsPolicy)
+Write-Host ('Native Artifacts      : {0}/{1} resolved' -f $nativeArtifactStatus.resolved_count, $nativeArtifactStatus.total_count)
+Write-Host ('Materialized Root     : {0}' -f $nativeArtifactSync.materialized_count)
 foreach ($artifact in @($nativeArtifactStatus.artifacts)) {
     $syncArtifact = @($nativeArtifactSync.artifacts | Where-Object { $_.package_path -eq $artifact.package_path } | Select-Object -First 1)
     $sourceLabel = 'missing'
@@ -124,4 +147,4 @@ foreach ($artifact in @($nativeArtifactStatus.artifacts)) {
     Write-Host ('    package_root        : {0}' -f $packageLabel)
     Write-Host ('    zip                 : {0}' -f $zipLabel)
 }
-Write-Host ('Total Files         : {0}' -f $plan.total_count)
+Write-Host ('Total Files           : {0}' -f $plan.total_count)

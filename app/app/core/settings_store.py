@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-03_free_salesafe_gui_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_settings_collapsible_sections_v1
@@ -15,7 +16,7 @@ from typing import Any, Dict
 from app.core.paths import ensure_runtime_dirs
 
 
-BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
+BUILD_ID = "2026-04-03_free_salesafe_gui_defaults_release_prep_v1"
 
 
 _CHART_MODES = {"Equity", "Net", "Max DD", "Trades", "Combined", "Candle"}
@@ -113,7 +114,7 @@ def _normalize_bool(raw: Any, *, default: bool = False) -> bool:
 @dataclass
 class AppSettings:
     # Secrets are NOT stored here (keyring only).
-    preset: str = "OFF"  # OFF / SELL_SAFE
+    preset: str = "SELL_SAFE"  # OFF / SELL_SAFE
     symbol: str = "BTC/JPY"
     report_enabled: bool = False
     report_out: str = ""  # empty -> default exports/report.json (runner/backtest side)

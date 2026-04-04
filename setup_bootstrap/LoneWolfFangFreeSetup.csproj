@@ -1,13 +1,20 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>LoneWolf_Fang_Free_Setup</AssemblyName>
-    <RootNamespace>LoneWolfFangFreeSetup</RootNamespace>
-    <ApplicationIcon>..\app\logos\lwf_logo.ico</ApplicationIcon>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>LoneWolfFangSetupBootstrapper</RootNamespace>
+    <SetupExecutableName Condition="'$(SetupExecutableName)' == ''">LoneWolf_Fang_Free_Setup</SetupExecutableName>
+    <SetupApplicationIcon Condition="'$(SetupApplicationIcon)' == ''">..\app\logos\lwf_logo.ico</SetupApplicationIcon>
+    <AssemblyName>$(SetupExecutableName)</AssemblyName>
+    <ApplicationIcon>$(SetupApplicationIcon)</ApplicationIcon>
     <UseAppHost>true</UseAppHost>
     <Platforms>x64</Platforms>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
 </Project>

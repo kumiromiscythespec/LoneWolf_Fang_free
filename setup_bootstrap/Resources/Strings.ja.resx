@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="SetupWindowTitle" xml:space="preserve">
+    <value>{0} セットアップ</value>
+  </data>
+  <data name="Welcome" xml:space="preserve">
+    <value>ようこそ</value>
+  </data>
+  <data name="WelcomeBody" xml:space="preserve">
+    <value>既存の PowerShell backend を活かしたまま、ウィンドウ付きセットアップウィザードで {0} をインストールします。</value>
+  </data>
+  <data name="InstallLocation" xml:space="preserve">
+    <value>インストール先</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>参照</value>
+  </data>
+  <data name="CreateDesktopShortcut" xml:space="preserve">
+    <value>デスクトップショートカットを作成する</value>
+  </data>
+  <data name="StartAfterInstallation" xml:space="preserve">
+    <value>インストール完了後に起動する</value>
+  </data>
+  <data name="Install" xml:space="preserve">
+    <value>インストール</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>キャンセル</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>閉じる</value>
+  </data>
+  <data name="Installing" xml:space="preserve">
+    <value>インストール中...</value>
+  </data>
+  <data name="Completed" xml:space="preserve">
+    <value>完了</value>
+  </data>
+  <data name="Failed" xml:space="preserve">
+    <value>失敗</value>
+  </data>
+  <data name="OpenLogFolder" xml:space="preserve">
+    <value>ログフォルダーを開く</value>
+  </data>
+  <data name="ContinueAndRefreshFiles" xml:space="preserve">
+    <value>続行してファイルを更新しますか？</value>
+  </data>
+  <data name="RunningPythonProcessesDetected" xml:space="preserve">
+    <value>インストール先の配下で実行中の Python プロセスが検出されました。</value>
+  </data>
+  <data name="StopThemAndContinue" xml:space="preserve">
+    <value>停止して続行しますか？</value>
+  </data>
+  <data name="StoppingRunningPythonProcesses" xml:space="preserve">
+    <value>実行中の Python プロセスを停止しています...</value>
+  </data>
+  <data name="PythonProcessesWereStoppedSuccessfully" xml:space="preserve">
+    <value>Python プロセスを正常に停止しました。</value>
+  </data>
+  <data name="SomePythonProcessesCouldNotBeStopped" xml:space="preserve">
+    <value>停止できない Python プロセスが残っています。</value>
+  </data>
+  <data name="InstallationCannotContinueUntilThoseProcessesAreClosed" xml:space="preserve">
+    <value>それらのプロセスが閉じられるまでインストールを続行できません。</value>
+  </data>
+  <data name="LicenseActivationRequired" xml:space="preserve">
+    <value>インストール後にライセンス有効化が必要です。</value>
+  </data>
+  <data name="Language" xml:space="preserve">
+    <value>言語</value>
+  </data>
+  <data name="ShowDetails" xml:space="preserve">
+    <value>詳細を表示</value>
+  </data>
+  <data name="HideDetails" xml:space="preserve">
+    <value>詳細を隠す</value>
+  </data>
+  <data name="StatusReady" xml:space="preserve">
+    <value>インストールの準備ができました。</value>
+  </data>
+  <data name="StatusCheckingRunningProcesses" xml:space="preserve">
+    <value>実行中の Python プロセスを確認しています...</value>
+  </data>
+  <data name="StatusStoppingRunningProcesses" xml:space="preserve">
+    <value>実行中の Python プロセスを停止しています...</value>
+  </data>
+  <data name="StatusResolvingPackage" xml:space="preserve">
+    <value>パッケージを確認しています...</value>
+  </data>
+  <data name="StatusDownloadingPackage" xml:space="preserve">
+    <value>パッケージをダウンロードしています...</value>
+  </data>
+  <data name="StatusExtractingPackage" xml:space="preserve">
+    <value>パッケージを展開しています...</value>
+  </data>
+  <data name="StatusRunningInstaller" xml:space="preserve">
+    <value>installer backend を実行しています...</value>
+  </data>
+  <data name="StatusStartingApplication" xml:space="preserve">
+    <value>アプリを起動しています...</value>
+  </data>
+  <data name="StatusCompleted" xml:space="preserve">
+    <value>インストールが完了しました。</value>
+  </data>
+  <data name="StatusFailed" xml:space="preserve">
+    <value>インストールに失敗しました。</value>
+  </data>
+  <data name="InstallFolderPromptTitle" xml:space="preserve">
+    <value>既存ファイルが見つかりました</value>
+  </data>
+  <data name="InstallFolderPromptBody" xml:space="preserve">
+    <value>選択したインストール先には既にファイルがあります。</value>
+  </data>
+  <data name="InstallFolderPromptTarget" xml:space="preserve">
+    <value>インストール先: {0}</value>
+  </data>
+  <data name="PythonPromptTitle" xml:space="preserve">
+    <value>実行中の Python プロセスを検出しました</value>
+  </data>
+  <data name="PythonPromptTarget" xml:space="preserve">
+    <value>インストール先: {0}</value>
+  </data>
+  <data name="PythonPromptCount" xml:space="preserve">
+    <value>一致したプロセス数: {0}</value>
+  </data>
+  <data name="SetupFailureTitle" xml:space="preserve">
+    <value>インストール失敗</value>
+  </data>
+  <data name="SetupFailureUnexpected" xml:space="preserve">
+    <value>セットアップが予期せず失敗しました。詳細はログフォルダーを確認してください。</value>
+  </data>
+  <data name="SetupFailureSummary" xml:space="preserve">
+    <value>{0} のインストールは完了しませんでした。</value>
+  </data>
+  <data name="SetupFailureExitCode" xml:space="preserve">
+    <value>終了コード: {0}</value>
+  </data>
+  <data name="SetupFailureLogPath" xml:space="preserve">
+    <value>ログフォルダー: {0}</value>
+  </data>
+  <data name="SetupSuccessSummary" xml:space="preserve">
+    <value>{0} のインストールが完了しました。</value>
+  </data>
+  <data name="SetupSuccessLaunchWarning" xml:space="preserve">
+    <value>アプリを自動起動できませんでした。</value>
+  </data>
+  <data name="SetupSuccessLicenseNote" xml:space="preserve">
+    <value>インストール後にライセンス有効化が必要です。</value>
+  </data>
+  <data name="DetailsHeader" xml:space="preserve">
+    <value>詳細</value>
+  </data>
+  <data name="BrowseDialogDescription" xml:space="preserve">
+    <value>インストール先フォルダーを選択してください</value>
+  </data>
+  <data name="InvalidInstallDirectory" xml:space="preserve">
+    <value>インストール先を指定してください。</value>
+  </data>
+  <data name="OpenLogFolderFailed" xml:space="preserve">
+    <value>ログフォルダーを開けませんでした。</value>
+  </data>
+</root>

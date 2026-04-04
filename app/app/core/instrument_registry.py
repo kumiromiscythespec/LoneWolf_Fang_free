@@ -1,10 +1,11 @@
+# BUILD_ID: 2026-04-03_free_exchange_symbol_matrix_release_prep_v1
 # BUILD_ID: 2026-03-05_btcusdt_first_quote_agnostic_v1
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 
-BUILD_ID = "2026-03-05_btcusdt_first_quote_agnostic_v1"
+BUILD_ID = "2026-04-03_free_exchange_symbol_matrix_release_prep_v1"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,17 @@ INSTRUMENTS: tuple[InstrumentSpec, ...] = (
         account_ccy="JPY",
         settlement_ccy="JPY",
         dataset_prefix="BTCJPY",
+        visible=True,
+    ),
+    InstrumentSpec(
+        exchange_id="coincheck",
+        symbol="ETH/JPY",
+        market_type="spot",
+        base_ccy="ETH",
+        quote_ccy="JPY",
+        account_ccy="JPY",
+        settlement_ccy="JPY",
+        dataset_prefix="ETHJPY",
         visible=True,
     ),
     InstrumentSpec(
@@ -76,8 +88,7 @@ INSTRUMENTS: tuple[InstrumentSpec, ...] = (
         account_ccy="USDC",
         settlement_ccy="USDC",
         dataset_prefix="BTCUSDC",
-        visible=False,
-        experimental=True,
+        visible=True,
     ),
     InstrumentSpec(
         exchange_id="binance",
@@ -88,6 +99,39 @@ INSTRUMENTS: tuple[InstrumentSpec, ...] = (
         account_ccy="USDT",
         settlement_ccy="USDT",
         dataset_prefix="ETHUSDT",
+        visible=True,
+    ),
+    InstrumentSpec(
+        exchange_id="binance",
+        symbol="BTC/USDT",
+        market_type="spot",
+        base_ccy="BTC",
+        quote_ccy="USDT",
+        account_ccy="USDT",
+        settlement_ccy="USDT",
+        dataset_prefix="BTCUSDT",
+        visible=True,
+    ),
+    InstrumentSpec(
+        exchange_id="binance",
+        symbol="ETH/USDC",
+        market_type="spot",
+        base_ccy="ETH",
+        quote_ccy="USDC",
+        account_ccy="USDC",
+        settlement_ccy="USDC",
+        dataset_prefix="ETHUSDC",
+        visible=True,
+    ),
+    InstrumentSpec(
+        exchange_id="binance",
+        symbol="BTC/USDC",
+        market_type="spot",
+        base_ccy="BTC",
+        quote_ccy="USDC",
+        account_ccy="USDC",
+        settlement_ccy="USDC",
+        dataset_prefix="BTCUSDC",
         visible=True,
     ),
 )

@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="SetupWindowTitle" xml:space="preserve">
+    <value>{0} Setup</value>
+  </data>
+  <data name="Welcome" xml:space="preserve">
+    <value>Welcome</value>
+  </data>
+  <data name="WelcomeBody" xml:space="preserve">
+    <value>Install {0} with a windowed setup wizard while keeping the existing PowerShell backend.</value>
+  </data>
+  <data name="InstallLocation" xml:space="preserve">
+    <value>Install location</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>Browse</value>
+  </data>
+  <data name="CreateDesktopShortcut" xml:space="preserve">
+    <value>Create desktop shortcut</value>
+  </data>
+  <data name="StartAfterInstallation" xml:space="preserve">
+    <value>Start after installation</value>
+  </data>
+  <data name="Install" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Installing" xml:space="preserve">
+    <value>Installing...</value>
+  </data>
+  <data name="Completed" xml:space="preserve">
+    <value>Completed</value>
+  </data>
+  <data name="Failed" xml:space="preserve">
+    <value>Failed</value>
+  </data>
+  <data name="OpenLogFolder" xml:space="preserve">
+    <value>Open log folder</value>
+  </data>
+  <data name="ContinueAndRefreshFiles" xml:space="preserve">
+    <value>Continue and refresh files?</value>
+  </data>
+  <data name="RunningPythonProcessesDetected" xml:space="preserve">
+    <value>Running Python processes were detected under the install target.</value>
+  </data>
+  <data name="StopThemAndContinue" xml:space="preserve">
+    <value>Stop them and continue?</value>
+  </data>
+  <data name="StoppingRunningPythonProcesses" xml:space="preserve">
+    <value>Stopping running Python processes...</value>
+  </data>
+  <data name="PythonProcessesWereStoppedSuccessfully" xml:space="preserve">
+    <value>Python processes were stopped successfully.</value>
+  </data>
+  <data name="SomePythonProcessesCouldNotBeStopped" xml:space="preserve">
+    <value>Some Python processes could not be stopped.</value>
+  </data>
+  <data name="InstallationCannotContinueUntilThoseProcessesAreClosed" xml:space="preserve">
+    <value>Installation cannot continue until those processes are closed.</value>
+  </data>
+  <data name="LicenseActivationRequired" xml:space="preserve">
+    <value>License activation is required after installation.</value>
+  </data>
+  <data name="Language" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="ShowDetails" xml:space="preserve">
+    <value>Show details</value>
+  </data>
+  <data name="HideDetails" xml:space="preserve">
+    <value>Hide details</value>
+  </data>
+  <data name="StatusReady" xml:space="preserve">
+    <value>Ready to install.</value>
+  </data>
+  <data name="StatusCheckingRunningProcesses" xml:space="preserve">
+    <value>Checking for running Python processes...</value>
+  </data>
+  <data name="StatusStoppingRunningProcesses" xml:space="preserve">
+    <value>Stopping running Python processes...</value>
+  </data>
+  <data name="StatusResolvingPackage" xml:space="preserve">
+    <value>Resolving package...</value>
+  </data>
+  <data name="StatusDownloadingPackage" xml:space="preserve">
+    <value>Downloading package...</value>
+  </data>
+  <data name="StatusExtractingPackage" xml:space="preserve">
+    <value>Extracting package...</value>
+  </data>
+  <data name="StatusRunningInstaller" xml:space="preserve">
+    <value>Running installer backend...</value>
+  </data>
+  <data name="StatusStartingApplication" xml:space="preserve">
+    <value>Starting application...</value>
+  </data>
+  <data name="StatusCompleted" xml:space="preserve">
+    <value>Installation completed.</value>
+  </data>
+  <data name="StatusFailed" xml:space="preserve">
+    <value>Installation failed.</value>
+  </data>
+  <data name="InstallFolderPromptTitle" xml:space="preserve">
+    <value>Existing files detected</value>
+  </data>
+  <data name="InstallFolderPromptBody" xml:space="preserve">
+    <value>The selected install folder already contains files.</value>
+  </data>
+  <data name="InstallFolderPromptTarget" xml:space="preserve">
+    <value>Install target: {0}</value>
+  </data>
+  <data name="PythonPromptTitle" xml:space="preserve">
+    <value>Running Python processes detected</value>
+  </data>
+  <data name="PythonPromptTarget" xml:space="preserve">
+    <value>Install target: {0}</value>
+  </data>
+  <data name="PythonPromptCount" xml:space="preserve">
+    <value>Matched processes: {0}</value>
+  </data>
+  <data name="SetupFailureTitle" xml:space="preserve">
+    <value>Installation failed</value>
+  </data>
+  <data name="SetupFailureUnexpected" xml:space="preserve">
+    <value>Setup failed unexpectedly. Check the log folder for details.</value>
+  </data>
+  <data name="SetupFailureSummary" xml:space="preserve">
+    <value>{0} installation did not complete.</value>
+  </data>
+  <data name="SetupFailureExitCode" xml:space="preserve">
+    <value>Exit code: {0}</value>
+  </data>
+  <data name="SetupFailureLogPath" xml:space="preserve">
+    <value>Log folder: {0}</value>
+  </data>
+  <data name="SetupSuccessSummary" xml:space="preserve">
+    <value>{0} was installed successfully.</value>
+  </data>
+  <data name="SetupSuccessLaunchWarning" xml:space="preserve">
+    <value>The app could not be started automatically.</value>
+  </data>
+  <data name="SetupSuccessLicenseNote" xml:space="preserve">
+    <value>License activation is required after installation.</value>
+  </data>
+  <data name="DetailsHeader" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="BrowseDialogDescription" xml:space="preserve">
+    <value>Select an install folder</value>
+  </data>
+  <data name="InvalidInstallDirectory" xml:space="preserve">
+    <value>Choose an install location.</value>
+  </data>
+  <data name="OpenLogFolderFailed" xml:space="preserve">
+    <value>The log folder could not be opened.</value>
+  </data>
+</root>

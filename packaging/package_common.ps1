@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-03-24_standard_package_common_app_payload_impl_v1
+# BUILD_ID: 2026-03-30_free_package_common_native_artifacts_v1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -128,6 +128,199 @@ function Test-IsExcluded {
     return $false
 }
 
+function Get-ManifestEntryPackagePath {
+    param([object]$Entry)
+
+    $packagePath = ''
+    if ($null -ne $Entry.PSObject.Properties['package_path']) {
+        $packagePath = Normalize-RelativePath ([string]$Entry.package_path)
+    }
+    if ([string]::IsNullOrWhiteSpace($packagePath)) {
+        $packagePath = Normalize-RelativePath ([string]$Entry.path)
+    }
+    return $packagePath
+}
+
+function Get-ManifestEntrySourceCandidates {
+    param([object]$Entry)
+
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+    $seenCandidates = New-Object 'System.Collections.Generic.HashSet[string]'
+
+    if ($null -ne $Entry.PSObject.Properties['source_candidates']) {
+        foreach ($candidate in @($Entry.source_candidates)) {
+            Add-UniqueString -List $candidates -Set $seenCandidates -Value (Normalize-RelativePath ([string]$candidate))
+        }
+    }
+
+    if ($candidates.Count -eq 0) {
+        Add-UniqueString -List $candidates -Set $seenCandidates -Value (Normalize-RelativePath ([string]$Entry.path))
+    }
+
+    return @($candidates)
+}
+
+function Resolve-ManifestEntrySource {
+    param(
+        [string]$RepoRoot,
+        [string[]]$SourceCandidates
+    )
+
+    foreach ($candidate in @($SourceCandidates)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        $sourcePath = Join-NormalizedPath -BasePath $RepoRoot -RelativePath $candidate
+        if (Test-Path -LiteralPath $sourcePath) {
+            return [pscustomobject]@{
+                source_relative_path = $candidate
+                source_path          = (Get-Item -LiteralPath $sourcePath).FullName
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-NativeArtifactSourceKind {
+    param(
+        [string]$TargetRelativePath,
+        [string]$SourceRelativePath
+    )
+
+    $target = Normalize-RelativePath $TargetRelativePath
+    $source = Normalize-RelativePath $SourceRelativePath
+
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        return ''
+    }
+
+    if ([string]::Equals($target, $source, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return 'repo_root'
+    }
+
+    if (($source -like '*/publish/*') -or ($source -like 'launcher_native/*') -or ($source -like 'setup_bootstrap/*')) {
+        return 'publish_output'
+    }
+
+    return 'source_candidate'
+}
+
+function Sync-PackageNativeArtifacts {
+    param(
+        [string]$RepoRoot,
+        [object]$Manifest,
+        [bool]$MaterializeToRepoRoot = $true
+    )
+
+    $artifactResults = New-Object 'System.Collections.Generic.List[object]'
+
+    foreach ($entry in @($Manifest.include_native_artifacts)) {
+        $packagePath = Get-ManifestEntryPackagePath -Entry $entry
+        $targetRelativePath = $packagePath
+        $targetPath = Join-NormalizedPath -BasePath $RepoRoot -RelativePath $targetRelativePath
+        $sourceCandidates = @(Get-ManifestEntrySourceCandidates -Entry $entry)
+        $resolvedSource = Resolve-ManifestEntrySource -RepoRoot $RepoRoot -SourceCandidates $sourceCandidates
+
+        $sourceRelativePath = ''
+        $sourcePath = ''
+        $sourceKind = ''
+        $status = 'missing'
+        $wasMaterializedToRepoRoot = $false
+        $wouldMaterializeToRepoRoot = $false
+
+        $existsAtTarget = Test-Path -LiteralPath $targetPath
+        if ($existsAtTarget) {
+            $sourceRelativePath = $targetRelativePath
+            $sourcePath = (Resolve-Path -LiteralPath $targetPath).Path
+            $sourceKind = 'repo_root'
+            $status = 'repo_root'
+        }
+        elseif ($resolvedSource) {
+            $sourceRelativePath = [string]$resolvedSource.source_relative_path
+            $sourcePath = [string]$resolvedSource.source_path
+            $sourceKind = Get-NativeArtifactSourceKind -TargetRelativePath $targetRelativePath -SourceRelativePath $sourceRelativePath
+            $wouldMaterializeToRepoRoot = ($sourceKind -ne 'repo_root')
+            $status = $sourceKind
+
+            if ($MaterializeToRepoRoot -and $wouldMaterializeToRepoRoot) {
+                $parentDir = Split-Path -Parent $targetPath
+                if ($parentDir) {
+                    $null = New-Item -ItemType Directory -Path $parentDir -Force
+                }
+                Copy-Item -LiteralPath $sourcePath -Destination $targetPath -Force
+                $wasMaterializedToRepoRoot = $true
+                $wouldMaterializeToRepoRoot = $false
+                $existsAtTarget = $true
+                $status = 'materialized_to_repo_root'
+            }
+        }
+
+        $targetResolvedPath = if ($existsAtTarget) { (Resolve-Path -LiteralPath $targetPath).Path } else { $targetPath }
+
+        $null = $artifactResults.Add([pscustomobject]@{
+            package_path                   = $packagePath
+            target_relative_path           = $targetRelativePath
+            target_path                    = $targetResolvedPath
+            source_candidates              = @($sourceCandidates)
+            source_relative_path           = $sourceRelativePath
+            source_path                    = $sourcePath
+            source_kind                    = $sourceKind
+            status                         = $status
+            was_materialized_to_repo_root  = $wasMaterializedToRepoRoot
+            would_materialize_to_repo_root = $wouldMaterializeToRepoRoot
+            exists_at_target               = $existsAtTarget
+            required                       = [bool]$entry.required
+            group                          = [string]$entry.group
+            role                           = $(if ($null -ne $entry.PSObject.Properties['role']) { [string]$entry.role } else { '' })
+            signing_scope                  = $(if ($null -ne $entry.PSObject.Properties['signing_scope']) { [string]$entry.signing_scope } else { '' })
+        })
+    }
+
+    $artifactArray = @($artifactResults | Sort-Object package_path)
+    $resolvedArtifacts = @($artifactArray | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.source_kind) })
+    $materializedArtifacts = @($artifactArray | Where-Object { $_.was_materialized_to_repo_root })
+    $missingArtifacts = @($artifactArray | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.source_kind) })
+
+    return [pscustomobject]@{
+        artifacts          = $artifactArray
+        total_count        = @($artifactArray).Count
+        resolved_count     = @($resolvedArtifacts).Count
+        materialized_count = @($materializedArtifacts).Count
+        missing_count      = @($missingArtifacts).Count
+    }
+}
+
+function Get-PackageNativeArtifactEntries {
+    param(
+        [string]$RepoRoot,
+        [object]$Manifest
+    )
+
+    $nativeArtifacts = New-Object 'System.Collections.Generic.List[object]'
+
+    foreach ($entry in @($Manifest.include_native_artifacts)) {
+        $packagePath = Get-ManifestEntryPackagePath -Entry $entry
+        $sourceCandidates = @(Get-ManifestEntrySourceCandidates -Entry $entry)
+        $resolvedSource = Resolve-ManifestEntrySource -RepoRoot $RepoRoot -SourceCandidates $sourceCandidates
+
+        $null = $nativeArtifacts.Add([pscustomobject]@{
+            package_path         = $packagePath
+            source_candidates    = @($sourceCandidates)
+            source_relative_path = $(if ($resolvedSource) { [string]$resolvedSource.source_relative_path } else { '' })
+            source_path          = $(if ($resolvedSource) { [string]$resolvedSource.source_path } else { '' })
+            required             = [bool]$entry.required
+            group                = [string]$entry.group
+            role                 = $(if ($null -ne $entry.PSObject.Properties['role']) { [string]$entry.role } else { '' })
+            signing_scope        = $(if ($null -ne $entry.PSObject.Properties['signing_scope']) { [string]$entry.signing_scope } else { '' })
+            is_resolved          = ($null -ne $resolvedSource)
+        })
+    }
+
+    return @($nativeArtifacts | Sort-Object package_path)
+}
+
 function Get-PackagePlan {
     param(
         [string]$RepoRoot,
@@ -173,23 +366,26 @@ function Get-PackagePlan {
     foreach ($sectionName in $sectionEntries.Keys) {
         foreach ($entry in @($sectionEntries[$sectionName])) {
             $entryPath = Normalize-RelativePath ([string]$entry.path)
+            $entryPackagePath = Get-ManifestEntryPackagePath -Entry $entry
+            $entrySourceCandidates = @(Get-ManifestEntrySourceCandidates -Entry $entry)
             $entryType = [string]$entry.type
             $entryRequired = [bool]$entry.required
             $entryGroup = [string]$entry.group
+
             $sourcePath = Join-NormalizedPath -BasePath $RepoRoot -RelativePath $entryPath
 
-            if (-not (Test-Path -LiteralPath $sourcePath)) {
-                $label = "${sectionName}:$entryPath"
-                if ($entryRequired) {
-                    Add-UniqueString -List $missingRequired -Set $seenMissingRequired -Value $label
-                }
-                else {
-                    Add-UniqueString -List $missingOptional -Set $seenMissingOptional -Value $label
-                }
-                continue
-            }
-
             if ($entryType -eq 'directory') {
+                if (-not (Test-Path -LiteralPath $sourcePath)) {
+                    $label = "${sectionName}:$entryPath"
+                    if ($entryRequired) {
+                        Add-UniqueString -List $missingRequired -Set $seenMissingRequired -Value $label
+                    }
+                    else {
+                        Add-UniqueString -List $missingOptional -Set $seenMissingOptional -Value $label
+                    }
+                    continue
+                }
+
                 foreach ($file in Get-ChildItem -LiteralPath $sourcePath -Recurse -File -Force) {
                     $relativePath = Get-RepoRelativePath -FullPath $file.FullName -BasePath $RepoRoot
                     if (Test-IsExcluded -RelativePath $relativePath -ExcludeEntries $excludeEntries) {
@@ -210,17 +406,36 @@ function Get-PackagePlan {
             }
 
             if (($entryType -eq 'file') -or ($entryType -eq 'file_if_present')) {
-                if (Test-IsExcluded -RelativePath $entryPath -ExcludeEntries $excludeEntries) {
-                    Add-UniqueString -List $excludedSamples -Set $seenExcludedSamples -Value $entryPath
+                $resolvedSource = Resolve-ManifestEntrySource -RepoRoot $RepoRoot -SourceCandidates $entrySourceCandidates
+                if ($null -eq $resolvedSource) {
+                    $label = if ($entrySourceCandidates.Count -gt 1) {
+                        '{0}:{1} (sources: {2})' -f $sectionName, $entryPackagePath, ($entrySourceCandidates -join ' | ')
+                    }
+                    else {
+                        "${sectionName}:$entryPackagePath"
+                    }
+
+                    if ($entryRequired) {
+                        Add-UniqueString -List $missingRequired -Set $seenMissingRequired -Value $label
+                    }
+                    else {
+                        Add-UniqueString -List $missingOptional -Set $seenMissingOptional -Value $label
+                    }
                     continue
                 }
 
-                if ($seenCandidateFiles.Add($entryPath)) {
+                if (Test-IsExcluded -RelativePath $entryPackagePath -ExcludeEntries $excludeEntries) {
+                    Add-UniqueString -List $excludedSamples -Set $seenExcludedSamples -Value $entryPackagePath
+                    continue
+                }
+
+                if ($seenCandidateFiles.Add($entryPackagePath)) {
                     $null = $candidateFiles.Add([pscustomobject]@{
-                        relative_path = $entryPath
-                        source_path   = (Get-Item -LiteralPath $sourcePath).FullName
-                        section       = [string]$sectionName
-                        group         = $entryGroup
+                        relative_path        = $entryPackagePath
+                        source_path          = [string]$resolvedSource.source_path
+                        source_relative_path = [string]$resolvedSource.source_relative_path
+                        section              = [string]$sectionName
+                        group                = $entryGroup
                     })
                 }
                 continue
@@ -257,6 +472,8 @@ function Get-PackagePlan {
         docs_count              = @($sortedCandidateFiles | Where-Object { $_.section -eq 'include_docs' }).Count
         config_count            = @($sortedCandidateFiles | Where-Object { $_.section -eq 'include_configs' }).Count
         launcher_count          = @($sortedCandidateFiles | Where-Object { $_.section -eq 'include_launchers' }).Count
+        native_artifact_count   = @($sortedCandidateFiles | Where-Object { $_.section -eq 'include_native_artifacts' }).Count
+        native_artifacts        = @(Get-PackageNativeArtifactEntries -RepoRoot $RepoRoot -Manifest $manifest)
         total_count             = @($sortedCandidateFiles).Count
     }
 }
@@ -384,6 +601,97 @@ function New-PackageZip {
     }
 
     return (Resolve-Path -LiteralPath $ZipPath).Path
+}
+
+function Get-ZipEntryNames {
+    param([string]$ZipPath)
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $resolvedZipPath = (Resolve-Path -LiteralPath $ZipPath).Path
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedZipPath)
+    try {
+        $entryNames = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($entry in $archive.Entries) {
+            $entryName = Normalize-RelativePath ($entry.FullName.TrimEnd('/'))
+            if (-not [string]::IsNullOrWhiteSpace($entryName)) {
+                $null = $entryNames.Add($entryName)
+            }
+        }
+
+        return @($entryNames | Sort-Object -Unique)
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-NativeArtifactValidation {
+    param(
+        [object[]]$NativeArtifacts,
+        [string]$PackageRootPath,
+        [string]$PackageRootName,
+        [string]$ZipPath = ""
+    )
+
+    $zipEntrySet = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not [string]::IsNullOrWhiteSpace($ZipPath) -and (Test-Path -LiteralPath $ZipPath)) {
+        foreach ($entryName in @(Get-ZipEntryNames -ZipPath $ZipPath)) {
+            $null = $zipEntrySet.Add($entryName)
+        }
+    }
+
+    $artifactRows = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($artifact in @($NativeArtifacts)) {
+        $packagePath = Normalize-RelativePath ([string]$artifact.package_path)
+        $packageRootExists = $false
+        if (-not [string]::IsNullOrWhiteSpace($PackageRootPath)) {
+            $packageRootExists = Test-Path -LiteralPath (Join-NormalizedPath -BasePath $PackageRootPath -RelativePath $packagePath)
+        }
+
+        $zipExists = $false
+        $zipChecked = ($zipEntrySet.Count -gt 0)
+        if ($zipChecked) {
+            $zipRelativePath = Normalize-RelativePath ("$PackageRootName/$packagePath")
+            $zipExists = $zipEntrySet.Contains($zipRelativePath)
+        }
+
+        $null = $artifactRows.Add([pscustomobject]@{
+            package_path           = $packagePath
+            source_candidates      = @($artifact.source_candidates)
+            source_relative_path   = [string]$artifact.source_relative_path
+            required               = [bool]$artifact.required
+            group                  = [string]$artifact.group
+            role                   = [string]$artifact.role
+            signing_scope          = [string]$artifact.signing_scope
+            is_resolved_source     = [bool]$artifact.is_resolved
+            exists_in_package_root = $packageRootExists
+            zip_checked            = $zipChecked
+            exists_in_zip          = $zipExists
+        })
+    }
+
+    $resolvedArtifacts = @($artifactRows | Where-Object { $_.is_resolved_source })
+    $missingSource = @($artifactRows | Where-Object { -not $_.is_resolved_source } | ForEach-Object { $_.package_path })
+    $missingInPackageRoot = @($resolvedArtifacts | Where-Object { -not $_.exists_in_package_root } | ForEach-Object { $_.package_path })
+    $missingInZip = @()
+    if ($zipEntrySet.Count -gt 0) {
+        $missingInZip = @($resolvedArtifacts | Where-Object { -not $_.exists_in_zip } | ForEach-Object { $_.package_path })
+    }
+
+    $artifactArray = @($artifactRows | Sort-Object package_path)
+    $totalCount = @($artifactArray).Count
+    $resolvedCount = @($resolvedArtifacts).Count
+
+    return [pscustomobject]@{
+        artifacts               = $artifactArray
+        total_count             = $totalCount
+        resolved_count          = $resolvedCount
+        missing_source          = @($missingSource)
+        missing_in_package_root = @($missingInPackageRoot)
+        missing_in_zip          = @($missingInZip)
+    }
 }
 
 function New-FlatPayloadStaging {

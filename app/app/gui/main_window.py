@@ -1,3 +1,7 @@
+# BUILD_ID: 2026-04-03_free_gui_report_path_readability_v1
+# BUILD_ID: 2026-04-03_free_gui_settings_two_column_v1
+# BUILD_ID: 2026-04-03_free_gui_version_title_release_prep_v1
+# BUILD_ID: 2026-04-03_free_gui_release_prep_v1
 # BUILD_ID: 2026-03-29_free_gui_responsiveness_fix_v1
 # BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
@@ -44,6 +48,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+import config as C
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QTextCursor
 from PySide6.QtWidgets import (
@@ -109,7 +114,6 @@ from app.core.dataset import (
 from app.gui.exchange_registry import (
     EXCHANGES,
     ExchangeOption,
-    all_symbols as all_exchange_symbols,
     get_exchange_option,
     normalize_exchange_id,
     normalize_symbol_for_exchange,
@@ -132,13 +136,17 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-03-29_free_gui_responsiveness_fix_v1"
+BUILD_ID = "2026-04-03_free_gui_report_path_readability_v1"
 logger = logging.getLogger(__name__)
+APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
+APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
+APP_WINDOW_TITLE = f"{APP_DISPLAY_NAME} {APP_VERSION}".strip() if APP_VERSION else APP_DISPLAY_NAME
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
 _RUNTIME_LOG_LEVEL_VALUES = ("MINIMAL",)
 FREE_BUILD_NOTE = "FREE build: PAPER / REPLAY / BACKTEST only"
 COMPACT_WIDTH_THRESHOLD = 980
+SETTINGS_TWO_COLUMN_WIDTH_THRESHOLD = 1180
 DEFAULT_LOG_MIN_HEIGHT = 180
 COMPACT_LOG_MIN_HEIGHT = 120
 DEFAULT_SECTION_VERTICAL_SPACING = 8
@@ -162,36 +170,46 @@ _UI_TEXTS = {
         "label.log_level": "ログレベル",
         "label.language": "表示言語",
         "label.dataset_root": "データセットルート",
-        "label.tf": "TF",
-        "label.since": "Since",
-        "label.until": "Until",
+        "label.tf": "時間足",
+        "label.since": "開始",
+        "label.until": "終了",
         "label.enable_report": "レポートを有効化",
         "label.report_out": "出力先",
         "label.resolved": "解決後パス",
         "label.key": "キー",
         "label.secret": "シークレット",
-        "label.from": "From",
-        "label.to": "To",
+        "label.from": "開始",
+        "label.to": "終了",
         "label.force_redownload": "再ダウンロードを強制",
+        "label.preview_mode": "プレビュー方式",
+        "label.account_currency": "口座通貨",
+        "label.native_balance": "残高",
+        "label.manual_jpy_balance": "手動 JPY 残高",
+        "label.preview_jpy_valuation": "JPY 評価額プレビュー",
+        "label.fx_source": "FX ソース",
+        "label.estimated_band": "推定バンド",
+        "label.preview_error": "プレビューエラー: {detail}",
         "group.replay": "Replay / Backtest / データセット",
         "group.report": "レポート",
-        "group.api_credentials": "API Credentials",
-        "group.diagnostics_pipeline": "Diagnostics / Pipeline",
-        "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
+        "group.valuation": "評価設定",
+        "group.api_credentials": "API認証情報",
+        "group.diagnostics_pipeline": "診断 / パイプライン",
+        "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST のみ",
+        "note.preview_only": "プレビューのみです。課金には反映されません。",
         "placeholder.dataset_root": "<PREFIX>_5m と <PREFIX>_1h を含むデータセットルートを選択",
-        "placeholder.api_key": "{exchange} key",
-        "placeholder.api_secret": "{exchange} secret",
+        "placeholder.api_key": "{exchange} キー",
+        "placeholder.api_secret": "{exchange} シークレット",
         "placeholder.yyyy_mm": "YYYY-MM",
         "action.select_replay_data": "Replay Data を選択...",
         "action.select_dataset_root": "Dataset Root を選択...",
         "action.start_replay": "Replay 実行",
         "action.start_backtest": "Backtest 実行",
         "action.start_paper": "Paper 開始",
-        "action.run_diagnostics": "Diagnostics 実行",
-        "action.create_support_bundle": "Support Bundle 作成",
-        "action.download_precompute": "Download + Precompute",
+        "action.run_diagnostics": "診断実行",
+        "action.create_support_bundle": "サポートバンドル作成",
+        "action.download_precompute": "ダウンロード + 事前計算",
         "action.save_settings": "設定を保存",
-        "action.clear_api_keys": "API Keys をクリア",
+        "action.clear_api_keys": "APIキーをクリア",
         "action.stop": "停止",
         "action.browse": "参照...",
         "action.open_folder": "フォルダを開く",
@@ -201,6 +219,7 @@ _UI_TEXTS = {
         "action.reset_view": "表示をリセット",
         "action.close": "閉じる",
         "action.refresh": "更新",
+        "status.preview_error": "プレビューエラー",
         "chart.mode.equity": "エクイティ",
         "chart.mode.net": "純損益",
         "chart.mode.max_dd": "最大DD",
@@ -222,7 +241,8 @@ _UI_TEXTS = {
         "dialog.replay_start_failed.title": "Replay起動失敗",
         "dialog.backtest_start_failed.title": "Backtest起動失敗",
         "dialog.start_failed.title": "起動失敗",
-        "dialog.save_png.title": "Save PNG",
+        "dialog.save_png.title": "PNG保存",
+        "dialog.select_report_output.title": "レポート出力先を選択",
         "dialog.already_running.title": "実行中",
         "dialog.already_running.message": "Bot はすでに実行中です。",
         "dialog.invalid_period.title": "期間エラー",
@@ -260,11 +280,21 @@ _UI_TEXTS = {
         "label.from": "From",
         "label.to": "To",
         "label.force_redownload": "Force re-download",
+        "label.preview_mode": "Preview Mode",
+        "label.account_currency": "Account Currency",
+        "label.native_balance": "Native Balance",
+        "label.manual_jpy_balance": "Manual JPY Balance",
+        "label.preview_jpy_valuation": "Preview JPY Valuation",
+        "label.fx_source": "FX Source",
+        "label.estimated_band": "Estimated Band",
+        "label.preview_error": "Preview error: {detail}",
         "group.replay": "Replay / Backtest / Dataset",
         "group.report": "Report",
+        "group.valuation": "Valuation Settings",
         "group.api_credentials": "API Credentials",
         "group.diagnostics_pipeline": "Diagnostics / Pipeline",
         "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
+        "note.preview_only": "Preview only. Billing is not affected.",
         "placeholder.dataset_root": "Select dataset root containing <PREFIX>_5m and <PREFIX>_1h",
         "placeholder.api_key": "{exchange} key",
         "placeholder.api_secret": "{exchange} secret",
@@ -288,6 +318,7 @@ _UI_TEXTS = {
         "action.reset_view": "Reset View",
         "action.close": "Close",
         "action.refresh": "Refresh",
+        "status.preview_error": "preview_error",
         "chart.mode.equity": "Equity",
         "chart.mode.net": "Net",
         "chart.mode.max_dd": "Max DD",
@@ -310,6 +341,7 @@ _UI_TEXTS = {
         "dialog.backtest_start_failed.title": "Backtest start failed",
         "dialog.start_failed.title": "Start failed",
         "dialog.save_png.title": "Save PNG",
+        "dialog.select_report_output.title": "Select Report Output",
         "dialog.already_running.title": "Already running",
         "dialog.already_running.message": "Bot is already running.",
         "dialog.invalid_period.title": "Invalid period",
@@ -375,12 +407,23 @@ def _config_symbols() -> list[str]:
         return ["BTC/JPY"]
 
 
+def _default_preset() -> str:
+    try:
+        import config as C  # local import to keep GUI module lightweight
+        value = str(getattr(C, "DEFAULT_PRESET", "SELL_SAFE") or "SELL_SAFE").strip().upper()
+        if value in {"OFF", "SELL_SAFE"}:
+            return value
+    except Exception:
+        pass
+    return "SELL_SAFE"
+
+
 class MainWindow(QWidget):
     sig_log = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("LoneWolf Fang Free")
+        self.setWindowTitle(APP_WINDOW_TITLE)
 
         self._paths = ensure_runtime_dirs()
 
@@ -440,6 +483,7 @@ class MainWindow(QWidget):
         self._last_logo_device_ratio_key: int = 0
         self._logo_label = QLabel()
         self._compact_mode: bool | None = None
+        self._settings_two_column_mode: bool | None = None
         self._pending_brand_logo_force: bool = False
         self._gui_perf_counters: dict[str, int] = {
             "proc_poll_calls": 0,
@@ -480,7 +524,9 @@ class MainWindow(QWidget):
         self.preset_label = QLabel("Preset")
         self.preset = QComboBox()
         self.preset.addItems(["OFF", "SELL_SAFE"])
-        self.preset.setCurrentText(self._settings.preset if self._settings.preset in ("OFF", "SELL_SAFE") else "OFF")
+        self.preset.setCurrentText(
+            self._settings.preset if self._settings.preset in ("OFF", "SELL_SAFE") else _default_preset()
+        )
 
         # Exchange / Symbol / Mode row
         self.controls_layout = QGridLayout()
@@ -569,6 +615,33 @@ class MainWindow(QWidget):
         self.btn_run_replay.setVisible(False)
         root.addWidget(self.replay_group)
 
+        self.settings_sections = QWidget()
+        self.settings_sections_layout = QHBoxLayout()
+        self.settings_sections_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_sections_layout.setSpacing(12)
+        self.settings_sections.setLayout(self.settings_sections_layout)
+        self.settings_left_column = QWidget()
+        self.settings_left_column_layout = QVBoxLayout()
+        self.settings_left_column_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_left_column_layout.setSpacing(12)
+        self.settings_left_column.setLayout(self.settings_left_column_layout)
+        self.settings_right_column = QWidget()
+        self.settings_right_column_layout = QVBoxLayout()
+        self.settings_right_column_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_right_column_layout.setSpacing(12)
+        self.settings_right_column.setLayout(self.settings_right_column_layout)
+        self.settings_sections_layout.addWidget(
+            self.settings_left_column,
+            stretch=1,
+            alignment=Qt.AlignmentFlag.AlignTop,
+        )
+        self.settings_sections_layout.addWidget(
+            self.settings_right_column,
+            stretch=1,
+            alignment=Qt.AlignmentFlag.AlignTop,
+        )
+        root.addWidget(self.settings_sections)
+
         self.report_group = QGroupBox("Report")
         self.report_group.setCheckable(True)
         report_layout = QVBoxLayout()
@@ -594,7 +667,6 @@ class MainWindow(QWidget):
         self.report_preview = QLineEdit()
         self.report_preview.setReadOnly(True)
         report_layout.addWidget(self.report_container)
-        root.addWidget(self.report_group)
 
         self.valuation_group = QGroupBox("Valuation Settings")
         self.valuation_group.setCheckable(True)
@@ -658,7 +730,6 @@ class MainWindow(QWidget):
         self.valuation_error.setWordWrap(True)
         self.valuation_error.setStyleSheet("color: #c0392b;")
         valuation_layout.addWidget(self.valuation_container)
-        root.addWidget(self.valuation_group)
 
         self.creds_group = QGroupBox("API Credentials")
         self.creds_group.setCheckable(True)
@@ -671,7 +742,6 @@ class MainWindow(QWidget):
         self.creds_stack = QStackedWidget()
         self.creds_stack.setVisible(creds_expanded)
         creds_layout.addWidget(self.creds_stack)
-        root.addWidget(self.creds_group)
         for item in EXCHANGES:
             page = QWidget()
             page_layout = QVBoxLayout()
@@ -752,8 +822,6 @@ class MainWindow(QWidget):
         self.license_meta = QLineEdit()
         self.license_meta.setReadOnly(True)
         activation_layout.addWidget(self.activation_container)
-
-        root.addWidget(self.activation_group)
         self.activation_group.setVisible(False)
         self.activation_group.setEnabled(False)
 
@@ -784,7 +852,6 @@ class MainWindow(QWidget):
         self.pipeline_force = QCheckBox("Force re-download")
         self.btn_pipeline = QPushButton("Download + Precompute")
         tools_layout.addWidget(self.tools_container)
-        root.addWidget(self.tools_group)
 
         row_buttons = QHBoxLayout()
         row_buttons.setSpacing(8)
@@ -896,6 +963,7 @@ class MainWindow(QWidget):
         self._live_chart_timer.start()
 
         self._refresh_license_widgets()
+        self._append(f"[ui] app_title={APP_WINDOW_TITLE}\n")
         self._append("[ui] Ready.\n")
         QTimer.singleShot(0, self._run_initial_gui_refresh)
 
@@ -922,6 +990,43 @@ class MainWindow(QWidget):
 
     def _is_compact_width(self) -> bool:
         return int(self.width()) < COMPACT_WIDTH_THRESHOLD
+
+    def _is_settings_two_column_width(self) -> bool:
+        return int(self.width()) >= SETTINGS_TWO_COLUMN_WIDTH_THRESHOLD
+
+    def _reset_box_layout(self, layout) -> None:
+        while layout.count():
+            layout.takeAt(0)
+
+    def _apply_settings_sections_layout(self, two_column: bool) -> None:
+        self._reset_box_layout(self.settings_left_column_layout)
+        self._reset_box_layout(self.settings_right_column_layout)
+        if two_column:
+            self.settings_right_column.setVisible(True)
+            for widget in (
+                self.valuation_group,
+                self.tools_group,
+            ):
+                self.settings_left_column_layout.addWidget(widget)
+            self.settings_left_column_layout.addStretch(1)
+            for widget in (
+                self.report_group,
+                self.creds_group,
+                self.activation_group,
+            ):
+                self.settings_right_column_layout.addWidget(widget)
+            self.settings_right_column_layout.addStretch(1)
+            return
+        self.settings_right_column.setVisible(False)
+        for widget in (
+            self.report_group,
+            self.valuation_group,
+            self.creds_group,
+            self.tools_group,
+            self.activation_group,
+        ):
+            self.settings_left_column_layout.addWidget(widget)
+        self.settings_left_column_layout.addStretch(1)
 
     def _reset_grid_layout(self, layout: QGridLayout) -> None:
         while layout.count():
@@ -1032,11 +1137,11 @@ class MainWindow(QWidget):
             result = calculate_valuation_preview(self._valuation_preview_request())
         except Exception as exc:
             self.valuation_preview_jpy.setText("")
-            self.valuation_fx_source.setText("preview_error")
+            self.valuation_fx_source.setText(self.tr("status.preview_error"))
             self.valuation_fx_source.setToolTip("")
             self.valuation_estimated_band.setText("")
-            self.valuation_note.setText(PREVIEW_ONLY_NOTE)
-            self.valuation_error.setText(f"Preview error: {str(exc) or 'unknown error'}")
+            self.valuation_note.setText(self.tr("note.preview_only"))
+            self.valuation_error.setText(self.tr("label.preview_error", detail=str(exc) or "unknown error"))
             return
 
         self.valuation_preview_jpy.setText(format_jpy_value(result.raw_balance_jpy))
@@ -1051,7 +1156,7 @@ class MainWindow(QWidget):
             tooltip_parts.append(f"state_db={result.state_db_path}")
         self.valuation_fx_source.setToolTip("\n".join(tooltip_parts))
         self.valuation_estimated_band.setText(str(result.estimated_band or ""))
-        self.valuation_note.setText(PREVIEW_ONLY_NOTE)
+        self.valuation_note.setText(self.tr("note.preview_only"))
         self.valuation_error.setText("")
 
     def _on_valuation_input_changed(self, *_args: object) -> None:
@@ -1059,26 +1164,30 @@ class MainWindow(QWidget):
 
     def _apply_report_layout(self, compact: bool) -> None:
         self._reset_grid_layout(self.report_container_layout)
+        self.report_container_layout.setHorizontalSpacing(6 if compact else 8)
         self.report_container_layout.setVerticalSpacing(
             COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
         )
         if compact:
-            self.report_container_layout.addWidget(self.report_enabled, 0, 0, 1, 4)
+            self.report_container_layout.addWidget(self.report_enabled, 0, 0, 1, 5)
             self.report_container_layout.addWidget(self.report_out_label, 1, 0)
-            self.report_container_layout.addWidget(self.report_out, 1, 1, 1, 2)
-            self.report_container_layout.addWidget(self.btn_report_out, 1, 3)
+            self.report_container_layout.addWidget(self.report_out, 1, 1, 1, 3)
+            self.report_container_layout.addWidget(self.btn_report_out, 1, 4)
             self.report_container_layout.addWidget(self.report_resolved_label, 2, 0)
-            self.report_container_layout.addWidget(self.report_preview, 2, 1, 1, 3)
+            self.report_container_layout.addWidget(self.report_preview, 2, 1, 1, 4)
             self.report_container_layout.setColumnStretch(1, 1)
             self.report_container_layout.setColumnStretch(2, 1)
+            self.report_container_layout.setColumnStretch(3, 1)
             return
-        self.report_container_layout.addWidget(self.report_enabled, 0, 0)
-        self.report_container_layout.addWidget(self.report_out_label, 0, 1)
-        self.report_container_layout.addWidget(self.report_out, 0, 2)
-        self.report_container_layout.addWidget(self.btn_report_out, 0, 3)
-        self.report_container_layout.addWidget(self.report_resolved_label, 1, 0)
-        self.report_container_layout.addWidget(self.report_preview, 1, 1, 1, 3)
+        self.report_container_layout.addWidget(self.report_enabled, 0, 0, 1, 5)
+        self.report_container_layout.addWidget(self.report_out_label, 1, 0)
+        self.report_container_layout.addWidget(self.report_out, 1, 1, 1, 3)
+        self.report_container_layout.addWidget(self.btn_report_out, 1, 4)
+        self.report_container_layout.addWidget(self.report_resolved_label, 2, 0)
+        self.report_container_layout.addWidget(self.report_preview, 2, 1, 1, 4)
+        self.report_container_layout.setColumnStretch(1, 1)
         self.report_container_layout.setColumnStretch(2, 1)
+        self.report_container_layout.setColumnStretch(3, 1)
 
     def _apply_valuation_layout(self, compact: bool) -> None:
         self._reset_grid_layout(self.valuation_container_layout)
@@ -1201,14 +1310,18 @@ class MainWindow(QWidget):
 
     def _apply_responsive_layout(self, compact: bool | None = None, *, force: bool = False) -> None:
         mode = self._is_compact_width() if compact is None else bool(compact)
-        if (not force) and (self._compact_mode == mode):
+        settings_two_column = (not mode) and self._is_settings_two_column_width()
+        section_compact = mode or settings_two_column
+        if (not force) and (self._compact_mode == mode) and (self._settings_two_column_mode == settings_two_column):
             return
         self._compact_mode = mode
+        self._settings_two_column_mode = settings_two_column
         self._apply_controls_layout(mode)
-        self._apply_report_layout(mode)
-        self._apply_valuation_layout(mode)
-        self._apply_activation_layout(mode)
-        self._apply_tools_layout(mode)
+        self._apply_settings_sections_layout(settings_two_column)
+        self._apply_report_layout(section_compact)
+        self._apply_valuation_layout(section_compact)
+        self._apply_activation_layout(section_compact)
+        self._apply_tools_layout(section_compact)
         self._set_log_minimum_height(mode)
         if mode:
             self._clear_brand_logo()
@@ -1236,7 +1349,7 @@ class MainWindow(QWidget):
             return _normalize_ui_language(self._ui_language)
 
     def _apply_ui_language(self) -> None:
-        self.setWindowTitle(self.tr("window.title"))
+        self.setWindowTitle(APP_WINDOW_TITLE)
         self.preset_label.setText(self.tr("label.preset"))
         self.exchange_label.setText(self.tr("label.exchange"))
         self.symbol_label.setText(self.tr("label.symbol"))
@@ -1261,18 +1374,18 @@ class MainWindow(QWidget):
         self.report_out_label.setText(self.tr("label.report_out"))
         self.btn_report_out.setText(self.tr("action.browse"))
         self.report_resolved_label.setText(self.tr("label.resolved"))
-        self.valuation_group.setTitle("Valuation Settings")
-        self.valuation_mode_label.setText("Preview Mode")
-        self.valuation_account_ccy_label.setText("Account Currency")
-        self.valuation_native_balance_label.setText("Native Balance")
-        self.valuation_manual_jpy_balance_label.setText("Manual JPY Balance")
+        self.valuation_group.setTitle(self.tr("group.valuation"))
+        self.valuation_mode_label.setText(self.tr("label.preview_mode"))
+        self.valuation_account_ccy_label.setText(self.tr("label.account_currency"))
+        self.valuation_native_balance_label.setText(self.tr("label.native_balance"))
+        self.valuation_manual_jpy_balance_label.setText(self.tr("label.manual_jpy_balance"))
         self.valuation_usdjpy_label.setText("USDJPY")
         self.valuation_usdtjpy_label.setText("USDTJPY")
         self.valuation_usdcjpy_label.setText("USDCJPY")
-        self.valuation_preview_jpy_label.setText("Preview JPY Valuation")
-        self.valuation_fx_source_label.setText("FX Source")
-        self.valuation_estimated_band_label.setText("Estimated Band")
-        self.valuation_note.setText(PREVIEW_ONLY_NOTE)
+        self.valuation_preview_jpy_label.setText(self.tr("label.preview_jpy_valuation"))
+        self.valuation_fx_source_label.setText(self.tr("label.fx_source"))
+        self.valuation_estimated_band_label.setText(self.tr("label.estimated_band"))
+        self.valuation_note.setText(self.tr("note.preview_only"))
         self.creds_group.setTitle(self.tr("group.api_credentials"))
         for exchange_id, refs in self._credential_ui_refs.items():
             exchange_label = str(refs.get("exchange_label", "") or exchange_id)
@@ -1571,8 +1684,15 @@ class MainWindow(QWidget):
         return os.path.abspath(os.path.join(self._paths.repo_root, value))
 
     def _refresh_report_preview(self) -> None:
+        report_out_path = self._report_out_abs()
         suffix = "" if self.report_enabled.isChecked() else " (disabled)"
-        self.report_preview.setText(f"{self._report_out_abs()}{suffix}")
+        preview_text = f"{report_out_path}{suffix}"
+        self.report_out.setToolTip(report_out_path)
+        self.report_preview.setText(preview_text)
+        self.report_preview.setToolTip(preview_text)
+        if not self.report_out.hasFocus():
+            self.report_out.setCursorPosition(0)
+        self.report_preview.setCursorPosition(0)
 
     def _ensure_report_parent(self) -> None:
         if not self.report_enabled.isChecked():
@@ -1691,8 +1811,7 @@ class MainWindow(QWidget):
     def _available_replay_symbols(self) -> list[str]:
         out: list[str] = []
         candidate_syms = (
-            list(all_exchange_symbols(include_hidden=False))
-            + list(_config_symbols())
+            list(symbols_for_exchange(self._selected_exchange_id()))
             + list(self._symbols or [])
             + [self._default_symbol]
         )
@@ -1701,7 +1820,8 @@ class MainWindow(QWidget):
             if (not raw) or raw in out:
                 continue
             out.append(raw)
-        return out or ["BTC/JPY", "BTC/USDT"]
+        fallback_symbol = normalize_symbol_for_exchange(self._selected_exchange_id(), self._default_symbol)
+        return out or [fallback_symbol]
 
     def _selected_replay_symbol(self) -> str:
         try:
@@ -1930,13 +2050,14 @@ class MainWindow(QWidget):
         start_path = self._report_out_abs()
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Select Report Output",
+            self.tr("dialog.select_report_output.title"),
             start_path,
             "JSON files (*.json);;All files (*.*)",
         )
         if not path:
             return
         self.report_out.setText(os.path.abspath(path))
+        self.report_out.setCursorPosition(0)
 
     def _open_replay_log_file(self, prefix: str = "replay") -> None:
         self._close_replay_log_file()
@@ -3393,7 +3514,7 @@ class MainWindow(QWidget):
             return
 
         spec = ReplaySpec(
-            preset=str(self.preset.currentText() or "OFF"),
+            preset=str(self.preset.currentText() or _default_preset()),
             replay_data_path=data_arg,
             symbol=str(symbol),
             timeframe=str(self.replay_tf.currentText() or "5m"),
@@ -3464,7 +3585,7 @@ class MainWindow(QWidget):
             return
 
         spec = ReplaySpec(
-            preset=str(self.preset.currentText() or "OFF"),
+            preset=str(self.preset.currentText() or _default_preset()),
             replay_data_path=str(prepared["data_arg"]),
             symbol=str(prepared["symbol"]),
             timeframe=str(prepared["timeframe"]),
@@ -3537,7 +3658,7 @@ class MainWindow(QWidget):
             return
 
         spec = BacktestSpec(
-            preset=str(self.preset.currentText() or "OFF"),
+            preset=str(self.preset.currentText() or _default_preset()),
             symbol=str(prepared["symbol"]),
             entry_timeframe=str(prepared["timeframe"]),
             since_ymd=str(prepared["since_ymd"]),
@@ -3648,7 +3769,7 @@ class MainWindow(QWidget):
         self._append(f"[ui] Cleared {ex} API keys from keyring.\n")
 
     def _get_spec(self) -> Optional[LaunchSpec]:
-        preset = self.preset.currentText().strip() or "OFF"
+        preset = self.preset.currentText().strip() or _default_preset()
         symbol = self._selected_symbol() or "BTC/JPY"
         exchange_id = self._selected_exchange_id()
         api_key, api_secret = self._resolve_runtime_creds(exchange_id)

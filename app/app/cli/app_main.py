@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-03_free_app_metadata_version_release_prep_v1
 # BUILD_ID: 2026-03-25_free_app_metadata_v1
 from __future__ import annotations
 
@@ -5,12 +6,13 @@ import argparse
 import ctypes
 import sys
 
+import config as C
 from app.core.gating import require_gui
 from app.core.paths import get_paths
 
 
-BUILD_ID = "2026-03-25_free_app_metadata_v1"
-APP_DISPLAY_NAME = "LoneWolf Fang Free"
+BUILD_ID = "2026-04-03_free_app_metadata_version_release_prep_v1"
+APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_USER_MODEL_ID = "LoneWolfFang.Free"
 
 

@@ -1,4 +1,4 @@
-REM BUILD_ID: 2026-03-25_free_shell_launcher_v1
+REM BUILD_ID: 2026-03-31_free_shared_python_launcher_v1
 @echo off
 setlocal
 
@@ -7,38 +7,14 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if "%ROOT:~-1%"==":" set "ROOT=%ROOT%\"
 cd /d "%ROOT%"
 
-set "PYTHON="
-set "PYTHON_DIR="
+set "LWF_SHARED_ROOT=%LocalAppData%\LoneWolfFang"
+set "PYTHON=%LWF_SHARED_ROOT%\venvs\free\Scripts\python.exe"
+set "PYTHON_DIR=%LWF_SHARED_ROOT%\venvs\free\Scripts"
 
-if exist "%ROOT%python_runtime\python.exe" set "PYTHON=%ROOT%python_runtime\python.exe"
-if exist "%ROOT%python_runtime\python.exe" set "PYTHON_DIR=%ROOT%python_runtime"
-
-if not defined PYTHON if exist "%ROOT%python_runtime\Scripts\python.exe" set "PYTHON=%ROOT%python_runtime\Scripts\python.exe"
-if not defined PYTHON_DIR if exist "%ROOT%python_runtime\Scripts\python.exe" set "PYTHON_DIR=%ROOT%python_runtime\Scripts"
-
-if not defined PYTHON if exist "%ROOT%.venv\Scripts\python.exe" set "PYTHON=%ROOT%.venv\Scripts\python.exe"
-if not defined PYTHON_DIR if exist "%ROOT%.venv\Scripts\python.exe" set "PYTHON_DIR=%ROOT%.venv\Scripts"
-
-if not defined PYTHON if exist "%LocalAppData%\Programs\Python\Python313\python.exe" set "PYTHON=%LocalAppData%\Programs\Python\Python313\python.exe"
-if not defined PYTHON_DIR if exist "%LocalAppData%\Programs\Python\Python313\python.exe" set "PYTHON_DIR=%LocalAppData%\Programs\Python\Python313"
-
-if not defined PYTHON if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PYTHON=%LocalAppData%\Programs\Python\Python312\python.exe"
-if not defined PYTHON_DIR if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PYTHON_DIR=%LocalAppData%\Programs\Python\Python312"
-
-if not defined PYTHON if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYTHON=%LocalAppData%\Programs\Python\Python311\python.exe"
-if not defined PYTHON_DIR if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYTHON_DIR=%LocalAppData%\Programs\Python\Python311"
-
-if not defined PYTHON (
-    echo [ERROR] python.exe was not found.
-    echo.
-    echo Expected locations:
-    echo   %ROOT%python_runtime\python.exe
-    echo   %ROOT%python_runtime\Scripts\python.exe
-    echo   %ROOT%.venv\Scripts\python.exe
-    echo   %LocalAppData%\Programs\Python\Python313\python.exe
-    echo   %LocalAppData%\Programs\Python\Python312\python.exe
-    echo   %LocalAppData%\Programs\Python\Python311\python.exe
-    echo.
+if not exist "%PYTHON%" (
+    echo [ERROR] free venv python.exe was not found.
+    echo Expected: %PYTHON%
+    echo Run LoneWolf Fang free Setup first.
     pause
     exit /b 1
 )
@@ -46,9 +22,9 @@ if not defined PYTHON (
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 set "LWF_HOME=%ROOT%"
-set "LWF_RUNTIME_ROOT=%ROOT%runtime"
-set "LWF_CONFIGS_ROOT=%ROOT%configs"
-set "LWF_MARKET_DATA_ROOT=%ROOT%market_data"
+set "LWF_RUNTIME_ROOT=%LWF_SHARED_ROOT%\data\free\runtime"
+set "LWF_CONFIGS_ROOT=%LWF_SHARED_ROOT%\data\free\configs"
+set "LWF_MARKET_DATA_ROOT=%LWF_SHARED_ROOT%\data\free\market_data"
 set "PYTHONPATH=%ROOT%app;%PYTHONPATH%"
 set "PATH=%PYTHON_DIR%;%PATH%"
 

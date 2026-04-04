@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-03_config_free_app_version_release_prep_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
@@ -19,7 +20,9 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-02_config_standard_continuity_hardening_v1"
+BUILD_ID = "2026-04-03_config_free_app_version_release_prep_v1"
+APP_DISPLAY_NAME = "LoneWolf Fang Free"
+APP_VERSION = "v1.1.0"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -580,6 +583,7 @@ SIZE_CAP_RAMP_ENABLED = True
 SIZE_CAP_RAMP_K = 1.25
 SIZE_CAP_RAMP_MAX_PCT = 0.18
 SIZE_SIZING_DEBUG_LOG_ENABLED = False
+DEFAULT_PRESET = "SELL_SAFE"
 PRESETS: dict[str, dict[str, Any]] = {
     "OFF": {},
     "SELL_SAFE": {

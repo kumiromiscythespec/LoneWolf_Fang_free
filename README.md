@@ -27,6 +27,7 @@ It does **not** include LIVE trading.
 ### Included in Free
 
 - GUI launcher
+- Native launcher and native setup bootstrap as official repo-top Windows artifacts after package build
 - PAPER
 - REPLAY
 - BACKTEST
@@ -47,6 +48,10 @@ Run the following file from the package root:
 
 `Install_LoneWolf_Fang_Free.cmd`
 
+When bundled, prefer the native setup entrypoint first:
+
+`LoneWolf_Fang_Free_Setup.exe`
+
 The local installer performs the following steps:
 
 - validates the local package contents
@@ -63,6 +68,7 @@ After installation, launch the app from the desktop shortcut:
 
 You can also launch it manually from the package root:
 
+- `LoneWolfFangFreeLauncher.exe`
 - `Launch_LoneWolf_Fang_Free_GUI.cmd`
 - `Launch_LoneWolf_Fang_Free_GUI.vbs`
 
@@ -83,6 +89,8 @@ The free edition supports the following modes:
 - The GUI title is `LoneWolf Fang Free`.
 - The package does not bundle market datasets.
 - Runtime folders are included as skeleton directories only.
+- Repo-top copies and packaged package-root copies of `LoneWolfFangFreeLauncher.exe` and `LoneWolf_Fang_Free_Setup.exe` are the intended signing targets.
+- Deep publish outputs under `launcher_native/` and `setup_bootstrap/` are intermediate build artifacts and are not user-facing release artifacts.
 
 ### Directory Notes
 

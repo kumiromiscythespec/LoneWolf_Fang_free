@@ -1,4 +1,4 @@
-﻿# BUILD_ID: 2026-04-02_user_scope_installer_shared_v1
+﻿# BUILD_ID: 2026-04-03_install_root_python_precheck_skip_v1
 [CmdletBinding()]
 param(
     [string]$InstallerBuildId = "",
@@ -8,6 +8,7 @@ param(
     [string]$InstallRoot = "",
     [string]$DesktopDirectoryOverride = "",
     [switch]$Force,
+    [switch]$SkipInstallRootPythonPrecheck,
     [switch]$SkipDesktopShortcut,
     [switch]$NonInteractive
 )
@@ -17,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = Split-Path -Parent $ScriptRoot
-$script:BuildId = if ([string]::IsNullOrWhiteSpace($InstallerBuildId)) { '2026-04-02_user_scope_installer_shared_v1' } else { $InstallerBuildId }
+$script:BuildId = if ([string]::IsNullOrWhiteSpace($InstallerBuildId)) { '2026-04-03_install_root_python_precheck_skip_v1' } else { $InstallerBuildId }
 $script:SharedRoot = Join-Path $env:LOCALAPPDATA 'LoneWolfFang'
 $script:SharedStatePath = Join-Path $script:SharedRoot 'config\shared_python.json'
 $script:LogPath = Join-Path ([System.IO.Path]::GetTempPath()) 'LoneWolfFang_installer.log'
@@ -260,6 +261,172 @@ function Confirm-OverwriteIfNeeded {
     }
 }
 
+function Get-NormalizedDirectoryPrefix {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+    }
+    catch {
+        return ''
+    }
+    $separator = [string][System.IO.Path]::DirectorySeparatorChar
+    $altSeparator = [string][System.IO.Path]::AltDirectorySeparatorChar
+    if ((-not $fullPath.EndsWith($separator)) -and (-not $fullPath.EndsWith($altSeparator))) {
+        $fullPath = $fullPath + $separator
+    }
+    return $fullPath
+}
+
+function Write-InstallRootPythonProcessDetails {
+    param(
+        [object[]]$Processes,
+        [string]$Prefix
+    )
+    foreach ($process in @($Processes)) {
+        $exePath = if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) { '<unknown>' } else { [string]$process.ExecutablePath }
+        Write-InstallLog -Level 'INFO' -Message ("{0} pid={1} ppid={2} name={3} executable_path={4} command_line={5}" -f $Prefix, $process.ProcessId, $process.ParentProcessId, $process.Name, $exePath, (Get-OutputSummary -Value ([string]$process.CommandLine)))
+    }
+}
+
+function Get-InstallRootPythonProcesses {
+    param([string]$TargetRoot)
+
+    if ([string]::IsNullOrWhiteSpace($TargetRoot)) {
+        return @()
+    }
+
+    $targetRootFull = ''
+    try {
+        $targetRootFull = [System.IO.Path]::GetFullPath($TargetRoot)
+    }
+    catch {
+        return @()
+    }
+
+    if (-not (Test-Path -LiteralPath $targetRootFull -PathType Container)) {
+        return @()
+    }
+
+    $runtimeRootPrefix = Get-NormalizedDirectoryPrefix -Path (Join-Path $targetRootFull 'python_runtime')
+    $commandLinePattern = '(^|[\s"''=])' + [regex]::Escape($targetRootFull) + '([\\\s"'']|$)'
+    $matched = New-Object 'System.Collections.Generic.List[object]'
+    $processes = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue)
+
+    foreach ($process in @($processes | Sort-Object ProcessId)) {
+        $exePath = [string]$process.ExecutablePath
+        if (-not [string]::IsNullOrWhiteSpace($exePath)) {
+            try {
+                $exePath = [System.IO.Path]::GetFullPath($exePath)
+            }
+            catch {
+            }
+        }
+
+        $commandLine = [string]$process.CommandLine
+        $runtimeMatch = (-not [string]::IsNullOrWhiteSpace($exePath)) -and (-not [string]::IsNullOrWhiteSpace($runtimeRootPrefix)) -and $exePath.StartsWith($runtimeRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        $commandLineMatch = (-not [string]::IsNullOrWhiteSpace($commandLine)) -and [regex]::IsMatch($commandLine, $commandLinePattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+
+        if (-not ($runtimeMatch -or $commandLineMatch)) {
+            continue
+        }
+
+        $null = $matched.Add([pscustomobject]@{
+            ProcessId = [int]$process.ProcessId
+            ParentProcessId = [int]$process.ParentProcessId
+            Name = [string]$process.Name
+            ExecutablePath = $exePath
+            CommandLine = $commandLine
+        })
+    }
+
+    return $matched.ToArray()
+}
+
+function Stop-InstallRootPythonProcesses {
+    param(
+        [string]$TargetRoot,
+        [object[]]$Processes,
+        [string]$Action
+    )
+
+    $processList = @($Processes)
+    if ($processList.Count -eq 0) {
+        return
+    }
+
+    Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_action={0} target_root={1} matched_count={2}" -f $Action, $TargetRoot, $processList.Count)
+
+    foreach ($process in $processList) {
+        try {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+            Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_stop_requested pid={0} ppid={1} name={2}" -f $process.ProcessId, $process.ParentProcessId, $process.Name)
+        }
+        catch {
+            Write-InstallLog -Level 'WARN' -Message ("python_process_precheck_stop_failed pid={0} ppid={1} name={2} reason={3}" -f $process.ProcessId, $process.ParentProcessId, $process.Name, $_.Exception.Message)
+        }
+    }
+
+    $remaining = @()
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        $remaining = @(Get-InstallRootPythonProcesses -TargetRoot $TargetRoot)
+        Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_post_kill attempt={0} remaining_count={1}" -f $attempt, $remaining.Count)
+        if ($remaining.Count -eq 0) {
+            return
+        }
+    }
+
+    Write-InstallRootPythonProcessDetails -Processes $remaining -Prefix 'python_process_precheck_remaining'
+    Write-InstallLog -Level 'ERROR' -Message ("python_process_precheck_failed target_root={0} reason=python_processes_still_running remaining_count={1}" -f $TargetRoot, $remaining.Count)
+    throw 'Failed to stop running Python processes under the install target. Close them manually and try again.'
+}
+
+function Invoke-InstallRootPythonPrecheck {
+    param(
+        [string]$TargetRoot,
+        [switch]$ForceInstall,
+        [switch]$NoPrompt
+    )
+
+    Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_started target_root={0}" -f $TargetRoot)
+    $processes = @(Get-InstallRootPythonProcesses -TargetRoot $TargetRoot)
+    Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_matched_count={0}" -f $processes.Count)
+
+    if ($processes.Count -eq 0) {
+        return
+    }
+
+    Write-InstallRootPythonProcessDetails -Processes $processes -Prefix 'python_process_precheck_match'
+
+    if ($ForceInstall -or $NoPrompt) {
+        Stop-InstallRootPythonProcesses -TargetRoot $TargetRoot -Processes $processes -Action 'auto_kill'
+        return
+    }
+
+    Write-Host ''
+    Write-Host '[WARN] Detected running Python processes under the install target.'
+    Write-Host ("Install Target   : {0}" -f $TargetRoot)
+    Write-Host ("Matched Processes: {0}" -f $processes.Count)
+    Write-Host ''
+    foreach ($process in $processes) {
+        $exePath = if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) { '<unknown>' } else { [string]$process.ExecutablePath }
+        Write-Host ("PID={0} PPID={1} NAME={2}" -f $process.ProcessId, $process.ParentProcessId, $process.Name)
+        Write-Host ("Path : {0}" -f $exePath)
+        Write-Host ("Cmd  : {0}" -f (Get-OutputSummary -Value ([string]$process.CommandLine)))
+        Write-Host ''
+    }
+
+    $answer = Read-Host 'Detected running Python processes under the install target. Stop them and continue? [y/N]'
+    if ($answer -notin @('y', 'Y', 'yes', 'YES')) {
+        Write-InstallLog -Level 'ERROR' -Message ("python_process_precheck_failed target_root={0} reason=user_declined_stop" -f $TargetRoot)
+        throw 'Installation cancelled because running Python processes were detected under the install target.'
+    }
+
+    Stop-InstallRootPythonProcesses -TargetRoot $TargetRoot -Processes $processes -Action 'user_confirmed_kill'
+}
 function Read-SharedState {
     if (-not (Test-Path -LiteralPath $script:SharedStatePath)) {
         return $null
@@ -683,6 +850,12 @@ try {
 
     Ensure-Directory -Path $targetRoot
     Confirm-OverwriteIfNeeded -TargetRoot $targetRoot -ForceInstall:$Force -NoPrompt:$NonInteractive
+    if ($SkipInstallRootPythonPrecheck) {
+        Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_skipped target_root={0} reason=skip_install_root_python_precheck" -f $targetRoot)
+    }
+    else {
+        Invoke-InstallRootPythonPrecheck -TargetRoot $targetRoot -ForceInstall:$Force -NoPrompt:$NonInteractive
+    }
 
     $plan = Get-PackagePlan -RepoRoot $RepoRoot -ManifestPath $ManifestPath
     if (@($plan.missing_required).Count -gt 0) {
@@ -737,5 +910,6 @@ catch {
     Write-Host ('Installer Log   : {0}' -f $script:LogPath)
     exit 1
 }
+
 
 

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 
-BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
 BITBANK_BASE_URL = "https://public.bitbank.cc"
 GMO_KLINES_URL = "https://api.coin.z.com/public/v1/klines"
 _DEFAULT_TIMEOUT_SEC = 30
@@ -25,6 +26,10 @@ _INTERVAL_MAP = {
     "5min": ("5min", 300_000, "5m"),
     "1h": ("1hour", 3_600_000, "1h"),
     "1hour": ("1hour", 3_600_000, "1h"),
+}
+_JPY_PAIR_MAP = {
+    "BTC/JPY": ("btc_jpy", "BTC"),
+    "ETH/JPY": ("eth_jpy", "ETH"),
 }
 
 
@@ -39,9 +44,10 @@ def _parse_provider(raw: str) -> str:
 
 def _parse_pair(raw: str) -> tuple[str, str, str]:
     pair = str(raw or "").strip().upper()
-    if pair != "BTC/JPY":
+    hit = _JPY_PAIR_MAP.get(pair)
+    if hit is None:
         raise ValueError(f"unsupported pair: {raw}")
-    return ("BTC/JPY", "btc_jpy", "BTC")
+    return (pair, str(hit[0]), str(hit[1]))
 
 
 def _normalize_interval(raw: str) -> tuple[str, int, str]:

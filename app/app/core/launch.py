@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_free_launch_salesafe_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
@@ -34,7 +35,7 @@ from app.security.license_client import (
 )
 
 
-BUILD_ID = "2026-04-03_free_launch_salesafe_defaults_release_prep_v1"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
 
 _RUNTIME_LOG_LEVELS = {"MINIMAL", "OPS", "DEBUG"}
 _FREE_RUN_MODES = {"PAPER", "REPLAY", "BACKTEST"}
@@ -72,6 +73,7 @@ class LaunchSpec:
     preset: str  # OFF / SELL_SAFE
     api_key: str
     api_secret: str
+    api_passphrase: str = ""
     exchange_id: str = "coincheck"
     symbol: str = "BTC/JPY"
     log_level: str = ""
@@ -288,33 +290,34 @@ def _build_env(spec: LaunchSpec) -> Dict[str, str]:
     # Preset precedence: ENV BOT_PRESET is respected by project policy.
     env["BOT_PRESET"] = str(spec.preset or _DEFAULT_PRESET)
 
+    cred_envs = {
+        "coincheck": ("COINCHECK_API_KEY", "COINCHECK_API_SECRET", ""),
+        "mexc": ("MEXC_API_KEY", "MEXC_API_SECRET", ""),
+        "binance": ("BINANCE_API_KEY", "BINANCE_API_SECRET", ""),
+        "bitbank": ("BITBANK_API_KEY", "BITBANK_API_SECRET", ""),
+        "okx": ("OKX_API_KEY", "OKX_API_SECRET", "OKX_API_PASSPHRASE"),
+    }
     exchange_id = str(spec.exchange_id or "").strip().lower() or "coincheck"
-    if exchange_id not in ("coincheck", "mexc", "binance"):
+    if exchange_id not in cred_envs:
         exchange_id = "coincheck"
     env["LWF_EXCHANGE_ID"] = str(exchange_id)
 
     # Pass creds via env only (never write to disk).
-    if exchange_id == "coincheck":
-        env["COINCHECK_API_KEY"] = str(spec.api_key or "")
-        env["COINCHECK_API_SECRET"] = str(spec.api_secret or "")
-        env.pop("MEXC_API_KEY", None)
-        env.pop("MEXC_API_SECRET", None)
-        env.pop("BINANCE_API_KEY", None)
-        env.pop("BINANCE_API_SECRET", None)
-    elif exchange_id == "binance":
-        env["BINANCE_API_KEY"] = str(spec.api_key or "")
-        env["BINANCE_API_SECRET"] = str(spec.api_secret or "")
-        env.pop("MEXC_API_KEY", None)
-        env.pop("MEXC_API_SECRET", None)
-        env.pop("COINCHECK_API_KEY", None)
-        env.pop("COINCHECK_API_SECRET", None)
-    else:
-        env["MEXC_API_KEY"] = str(spec.api_key or "")
-        env["MEXC_API_SECRET"] = str(spec.api_secret or "")
-        env.pop("BINANCE_API_KEY", None)
-        env.pop("BINANCE_API_SECRET", None)
-        env.pop("COINCHECK_API_KEY", None)
-        env.pop("COINCHECK_API_SECRET", None)
+    for key_env, secret_env, passphrase_env in cred_envs.values():
+        env.pop(key_env, None)
+        env.pop(secret_env, None)
+        if passphrase_env:
+            env.pop(passphrase_env, None)
+    env.pop("OKX_API_PASSWORD", None)
+    key_env, secret_env, passphrase_env = cred_envs[exchange_id]
+    env[key_env] = str(spec.api_key or "")
+    env[secret_env] = str(spec.api_secret or "")
+    if passphrase_env:
+        passphrase = str(spec.api_passphrase or "").strip()
+        if not passphrase:
+            raise RuntimeError("OKX requires API passphrase.")
+        env[passphrase_env] = passphrase
+        env["OKX_API_PASSWORD"] = passphrase
 
     # Keep all runtime artifacts under runtime/
     # If runner/backtest already writes to exports/, this at least gives GUI a stable place to show.
@@ -351,6 +354,12 @@ def _build_replay_env(spec: ReplaySpec) -> Dict[str, str]:
     env.pop("BINANCE_API_SECRET", None)
     env.pop("COINCHECK_API_KEY", None)
     env.pop("COINCHECK_API_SECRET", None)
+    env.pop("BITBANK_API_KEY", None)
+    env.pop("BITBANK_API_SECRET", None)
+    env.pop("OKX_API_KEY", None)
+    env.pop("OKX_API_SECRET", None)
+    env.pop("OKX_API_PASSPHRASE", None)
+    env.pop("OKX_API_PASSWORD", None)
     return env
 
 

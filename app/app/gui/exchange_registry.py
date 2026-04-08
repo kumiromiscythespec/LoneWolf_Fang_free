@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-03-05_btcusdt_first_quote_agnostic_v1
 from __future__ import annotations
 
@@ -7,7 +8,7 @@ from app.core.instrument_registry import all_symbols as registry_all_symbols
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-03-05_btcusdt_first_quote_agnostic_v1"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class ExchangeOption:
     label: str
     key_env: str
     secret_env: str
+    passphrase_env: str = ""
 
 
 EXCHANGES: tuple[ExchangeOption, ...] = (
@@ -36,6 +38,19 @@ EXCHANGES: tuple[ExchangeOption, ...] = (
         label="Binance",
         key_env="BINANCE_API_KEY",
         secret_env="BINANCE_API_SECRET",
+    ),
+    ExchangeOption(
+        id="bitbank",
+        label="bitbank",
+        key_env="BITBANK_API_KEY",
+        secret_env="BITBANK_API_SECRET",
+    ),
+    ExchangeOption(
+        id="okx",
+        label="OKX",
+        key_env="OKX_API_KEY",
+        secret_env="OKX_API_SECRET",
+        passphrase_env="OKX_API_PASSPHRASE",
     ),
 )
 

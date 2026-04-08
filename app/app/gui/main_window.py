@@ -1,3 +1,10 @@
+# BUILD_ID: 2026-04-08_free_update_check_manual_retry_v1
+# BUILD_ID: 2026-04-08_free_update_check_notify_latch_v1
+# BUILD_ID: 2026-04-08_free_manual_update_dialog_masked_keys_v1
+# BUILD_ID: 2026-04-08_free_okx_passphrase_coincheck_default_v1
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
+# BUILD_ID: 2026-04-08_free_gui_update_check_top_button_v1
+# BUILD_ID: 2026-04-08_free_gui_update_check_v1
 # BUILD_ID: 2026-04-03_free_gui_report_path_readability_v1
 # BUILD_ID: 2026-04-03_free_gui_settings_two_column_v1
 # BUILD_ID: 2026-04-03_free_gui_version_title_release_prep_v1
@@ -136,7 +143,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-03_free_gui_report_path_readability_v1"
+BUILD_ID = "2026-04-08_free_update_check_manual_retry_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -178,6 +185,7 @@ _UI_TEXTS = {
         "label.resolved": "解決後パス",
         "label.key": "キー",
         "label.secret": "シークレット",
+        "label.passphrase": "Passphrase",
         "label.from": "開始",
         "label.to": "終了",
         "label.force_redownload": "再ダウンロードを強制",
@@ -199,6 +207,7 @@ _UI_TEXTS = {
         "placeholder.dataset_root": "<PREFIX>_5m と <PREFIX>_1h を含むデータセットルートを選択",
         "placeholder.api_key": "{exchange} キー",
         "placeholder.api_secret": "{exchange} シークレット",
+        "placeholder.api_passphrase": "{exchange} passphrase",
         "placeholder.yyyy_mm": "YYYY-MM",
         "action.select_replay_data": "Replay Data を選択...",
         "action.select_dataset_root": "Dataset Root を選択...",
@@ -208,6 +217,7 @@ _UI_TEXTS = {
         "action.run_diagnostics": "診断実行",
         "action.create_support_bundle": "サポートバンドル作成",
         "action.download_precompute": "ダウンロード + 事前計算",
+        "action.check_updates": "更新確認",
         "action.save_settings": "設定を保存",
         "action.clear_api_keys": "APIキーをクリア",
         "action.stop": "停止",
@@ -238,6 +248,7 @@ _UI_TEXTS = {
         "result.empty.live_waiting": "paper のローソク足を待機中...",
         "dialog.missing_api_keys.title": "APIキー不足",
         "dialog.missing_api_keys.message": "{exchange} の API Key/Secret を入力して Save を押してください。",
+        "dialog.missing_api_credentials.message": "Please enter {exchange} API credentials and click Save.",
         "dialog.replay_start_failed.title": "Replay起動失敗",
         "dialog.backtest_start_failed.title": "Backtest起動失敗",
         "dialog.start_failed.title": "起動失敗",
@@ -277,6 +288,7 @@ _UI_TEXTS = {
         "label.resolved": "Resolved",
         "label.key": "Key",
         "label.secret": "Secret",
+        "label.passphrase": "Passphrase",
         "label.from": "From",
         "label.to": "To",
         "label.force_redownload": "Force re-download",
@@ -298,6 +310,7 @@ _UI_TEXTS = {
         "placeholder.dataset_root": "Select dataset root containing <PREFIX>_5m and <PREFIX>_1h",
         "placeholder.api_key": "{exchange} key",
         "placeholder.api_secret": "{exchange} secret",
+        "placeholder.api_passphrase": "{exchange} passphrase",
         "placeholder.yyyy_mm": "YYYY-MM",
         "action.select_replay_data": "Select Replay Data...",
         "action.select_dataset_root": "Select Dataset Root...",
@@ -307,6 +320,7 @@ _UI_TEXTS = {
         "action.run_diagnostics": "Run Diagnostics",
         "action.create_support_bundle": "Create Support Bundle",
         "action.download_precompute": "Download + Precompute",
+        "action.check_updates": "Check for Updates",
         "action.save_settings": "Save Settings",
         "action.clear_api_keys": "Clear API Keys",
         "action.stop": "Stop",
@@ -337,6 +351,7 @@ _UI_TEXTS = {
         "result.empty.live_waiting": "Waiting for paper candles...",
         "dialog.missing_api_keys.title": "Missing API Keys",
         "dialog.missing_api_keys.message": "Please enter {exchange} API Key/Secret and click Save.",
+        "dialog.missing_api_credentials.message": "Please enter {exchange} API credentials and click Save.",
         "dialog.replay_start_failed.title": "Replay start failed",
         "dialog.backtest_start_failed.title": "Backtest start failed",
         "dialog.start_failed.title": "Start failed",
@@ -363,11 +378,23 @@ _UI_TEXTS = {
 
 
 def _mask_secret(s: str) -> str:
-    if not s:
+    text = str(s or "")
+    if not text:
         return ""
-    if len(s) <= 6:
-        return "*" * len(s)
-    return s[:2] + ("*" * (len(s) - 4)) + s[-2:]
+    if len(text) <= 2:
+        return "*" * len(text)
+    if len(text) <= 6:
+        return text[:1] + ("*" * (len(text) - 2)) + text[-1:]
+    return text[:2] + ("*" * (len(text) - 4)) + text[-2:]
+
+
+def _is_masked_secret_text(s: str) -> bool:
+    return "*" in str(s or "")
+
+
+def _is_plain_secret_text(s: str) -> bool:
+    text = str(s or "").strip()
+    return bool(text) and not _is_masked_secret_text(text)
 
 
 def _normalize_exchange_id(raw: str) -> str:
@@ -420,6 +447,7 @@ def _default_preset() -> str:
 
 class MainWindow(QWidget):
     sig_log = Signal(str)
+    sig_update_check_finished = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -473,6 +501,10 @@ class MainWindow(QWidget):
         self._chart_mode_user_locked: bool = False
         self._chart_mode_auto_live_candle_applied: bool = False
         self._suppress_chart_mode_user_lock: bool = False
+        self._update_check_started: bool = False
+        self._update_check_running: bool = False
+        self._update_check_notify: bool = False
+        self._update_check_manual_retry: bool = False
         self._last_chart_state_diag_key: tuple[str, int, int, str] | None = None
         self._last_chart_state_reader_path: str = ""
         self._last_live_chart_poll_signature: tuple[str, str, str, bool, bool, int, int, bool] | None = None
@@ -560,6 +592,7 @@ class MainWindow(QWidget):
             self.language.addItem(label, code)
         idx_language = max(0, self.language.findData(self._ui_language))
         self.language.setCurrentIndex(idx_language)
+        self.btn_check_updates = QPushButton("Check for Updates")
         top_form.addLayout(self.controls_layout)
 
         self.free_build_note = QLabel(FREE_BUILD_NOTE)
@@ -754,7 +787,7 @@ class MainWindow(QWidget):
             key_label = QLabel("Key")
             key_row.addWidget(key_label)
             key_edit = QLineEdit()
-            key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+            key_edit.setEchoMode(QLineEdit.EchoMode.Normal)
             key_edit.setClearButtonEnabled(True)
             key_edit.setPlaceholderText(f"{item.label} key")
             key_row.addWidget(key_edit)
@@ -765,27 +798,51 @@ class MainWindow(QWidget):
             secret_label = QLabel("Secret")
             secret_row.addWidget(secret_label)
             secret_edit = QLineEdit()
-            secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            secret_edit.setEchoMode(QLineEdit.EchoMode.Normal)
             secret_edit.setClearButtonEnabled(True)
             secret_edit.setPlaceholderText(f"{item.label} secret")
             secret_row.addWidget(secret_edit)
             page_layout.addLayout(secret_row)
 
+            passphrase_row_widget = QWidget()
+            passphrase_row = QHBoxLayout()
+            passphrase_row.setContentsMargins(0, 0, 0, 0)
+            passphrase_row.setSpacing(8)
+            passphrase_row_widget.setLayout(passphrase_row)
+            passphrase_label = QLabel("Passphrase")
+            passphrase_row.addWidget(passphrase_label)
+            passphrase_edit = QLineEdit()
+            passphrase_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+            passphrase_edit.setClearButtonEnabled(True)
+            passphrase_edit.setPlaceholderText(f"{item.label} passphrase")
+            passphrase_row.addWidget(passphrase_edit)
+            passphrase_row_widget.setVisible(bool(item.passphrase_env))
+            page_layout.addWidget(passphrase_row_widget)
+
             index = self.creds_stack.addWidget(page)
             self._credential_page_index[str(item.id)] = int(index)
-            self._credential_inputs[str(item.id)] = {"key": key_edit, "secret": secret_edit}
+            self._credential_inputs[str(item.id)] = {
+                "key": key_edit,
+                "secret": secret_edit,
+                "passphrase": passphrase_edit,
+            }
             self._credential_ui_refs[str(item.id)] = {
                 "exchange_label": str(item.label),
                 "key_label": key_label,
                 "secret_label": secret_label,
+                "passphrase_label": passphrase_label,
                 "key_edit": key_edit,
                 "secret_edit": secret_edit,
+                "passphrase_edit": passphrase_edit,
+                "passphrase_row": passphrase_row_widget,
             }
 
             creds = load_creds(str(item.id))
             if creds is not None:
                 key_edit.setText(_mask_secret(creds.api_key))
                 secret_edit.setText(_mask_secret(creds.api_secret))
+                if str(getattr(creds, "api_passphrase", "") or ""):
+                    passphrase_edit.setText(_mask_secret(str(creds.api_passphrase or "")))
 
         self.activation_group = QGroupBox("Desktop Activation")
         self.activation_group.setCheckable(True)
@@ -804,7 +861,7 @@ class MainWindow(QWidget):
         self.activation_container.setLayout(self.activation_container_layout)
 
         self.activation_seat_key_label = QLabel("Seat Key")
-        self.license_seat_key = QLineEdit(str(load_license_seat_key() or ""))
+        self.license_seat_key = QLineEdit(_mask_secret(str(load_license_seat_key() or "")))
         self.license_seat_key.setClearButtonEnabled(True)
         self.license_seat_key.setPlaceholderText("Paste your Desktop Activation seat key")
         self.btn_license_activate = QPushButton("Activate")
@@ -876,6 +933,7 @@ class MainWindow(QWidget):
         first_inputs = self._credential_inputs.get(self._exchange_id, {})
         self.api_key = first_inputs.get("key")
         self.api_secret = first_inputs.get("secret")
+        self.api_passphrase = first_inputs.get("passphrase")
         self._sync_exchange_fields()
         self._refresh_report_preview()
         self._refresh_valuation_preview()
@@ -916,6 +974,7 @@ class MainWindow(QWidget):
         self.btn_diag.clicked.connect(self.on_run_diagnostics)
         self.btn_bundle.clicked.connect(self.on_create_support_bundle)
         self.btn_pipeline.clicked.connect(self.on_run_pipeline)
+        self.btn_check_updates.clicked.connect(self.on_check_updates)
         self.btn_select_replay.clicked.connect(self.on_select_replay_data)
         self.btn_select_replay_dir.clicked.connect(self.on_select_replay_folder)
         self.btn_run_replay.clicked.connect(self.on_run_replay)
@@ -951,6 +1010,7 @@ class MainWindow(QWidget):
         self.replay_since_ym.textEdited.connect(self._on_replay_range_edited)
         self.replay_until_ym.textEdited.connect(self._on_replay_range_edited)
         self.sig_log.connect(self._append)
+        self.sig_update_check_finished.connect(self._on_update_check_finished)
 
         # Timer to poll process exit
         self._timer = QTimer(self)
@@ -1031,7 +1091,7 @@ class MainWindow(QWidget):
     def _reset_grid_layout(self, layout: QGridLayout) -> None:
         while layout.count():
             layout.takeAt(0)
-        for index in range(12):
+        for index in range(13):
             layout.setColumnStretch(index, 0)
             layout.setRowStretch(index, 0)
 
@@ -1052,6 +1112,7 @@ class MainWindow(QWidget):
             self.controls_layout.addWidget(self.log_level, 1, 3)
             self.controls_layout.addWidget(self.language_label, 1, 4)
             self.controls_layout.addWidget(self.language, 1, 5)
+            self.controls_layout.addWidget(self.btn_check_updates, 2, 0, 1, 6, Qt.AlignmentFlag.AlignRight)
             self.controls_layout.setColumnStretch(1, 1)
             self.controls_layout.setColumnStretch(3, 1)
             self.controls_layout.setColumnStretch(5, 1)
@@ -1068,6 +1129,7 @@ class MainWindow(QWidget):
         self.controls_layout.addWidget(self.log_level, 0, 9)
         self.controls_layout.addWidget(self.language_label, 0, 10)
         self.controls_layout.addWidget(self.language, 0, 11)
+        self.controls_layout.addWidget(self.btn_check_updates, 1, 0, 1, 13, Qt.AlignmentFlag.AlignRight)
         self.controls_layout.setColumnStretch(1, 1)
         self.controls_layout.setColumnStretch(3, 1)
         self.controls_layout.setColumnStretch(5, 1)
@@ -1391,16 +1453,26 @@ class MainWindow(QWidget):
             exchange_label = str(refs.get("exchange_label", "") or exchange_id)
             key_label = refs.get("key_label")
             secret_label = refs.get("secret_label")
+            passphrase_label = refs.get("passphrase_label")
             key_edit = refs.get("key_edit")
             secret_edit = refs.get("secret_edit")
+            passphrase_edit = refs.get("passphrase_edit")
+            passphrase_row = refs.get("passphrase_row")
+            option = get_exchange_option(exchange_id)
             if isinstance(key_label, QLabel):
                 key_label.setText(self.tr("label.key"))
             if isinstance(secret_label, QLabel):
                 secret_label.setText(self.tr("label.secret"))
+            if isinstance(passphrase_label, QLabel):
+                passphrase_label.setText(self.tr("label.passphrase"))
             if isinstance(key_edit, QLineEdit):
                 key_edit.setPlaceholderText(self.tr("placeholder.api_key", exchange=exchange_label))
             if isinstance(secret_edit, QLineEdit):
                 secret_edit.setPlaceholderText(self.tr("placeholder.api_secret", exchange=exchange_label))
+            if isinstance(passphrase_edit, QLineEdit):
+                passphrase_edit.setPlaceholderText(self.tr("placeholder.api_passphrase", exchange=exchange_label))
+            if isinstance(passphrase_row, QWidget):
+                passphrase_row.setVisible(bool(option.passphrase_env))
         self.tools_group.setTitle(self.tr("group.diagnostics_pipeline"))
         self.btn_diag.setText(self.tr("action.run_diagnostics"))
         self.btn_bundle.setText(self.tr("action.create_support_bundle"))
@@ -1410,6 +1482,8 @@ class MainWindow(QWidget):
         self.pipeline_to_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
         self.pipeline_force.setText(self.tr("label.force_redownload"))
         self.btn_pipeline.setText(self.tr("action.download_precompute"))
+        self.btn_check_updates.setText(self.tr("action.check_updates"))
+        self.btn_check_updates.setMinimumWidth(self.btn_check_updates.sizeHint().width())
         self.btn_save.setText(self.tr("action.save_settings"))
         self.btn_clear.setText(self.tr("action.clear_api_keys"))
         self.btn_stop.setText(self.tr("action.stop"))
@@ -1455,10 +1529,22 @@ class MainWindow(QWidget):
             parts.append(f"offline_grace_until={grace}")
         return " | ".join(parts)
 
+    def _plain_license_seat_key_input(self) -> str:
+        text = str(self.license_seat_key.text() or "").strip()
+        return text if _is_plain_secret_text(text) else ""
+
+    def _license_seat_key_raw_value(self, *, prefer_typed: bool = False) -> str:
+        typed_seat_key = self._plain_license_seat_key_input()
+        stored_seat_key = str(load_license_seat_key() or "").strip()
+        if prefer_typed and typed_seat_key:
+            return typed_seat_key
+        return stored_seat_key or typed_seat_key
+
     def _refresh_license_widgets(self) -> None:
         stored_seat_key = str(load_license_seat_key() or "").strip()
-        if stored_seat_key and not str(self.license_seat_key.text() or "").strip():
-            self.license_seat_key.setText(stored_seat_key)
+        current_text = str(self.license_seat_key.text() or "").strip()
+        if stored_seat_key and ((not current_text) or _is_masked_secret_text(current_text)):
+            self.license_seat_key.setText(_mask_secret(stored_seat_key))
         self.license_status.setText(self._license_status_text())
         device_id = str(load_license_device_id() or "").strip()
         base_url = self._license_base_url()
@@ -1495,14 +1581,14 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "Desktop Activation", msg)
 
     def on_activate_license(self) -> None:
-        seat_key = str(self.license_seat_key.text() or "").strip()
+        seat_key = self._license_seat_key_raw_value(prefer_typed=True)
         if not seat_key:
             self.activation_group.setChecked(True)
             QMessageBox.warning(self, "Desktop Activation", "Seat Key is required.")
             return
         try:
             state = activate_and_store_license(seat_key, base_url=self._license_base_url())
-            self.license_seat_key.setText(str(state.seat_key or seat_key))
+            self.license_seat_key.setText(_mask_secret(str(state.seat_key or seat_key)))
             self._refresh_license_widgets()
             self.activation_group.setChecked(False)
             self._append(f"[ui] Desktop activation succeeded status={str(state.license_status or '')} live_allowed={bool(state.live_allowed)}\n")
@@ -1521,7 +1607,7 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "Desktop Activation", msg)
 
     def on_refresh_license(self) -> None:
-        typed_seat_key = str(self.license_seat_key.text() or "").strip()
+        typed_seat_key = self._plain_license_seat_key_input()
         stored_seat_key = str(load_license_seat_key() or "").strip()
         if (not stored_seat_key) and typed_seat_key:
             self.on_activate_license()
@@ -1532,7 +1618,7 @@ class MainWindow(QWidget):
             return
         try:
             state = refresh_and_store_license(base_url=self._license_base_url())
-            self.license_seat_key.setText(str(load_license_seat_key() or typed_seat_key or ""))
+            self.license_seat_key.setText(_mask_secret(str(load_license_seat_key() or typed_seat_key or "")))
             self._refresh_license_widgets()
             self.activation_group.setChecked(False)
             self._append(f"[ui] Desktop activation refresh succeeded status={str(state.license_status or '')} live_allowed={bool(state.live_allowed)}\n")
@@ -1551,7 +1637,7 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "Desktop Activation", msg)
 
     def on_clear_activation(self) -> None:
-        seat_key = str(load_license_seat_key() or self.license_seat_key.text() or "").strip()
+        seat_key = self._license_seat_key_raw_value()
         device_id = str(load_license_device_id() or "").strip()
         if not seat_key:
             self._refresh_license_widgets()
@@ -1911,6 +1997,22 @@ class MainWindow(QWidget):
     def _credential_widgets(self, exchange_id: str | None = None) -> dict[str, QLineEdit]:
         return self._credential_inputs.get(str(exchange_id or self._selected_exchange_id()), {})
 
+    def _refresh_credential_widgets_from_keyring(self, exchange_id: str) -> None:
+        creds = load_creds(str(exchange_id))
+        if creds is None:
+            return
+        widgets = self._credential_widgets(exchange_id)
+        key_edit = widgets.get("key")
+        secret_edit = widgets.get("secret")
+        passphrase_edit = widgets.get("passphrase")
+        if key_edit is not None:
+            key_edit.setText(_mask_secret(str(creds.api_key or "")))
+        if secret_edit is not None:
+            secret_edit.setText(_mask_secret(str(creds.api_secret or "")))
+        if passphrase_edit is not None:
+            passphrase = str(getattr(creds, "api_passphrase", "") or "")
+            passphrase_edit.setText(_mask_secret(passphrase) if passphrase else "")
+
     def _has_saved_creds(self, exchange_id: str | None = None) -> bool:
         try:
             return load_creds(str(exchange_id or self._selected_exchange_id())) is not None
@@ -1924,21 +2026,33 @@ class MainWindow(QWidget):
         except Exception:
             return False
 
-    def _resolve_runtime_creds(self, exchange_id: str | None = None) -> tuple[str, str]:
+    def _resolve_runtime_creds(self, exchange_id: str | None = None) -> tuple[str, str, str]:
         ex = str(exchange_id or self._selected_exchange_id())
+        option = get_exchange_option(ex)
         widgets = self._credential_widgets(ex)
         key_text = str((widgets.get("key").text() if widgets.get("key") is not None else "") or "").strip()
         secret_text = str((widgets.get("secret").text() if widgets.get("secret") is not None else "") or "").strip()
-        key_plain = bool(key_text) and ("*" not in key_text)
-        secret_plain = bool(secret_text) and ("*" not in secret_text)
-        if key_plain and secret_plain:
-            return (key_text, secret_text)
+        passphrase_text = str((widgets.get("passphrase").text() if widgets.get("passphrase") is not None else "") or "").strip()
+        key_plain = _is_plain_secret_text(key_text)
+        secret_plain = _is_plain_secret_text(secret_text)
+        passphrase_plain = _is_plain_secret_text(passphrase_text)
+        needs_passphrase = bool(getattr(option, "passphrase_env", ""))
+        if key_plain and secret_plain and ((not needs_passphrase) or passphrase_plain):
+            return (key_text, secret_text, passphrase_text if passphrase_plain else "")
         creds = load_creds(ex)
         if creds is not None:
-            return (str(creds.api_key or ""), str(creds.api_secret or ""))
-        if key_plain or secret_plain:
-            return (key_text if key_plain else "", secret_text if secret_plain else "")
-        return ("", "")
+            return (
+                str(creds.api_key or ""),
+                str(creds.api_secret or ""),
+                str(getattr(creds, "api_passphrase", "") or ""),
+            )
+        if key_plain or secret_plain or passphrase_plain:
+            return (
+                key_text if key_plain else "",
+                secret_text if secret_plain else "",
+                passphrase_text if passphrase_plain else "",
+            )
+        return ("", "", "")
 
     def _selected_run_mode(self) -> str:
         try:
@@ -2004,6 +2118,7 @@ class MainWindow(QWidget):
         active_inputs = self._credential_widgets(ex)
         self.api_key = active_inputs.get("key")
         self.api_secret = active_inputs.get("secret")
+        self.api_passphrase = active_inputs.get("passphrase")
         self._refresh_replay_symbol_options(preferred=target_symbol)
 
     def _on_exchange_changed(self, _value: str) -> None:
@@ -2238,6 +2353,137 @@ class MainWindow(QWidget):
         self._refresh_result_panel()
         if self._selected_run_mode() == "PAPER":
             self._poll_live_chart_state()
+        self._check_latest_release_async(force=False)
+
+    def _release_repo_full_name(self) -> str:
+        return str(getattr(C, "FREE_RELEASE_REPO", "") or "kumiromiscythespec/LoneWolf_Fang_free").strip()
+
+    def _release_latest_url(self) -> str:
+        return str(
+            getattr(C, "FREE_RELEASE_LATEST_URL", "")
+            or f"https://github.com/{self._release_repo_full_name()}/releases/latest"
+        ).strip()
+
+    def _version_sort_key(self, raw: str) -> tuple[int, ...]:
+        text = str(raw or "").strip().lower().lstrip("v")
+        parts = [int(x) for x in re.findall(r"\d+", text)]
+        return tuple(parts or [0])
+
+    def _is_newer_version(self, latest: str, current: str) -> bool:
+        latest_key = self._version_sort_key(latest)
+        current_key = self._version_sort_key(current)
+        width = max(len(latest_key), len(current_key))
+        return latest_key + (0,) * (width - len(latest_key)) > current_key + (0,) * (width - len(current_key))
+
+    def _check_latest_release_async(self, force: bool = False, notify: bool = False) -> None:
+        if self._update_check_running:
+            if notify:
+                self._update_check_notify = True
+            return
+        if self._update_check_started and not force:
+            return
+        repo = self._release_repo_full_name()
+        if not repo:
+            if notify:
+                QTimer.singleShot(0, self._show_update_check_failed)
+            return
+        self._update_check_started = True
+        self._update_check_running = True
+        self._update_check_notify = bool(notify)
+        if notify and hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.setEnabled(False)
+
+        def worker() -> None:
+            try:
+                req = urllib.request.Request(
+                    f"https://api.github.com/repos/{repo}/releases/latest",
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "User-Agent": "LoneWolf-Fang-Free-GUI",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=6.0) as resp:
+                    payload = json.loads((resp.read() or b"{}").decode("utf-8"))
+                notify_result = bool(notify)
+                if not isinstance(payload, dict):
+                    if notify_result:
+                        QTimer.singleShot(0, self._show_update_check_failed)
+                    return
+                latest = str(payload.get("tag_name") or payload.get("name") or "").strip()
+                release_url = str(payload.get("html_url") or self._release_latest_url()).strip()
+                current = str(APP_VERSION or "").strip()
+                if not latest or not current:
+                    if notify_result:
+                        QTimer.singleShot(0, self._show_update_check_failed)
+                    return
+                if self._is_newer_version(latest, current):
+                    if notify_result:
+                        QTimer.singleShot(
+                            0,
+                            lambda latest=latest, current=current, release_url=release_url: self._show_update_available(
+                                latest,
+                                current,
+                                release_url,
+                            ),
+                        )
+                    return
+                if notify_result:
+                    QTimer.singleShot(
+                        0,
+                        lambda latest=latest, current=current: self._show_update_not_available(latest, current),
+                    )
+            except Exception as exc:
+                self.sig_log.emit(f"[update] latest check skipped: {exc}\n")
+                notify_result = bool(notify)
+                if notify_result:
+                    QTimer.singleShot(0, self._show_update_check_failed)
+            finally:
+                self.sig_update_check_finished.emit()
+
+        threading.Thread(target=worker, name="lwf_free_update_check", daemon=True).start()
+
+    def _on_update_check_finished(self) -> None:
+        self._update_check_running = False
+        if self._update_check_manual_retry:
+            self._update_check_manual_retry = False
+            self._update_check_notify = False
+            self._check_latest_release_async(force=True, notify=True)
+            return
+        self._update_check_notify = False
+        if hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.setEnabled(True)
+
+    def on_check_updates(self) -> None:
+        if self._update_check_running:
+            self._update_check_notify = True
+            self._update_check_manual_retry = True
+            self.btn_check_updates.setEnabled(False)
+            return
+        self.btn_check_updates.setEnabled(False)
+        self._append("[update] checking latest release...\n")
+        self._check_latest_release_async(force=True, notify=True)
+        if not self._update_check_running:
+            self.btn_check_updates.setEnabled(True)
+
+    def _show_update_not_available(self, latest: str, current: str) -> None:
+        self._append(f"[update] up_to_date current={current} latest={latest}\n")
+        QMessageBox.information(self, "Update check", "お使いのクライアントは最新バージョンです。")
+
+    def _show_update_check_failed(self) -> None:
+        self._append("[update] latest_check_failed\n")
+        QMessageBox.warning(self, "Update check", "更新確認に失敗しました。")
+
+    def _show_update_available(self, latest: str, current: str, release_url: str) -> None:
+        self._append(f"[update] latest_available current={current} latest={latest} url={release_url}\n")
+        msg = (
+            f"A newer LoneWolf Fang Free release is available.\n\n"
+            f"Current: {current}\n"
+            f"Latest: {latest}\n\n"
+            "Open the GitHub Releases page?"
+        )
+        result = QMessageBox.question(self, "Update available", msg)
+        if result == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl(str(release_url or self._release_latest_url())))
 
     def _set_proc_poll_activity(self, active: bool) -> None:
         target = PROC_POLL_ACTIVE_INTERVAL_MS if active else PROC_POLL_IDLE_INTERVAL_MS
@@ -3404,11 +3650,14 @@ class MainWindow(QWidget):
             env["LWF_EXCHANGE_ID"] = str(exchange_id)
             env["LWF_PIPELINE_FORCE"] = "1" if bool(self.pipeline_force.isChecked()) else "0"
             option = self._selected_exchange_option()
-            api_key, api_secret = self._resolve_runtime_creds(exchange_id)
+            api_key, api_secret, api_passphrase = self._resolve_runtime_creds(exchange_id)
             if option.key_env:
                 env[str(option.key_env)] = str(api_key or "")
             if option.secret_env:
                 env[str(option.secret_env)] = str(api_secret or "")
+            if option.passphrase_env:
+                env[str(option.passphrase_env)] = str(api_passphrase or "")
+                env["OKX_API_PASSWORD"] = str(api_passphrase or "")
             creationflags = 0
             if os.name == "nt":
                 creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
@@ -3729,11 +3978,32 @@ class MainWindow(QWidget):
             widgets = self._credential_widgets(item.id)
             key_edit = widgets.get("key")
             secret_edit = widgets.get("secret")
+            passphrase_edit = widgets.get("passphrase")
             key_text = str((key_edit.text() if key_edit is not None else "") or "").strip()
             secret_text = str((secret_edit.text() if secret_edit is not None else "") or "").strip()
-            if key_text and ("*" not in key_text) and secret_text and ("*" not in secret_text):
-                save_creds(key_text, secret_text, str(item.id))
+            passphrase_text = str((passphrase_edit.text() if passphrase_edit is not None else "") or "").strip()
+            key_plain = _is_plain_secret_text(key_text)
+            secret_plain = _is_plain_secret_text(secret_text)
+            passphrase_plain = _is_plain_secret_text(passphrase_text)
+            passphrase_ok = (not item.passphrase_env) or passphrase_plain
+            if key_plain and secret_plain and passphrase_ok:
+                save_creds(key_text, secret_text, str(item.id), passphrase_text if item.passphrase_env else "")
+                self._refresh_credential_widgets_from_keyring(str(item.id))
                 saved = True
+            elif (
+                str(item.id).lower() == "okx"
+                and bool(item.passphrase_env)
+                and passphrase_plain
+                and bool(key_text)
+                and ("*" in key_text)
+                and bool(secret_text)
+                and ("*" in secret_text)
+            ):
+                creds = load_creds(str(item.id))
+                if creds is not None and creds.api_key and creds.api_secret:
+                    save_creds(str(creds.api_key or ""), str(creds.api_secret or ""), str(item.id), passphrase_text)
+                    self._refresh_credential_widgets_from_keyring(str(item.id))
+                    saved = True
         return saved
 
     def on_save(self) -> None:
@@ -3766,18 +4036,21 @@ class MainWindow(QWidget):
             widgets["key"].setText("")
         if widgets.get("secret") is not None:
             widgets["secret"].setText("")
+        if widgets.get("passphrase") is not None:
+            widgets["passphrase"].setText("")
         self._append(f"[ui] Cleared {ex} API keys from keyring.\n")
 
     def _get_spec(self) -> Optional[LaunchSpec]:
         preset = self.preset.currentText().strip() or _default_preset()
         symbol = self._selected_symbol() or "BTC/JPY"
         exchange_id = self._selected_exchange_id()
-        api_key, api_secret = self._resolve_runtime_creds(exchange_id)
-        if not api_key or not api_secret:
+        option = self._selected_exchange_option()
+        api_key, api_secret, api_passphrase = self._resolve_runtime_creds(exchange_id)
+        if not api_key or not api_secret or (bool(option.passphrase_env) and not api_passphrase):
             QMessageBox.warning(
                 self,
                 self.tr("dialog.missing_api_keys.title"),
-                self.tr("dialog.missing_api_keys.message", exchange=exchange_id.upper()),
+                self.tr("dialog.missing_api_credentials.message", exchange=option.label),
             )
             return None
 
@@ -3785,6 +4058,7 @@ class MainWindow(QWidget):
             preset=preset,
             api_key=api_key,
             api_secret=api_secret,
+            api_passphrase=api_passphrase,
             exchange_id=exchange_id,
             symbol=symbol,
             log_level=self._selected_log_level(),

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_free_salesafe_gui_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
@@ -16,7 +17,7 @@ from typing import Any, Dict
 from app.core.paths import ensure_runtime_dirs
 
 
-BUILD_ID = "2026-04-03_free_salesafe_gui_defaults_release_prep_v1"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
 
 
 _CHART_MODES = {"Equity", "Net", "Max DD", "Trades", "Combined", "Candle"}
@@ -156,7 +157,7 @@ def load_settings() -> AppSettings:
         s.report_enabled = bool(raw.get("report_enabled", s.report_enabled))
         s.report_out = str(raw.get("report_out", s.report_out))
         ex = str(raw.get("exchange_id", s.exchange_id) or s.exchange_id).strip().lower()
-        if ex in ("coincheck", "mexc", "binance"):
+        if ex in ("coincheck", "mexc", "binance", "bitbank", "okx"):
             s.exchange_id = ex
         else:
             s.exchange_id = "coincheck"

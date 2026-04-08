@@ -1,4 +1,5 @@
-﻿# BUILD_ID: 2026-04-03_config_standard_app_version_release_prep_v1
+﻿# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
+# BUILD_ID: 2026-04-03_config_standard_app_version_release_prep_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
@@ -9,6 +10,7 @@
 # BUILD_ID: 2026-03-20_config_btcjpy_market_data_root_v1
 # BUILD_ID: 2026-03-20_config_btcjpy_preset_backtest_defaults_v1
 # BUILD_ID: 2026-03-19_market_data_root_stage1_v1
+# BUILD_ID: 2026-04-08_config_free_update_check_v1
 # -*- coding: utf-8 -*-
 
 import importlib.util
@@ -20,9 +22,11 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-06_standard_beta_2_release_prep_v1"
-APP_DISPLAY_NAME = "LoneWolf Fang Standard"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
+APP_DISPLAY_NAME = "LoneWolf Fang Free"
 APP_VERSION = "v1.0.0-beta.2"
+FREE_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_free"
+FREE_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_free/releases/latest"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -257,8 +261,28 @@ PAIR_REGISTRY = {
         "quote_ccy": "JPY",
         "account_ccy": "JPY",
         "settlement_ccy": "JPY",
-        "visible": False,
-        "experimental": True,
+        "visible": True,
+        "experimental": False,
+    },
+    "bitbank:BTC/JPY": {
+        "exchange_id": "bitbank",
+        "symbol": "BTC/JPY",
+        "market_type": "spot",
+        "base_ccy": "BTC",
+        "quote_ccy": "JPY",
+        "account_ccy": "JPY",
+        "settlement_ccy": "JPY",
+        "visible": True,
+    },
+    "bitbank:ETH/JPY": {
+        "exchange_id": "bitbank",
+        "symbol": "ETH/JPY",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "JPY",
+        "account_ccy": "JPY",
+        "settlement_ccy": "JPY",
+        "visible": True,
     },
     "mexc:BTC/USDT": {
         "exchange_id": "mexc",
@@ -293,6 +317,86 @@ PAIR_REGISTRY = {
     },
     "mexc:ETH/USDC": {
         "exchange_id": "mexc",
+        "symbol": "ETH/USDC",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "USDC",
+        "account_ccy": "USDC",
+        "settlement_ccy": "USDC",
+        "visible": True,
+    },
+    "binance:BTC/USDT": {
+        "exchange_id": "binance",
+        "symbol": "BTC/USDT",
+        "market_type": "spot",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDT",
+        "account_ccy": "USDT",
+        "settlement_ccy": "USDT",
+        "visible": True,
+    },
+    "binance:ETH/USDT": {
+        "exchange_id": "binance",
+        "symbol": "ETH/USDT",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "USDT",
+        "account_ccy": "USDT",
+        "settlement_ccy": "USDT",
+        "visible": True,
+    },
+    "binance:BTC/USDC": {
+        "exchange_id": "binance",
+        "symbol": "BTC/USDC",
+        "market_type": "spot",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDC",
+        "account_ccy": "USDC",
+        "settlement_ccy": "USDC",
+        "visible": True,
+    },
+    "binance:ETH/USDC": {
+        "exchange_id": "binance",
+        "symbol": "ETH/USDC",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "USDC",
+        "account_ccy": "USDC",
+        "settlement_ccy": "USDC",
+        "visible": True,
+    },
+    "okx:BTC/USDT": {
+        "exchange_id": "okx",
+        "symbol": "BTC/USDT",
+        "market_type": "spot",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDT",
+        "account_ccy": "USDT",
+        "settlement_ccy": "USDT",
+        "visible": True,
+    },
+    "okx:ETH/USDT": {
+        "exchange_id": "okx",
+        "symbol": "ETH/USDT",
+        "market_type": "spot",
+        "base_ccy": "ETH",
+        "quote_ccy": "USDT",
+        "account_ccy": "USDT",
+        "settlement_ccy": "USDT",
+        "visible": True,
+    },
+    "okx:BTC/USDC": {
+        "exchange_id": "okx",
+        "symbol": "BTC/USDC",
+        "market_type": "spot",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDC",
+        "account_ccy": "USDC",
+        "settlement_ccy": "USDC",
+        "visible": True,
+    },
+    "okx:ETH/USDC": {
+        "exchange_id": "okx",
         "symbol": "ETH/USDC",
         "market_type": "spot",
         "base_ccy": "ETH",

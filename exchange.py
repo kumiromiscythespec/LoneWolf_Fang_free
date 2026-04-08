@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-03-20_exchange_mexc_precision_normalize_v1
 # BUILD_ID: 2026-03-09_coincheck_rest_poll_fill_v1
 # exchange.py
@@ -15,7 +16,7 @@ from app.core.fees import resolve_paper_fees
 from app.core.instrument_registry import default_quote_for_exchange
 from app.core.instrument_registry import quote_for_symbol
 
-BUILD_ID = "2026-03-20_exchange_mexc_precision_normalize_v1"
+BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
 logger = logging.getLogger("exchange")
 
 
@@ -80,6 +81,33 @@ class ExchangeClient:
                     "enableRateLimit": True,
                 }
             )
+        elif exchange_id == "bitbank":
+            api_key = (os.getenv("BITBANK_API_KEY") or "").strip()
+            api_secret = (os.getenv("BITBANK_API_SECRET") or "").strip()
+            self.ex = ccxt.bitbank(
+                {
+                    "apiKey": api_key,
+                    "secret": api_secret,
+                    "enableRateLimit": True,
+                }
+            )
+        elif exchange_id == "okx":
+            api_key = (os.getenv("OKX_API_KEY") or "").strip()
+            api_secret = (os.getenv("OKX_API_SECRET") or "").strip()
+            api_passphrase = (os.getenv("OKX_API_PASSPHRASE") or os.getenv("OKX_API_PASSWORD") or "").strip()
+            if (api_key or api_secret) and not api_passphrase:
+                raise RuntimeError("OKX requires API passphrase.")
+            self.ex = ccxt.okx(
+                {
+                    "apiKey": api_key,
+                    "secret": api_secret,
+                    "password": api_passphrase,
+                    "enableRateLimit": True,
+                    "options": {
+                        "defaultType": "spot",
+                    },
+                }
+            )
         else:
             api_key = (os.getenv("MEXC_API_KEY") or "").strip()
             api_secret = (os.getenv("MEXC_API_SECRET") or "").strip()
@@ -129,6 +157,8 @@ class ExchangeClient:
 
     def _adapt_order_params(self, params: dict | None = None) -> dict:
         out = dict(params or {})
+        if self.exchange_id == "okx":
+            out.setdefault("tdMode", "cash")
         if self.exchange_id != "coincheck":
             return out
         tif = str(out.get("time_in_force") or out.get("timeInForce") or "").strip().lower()
@@ -175,6 +205,8 @@ class ExchangeClient:
             amount_precision = max(int(amount_precision), 8)
             price_precision = max(int(price_precision), 0)
             min_qty = max(float(min_qty), 0.001)
+            min_cost = max(float(min_cost), 500.0)
+        elif self.exchange_id == "bitbank" and self._quote_from_symbol(symbol) == "JPY":
             min_cost = max(float(min_cost), 500.0)
         elif self.exchange_id == "mexc":
             quote_ccy = self._quote_from_symbol(symbol)
@@ -779,14 +811,14 @@ class ExchangeClient:
 
     def _bitbank_fetch_seed_ohlcv(self, symbol: str, bars_5m: int, since_ms: int | None = None) -> list[list[float]]:
         symbol = str(self._normalize_symbol(symbol) or symbol)
-        if symbol != "BTC/JPY":
+        if symbol not in ("BTC/JPY", "ETH/JPY"):
             return []
         client = self._bitbank_public_client()
         limit_i = max(1, min(1000, int(bars_5m or 0)))
         last_err: Exception | None = None
         for i in range(2):
             try:
-                rows = client.fetch_ohlcv("BTC/JPY", "5m", since_ms, limit_i)
+                rows = client.fetch_ohlcv(str(symbol), "5m", since_ms, limit_i)
                 return rows or []
             except Exception as exc:
                 last_err = exc
@@ -807,7 +839,7 @@ class ExchangeClient:
         max_days: int,
     ) -> tuple[list[list[float]], bool]:
         symbol = str(self._normalize_symbol(symbol) or symbol)
-        if symbol != "BTC/JPY":
+        if symbol not in ("BTC/JPY", "ETH/JPY"):
             return [], False
         bucket_5m_ms = self._timeframe_to_ms("5m")
         day_ms = 24 * 60 * 60 * 1000

@@ -1,3 +1,5 @@
+# BUILD_ID: 2026-04-08_free_okx_passphrase_coincheck_default_v1
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-27_keyring_activation_local_reset_v1
 from __future__ import annotations
@@ -12,7 +14,7 @@ from typing import Optional
 import keyring
 
 
-BUILD_ID = "2026-03-27_keyring_activation_local_reset_v1"
+BUILD_ID = "2026-04-08_free_okx_passphrase_coincheck_default_v1"
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +25,11 @@ ACCOUNT_COINCHECK_API_KEY = "lwf_coincheck_api_key"
 ACCOUNT_COINCHECK_API_SECRET = "lwf_coincheck_api_secret"
 ACCOUNT_BINANCE_API_KEY = "lwf_binance_api_key"
 ACCOUNT_BINANCE_API_SECRET = "lwf_binance_api_secret"
+ACCOUNT_BITBANK_API_KEY = "lwf_bitbank_api_key"
+ACCOUNT_BITBANK_API_SECRET = "lwf_bitbank_api_secret"
+ACCOUNT_OKX_API_KEY = "lwf_okx_api_key"
+ACCOUNT_OKX_API_SECRET = "lwf_okx_api_secret"
+ACCOUNT_OKX_API_PASSPHRASE = "lwf_okx_api_passphrase"
 ACCOUNT_LICENSE_SEAT_KEY = "lwf_license_seat_key"
 ACCOUNT_LICENSE_DEVICE_ID = "lwf_license_device_id"
 ACCOUNT_LICENSE_STATE = "lwf_license_state"
@@ -35,6 +42,7 @@ _INSECURE_BACKEND_TOKENS = ("plaintext", "fail", "null", "file")
 class ApiCreds:
     api_key: str
     api_secret: str
+    api_passphrase: str = ""
 
 
 @dataclass
@@ -57,9 +65,13 @@ class LicenseState:
 
 
 def _normalize_exchange_id(exchange_id: str) -> str:
-    x = str(exchange_id or "mexc").strip().lower()
+    x = str(exchange_id or "coincheck").strip().lower() or "coincheck"
     if x == "coincheck":
         return "coincheck"
+    if x == "bitbank":
+        return "bitbank"
+    if x == "okx":
+        return "okx"
     return "binance" if x == "binance" else "mexc"
 
 
@@ -69,7 +81,20 @@ def _account_pair(exchange_id: str) -> tuple[str, str]:
         return (ACCOUNT_COINCHECK_API_KEY, ACCOUNT_COINCHECK_API_SECRET)
     if ex == "binance":
         return (ACCOUNT_BINANCE_API_KEY, ACCOUNT_BINANCE_API_SECRET)
+    if ex == "bitbank":
+        return (ACCOUNT_BITBANK_API_KEY, ACCOUNT_BITBANK_API_SECRET)
+    if ex == "okx":
+        return (ACCOUNT_OKX_API_KEY, ACCOUNT_OKX_API_SECRET)
     return (ACCOUNT_MEXC_API_KEY, ACCOUNT_MEXC_API_SECRET)
+
+
+def _account_passphrase(exchange_id: str) -> str:
+    ex = _normalize_exchange_id(exchange_id)
+    return ACCOUNT_OKX_API_PASSPHRASE if ex == "okx" else ""
+
+
+def _requires_passphrase(exchange_id: str) -> bool:
+    return _normalize_exchange_id(exchange_id) == "okx"
 
 
 def _backend_obj():
@@ -141,6 +166,11 @@ def _migration_accounts() -> list[str]:
         ACCOUNT_COINCHECK_API_SECRET,
         ACCOUNT_BINANCE_API_KEY,
         ACCOUNT_BINANCE_API_SECRET,
+        ACCOUNT_BITBANK_API_KEY,
+        ACCOUNT_BITBANK_API_SECRET,
+        ACCOUNT_OKX_API_KEY,
+        ACCOUNT_OKX_API_SECRET,
+        ACCOUNT_OKX_API_PASSPHRASE,
         ACCOUNT_LICENSE_SEAT_KEY,
         ACCOUNT_LICENSE_DEVICE_ID,
         ACCOUNT_LICENSE_STATE,
@@ -223,6 +253,10 @@ def has_creds(exchange_id: str = "mexc") -> bool:
             legacy_k, legacy_s = _legacy_mexc_lookup()
             k = k or legacy_k
             s = s or legacy_s
+        p_acc = _account_passphrase(exchange_id)
+        p = _backend_get_password(backend, SERVICE_NAME, p_acc) if p_acc else ""
+        if _requires_passphrase(exchange_id) and not p:
+            return False
         return bool(k and s)
     except Exception as exc:
         logger.debug("[keyring] has_creds failed exchange=%s error=%s", _normalize_exchange_id(exchange_id), exc.__class__.__name__)
@@ -279,9 +313,13 @@ def load_creds(exchange_id: str = "mexc") -> Optional[ApiCreds]:
             legacy_k, legacy_s = _legacy_mexc_lookup()
             k = k or legacy_k
             s = s or legacy_s
+        p_acc = _account_passphrase(exchange_id)
+        p = _backend_get_password(backend, SERVICE_NAME, p_acc) if p_acc else ""
         if not k or not s:
             return None
-        return ApiCreds(api_key=str(k), api_secret=str(s))
+        if _requires_passphrase(exchange_id) and not p:
+            return None
+        return ApiCreds(api_key=str(k), api_secret=str(s), api_passphrase=str(p or ""))
     except Exception as exc:
         desc = describe_backend()
         logger.debug(
@@ -296,7 +334,7 @@ def load_creds(exchange_id: str = "mexc") -> Optional[ApiCreds]:
         return None
 
 
-def save_creds(api_key: str, api_secret: str, exchange_id: str = "mexc") -> None:
+def save_creds(api_key: str, api_secret: str, exchange_id: str = "mexc", api_passphrase: str = "") -> None:
     ensure_secure_backend()
     desc = describe_backend()
     if not bool(desc.get("secure")):
@@ -304,20 +342,32 @@ def save_creds(api_key: str, api_secret: str, exchange_id: str = "mexc") -> None
             f"insecure keyring backend blocked: {desc.get('backend')} ({desc.get('reason')})"
         )
     k_acc, s_acc = _account_pair(exchange_id)
+    p_acc = _account_passphrase(exchange_id)
     backend = _backend_obj()
+    passphrase = str(api_passphrase or "")
+    if _requires_passphrase(exchange_id) and not passphrase:
+        raise RuntimeError("OKX API passphrase is required")
     if not _backend_set_password(backend, SERVICE_NAME, k_acc, str(api_key or "")):
         raise RuntimeError("failed to save API key to keyring")
     if not _backend_set_password(backend, SERVICE_NAME, s_acc, str(api_secret or "")):
         _backend_delete_password(backend, SERVICE_NAME, k_acc)
         raise RuntimeError("failed to save API secret to keyring")
+    if p_acc:
+        if not _backend_set_password(backend, SERVICE_NAME, p_acc, passphrase):
+            _backend_delete_password(backend, SERVICE_NAME, k_acc)
+            _backend_delete_password(backend, SERVICE_NAME, s_acc)
+            raise RuntimeError("failed to save API passphrase to keyring")
 
 
 def clear_creds(exchange_id: str = "mexc") -> None:
     ensure_secure_backend()
     k_acc, s_acc = _account_pair(exchange_id)
+    p_acc = _account_passphrase(exchange_id)
     backend = _backend_obj()
     _backend_delete_password(backend, SERVICE_NAME, k_acc)
     _backend_delete_password(backend, SERVICE_NAME, s_acc)
+    if p_acc:
+        _backend_delete_password(backend, SERVICE_NAME, p_acc)
     if _normalize_exchange_id(exchange_id) == "mexc":
         _backend_delete_password(backend, SERVICE_NAME, f"{_LEGACY_ACCOUNT_NAME}:api_key")
         _backend_delete_password(backend, SERVICE_NAME, f"{_LEGACY_ACCOUNT_NAME}:api_secret")

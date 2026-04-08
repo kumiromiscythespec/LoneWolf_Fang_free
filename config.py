@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-04-03_config_free_app_version_release_prep_v1
+﻿# BUILD_ID: 2026-04-03_config_standard_app_version_release_prep_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
@@ -20,9 +20,9 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-03_config_free_app_version_release_prep_v1"
-APP_DISPLAY_NAME = "LoneWolf Fang Free"
-APP_VERSION = "v1.1.0"
+BUILD_ID = "2026-04-06_standard_beta_2_release_prep_v1"
+APP_DISPLAY_NAME = "LoneWolf Fang Standard"
+APP_VERSION = "v1.0.0-beta.2"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -635,7 +635,8 @@ MIN_RR_ENTRY_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_SHORT = 1.50
 MIN_TP_COST_MULT = 3.0
-MIN_TP_BPS = 12.0
+MIN_TP_BPS = 10.0
+RANGE_MIN_TP_BPS = 10.0
 MIN_STOP_BPS = 4.0
 MAX_STOP_BPS = 30.0  # cap SL distance; trades needing wider SL are skipped
 RANGE_MAX_STOP_BPS = 80.0  # disable hard cap so RANGE_ATR_SL_MULT can actually affect stop distance
@@ -917,3 +918,4 @@ _apply_symbol_preset(_ACTIVE_SYMBOL_PRESET)
 # Monitor real spread and realized slippage continuously before taking
 # this preset into paper/live operation, and define a stop condition for
 # degraded execution quality.
+

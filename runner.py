@@ -175,16 +175,24 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-03-29_free_from_standard_nonlive_build_v1"
+BUILD_ID = "2026-04-05_free_runner_user_runtime_state_fix_v1"
 BASE_DIR = Path(__file__).resolve().parent
+_APP_PATHS = ensure_runtime_dirs()
+RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
+STATE_DIR = Path(_APP_PATHS.state_dir).resolve()
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = STATE_DIR / "state.db"
 _FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
 
 
 def _resolve_runtime_log_path(configured_path: Any, default_name: str) -> str:
     raw = str(configured_path or "").strip()
-    path_obj = Path(raw) if raw else Path(getattr(C, "RUNTIME_LOGS_DIR", os.path.join("runtime", "logs"))) / str(default_name)
-    if not path_obj.is_absolute():
-        path_obj = BASE_DIR / path_obj
+    if raw:
+        path_obj = Path(raw)
+        if not path_obj.is_absolute():
+            path_obj = BASE_DIR / path_obj
+    else:
+        path_obj = Path(_APP_PATHS.logs_dir) / str(default_name)
     return str(path_obj)
 
 
@@ -200,9 +208,6 @@ def _reject_live_for_free_build(mode_name: str | None) -> None:
         raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
 
 
-STATE_DIR = BASE_DIR / "runtime" / "state"
-STATE_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = STATE_DIR / "state.db"
 _CURRENT_STATE_CONTEXT: StateContext | None = None
 _CURRENT_STATE_CONTEXT_PATHS: dict[str, str] = {}
 _RUNNER_STARTED = False

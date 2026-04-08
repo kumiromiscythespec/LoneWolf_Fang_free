@@ -1,3 +1,5 @@
+# BUILD_ID: 2026-04-08_free_update_dialog_tr_texts_v1
+# BUILD_ID: 2026-04-08_free_update_check_signal_dispatch_v1
 # BUILD_ID: 2026-04-08_free_gui_title_version_1_1_1_v1
 # BUILD_ID: 2026-04-08_free_update_check_manual_retry_v1
 # BUILD_ID: 2026-04-08_free_update_check_notify_latch_v1
@@ -144,7 +146,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-08_free_gui_title_version_1_1_1_v1"
+BUILD_ID = "2026-04-08_free_update_dialog_tr_texts_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -275,6 +277,12 @@ _UI_TEXTS = {
         "dialog.period_yyyy_mm.message": "Since/Until は YYYY-MM で指定してください。\n{detail}",
         "dialog.data_empty.message": "解決後の {tag} データセットフォルダ配下に CSV ファイルが見つかりませんでした。",
         "dialog.until_month_invalid.message": "Until month は Since month 以上である必要があります。",
+        "dialog.update_check.title": "更新確認",
+        "dialog.update_check.up_to_date": "お使いのクライアントは最新バージョンです。",
+        "dialog.update_check.failed": "更新確認に失敗しました。",
+        "dialog.update_available.title": "更新があります",
+        "dialog.update_available.message": "新しい LoneWolf Fang Free のリリースがあります。\n\n現在: {current}\n最新版: {latest}",
+        "dialog.update_available.open_question": "GitHub Releases ページを開きますか?",
         "dialog.backtest_guidance.dataset_missing.title": "Backtest データ不足",
         "dialog.backtest_guidance.dataset_missing.message": "この Backtest に必要な 5m / 1h データセットフォルダが見つかりません。\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nDiagnostics / Pipeline を開いて Download + Precompute を実行してください。",
         "dialog.backtest_guidance.dataset_missing.action": "Diagnostics / Pipeline を開く",
@@ -378,6 +386,12 @@ _UI_TEXTS = {
         "dialog.period_yyyy_mm.message": "Since/Until must be YYYY-MM.\n{detail}",
         "dialog.data_empty.message": "No CSV files were found under the resolved {tag} dataset folders.",
         "dialog.until_month_invalid.message": "Until month must be greater than or equal to since month.",
+        "dialog.update_check.title": "Update check",
+        "dialog.update_check.up_to_date": "Your client is already up to date.",
+        "dialog.update_check.failed": "Failed to check for updates.",
+        "dialog.update_available.title": "Update available",
+        "dialog.update_available.message": "A newer LoneWolf Fang Free release is available.\n\nCurrent: {current}\nLatest: {latest}",
+        "dialog.update_available.open_question": "Open the GitHub Releases page?",
         "dialog.backtest_guidance.dataset_missing.title": "Backtest dataset missing",
         "dialog.backtest_guidance.dataset_missing.message": "5m / 1h dataset folders for this backtest were not found.\n\nsymbol={symbol}\ndataset_root={dataset_root}\n\nOpen Diagnostics / Pipeline and run Download + Precompute.",
         "dialog.backtest_guidance.dataset_missing.action": "Open Diagnostics / Pipeline",
@@ -462,6 +476,9 @@ def _default_preset() -> str:
 class MainWindow(QWidget):
     sig_log = Signal(str)
     sig_update_check_finished = Signal()
+    sig_update_available = Signal(str, str, str)
+    sig_update_up_to_date = Signal(str, str)
+    sig_update_failed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -1024,6 +1041,9 @@ class MainWindow(QWidget):
         self.replay_since_ym.textEdited.connect(self._on_replay_range_edited)
         self.replay_until_ym.textEdited.connect(self._on_replay_range_edited)
         self.sig_log.connect(self._append)
+        self.sig_update_available.connect(self._show_update_available)
+        self.sig_update_up_to_date.connect(self._show_update_not_available)
+        self.sig_update_failed.connect(self._show_update_check_failed)
         self.sig_update_check_finished.connect(self._on_update_check_finished)
 
         # Timer to poll process exit
@@ -2399,7 +2419,7 @@ class MainWindow(QWidget):
         repo = self._release_repo_full_name()
         if not repo:
             if notify:
-                QTimer.singleShot(0, self._show_update_check_failed)
+                self.sig_update_failed.emit("repo=<empty> error=missing_repo")
             return
         self._update_check_started = True
         self._update_check_running = True
@@ -2408,49 +2428,49 @@ class MainWindow(QWidget):
             self.btn_check_updates.setEnabled(False)
 
         def worker() -> None:
+            api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+            notify_result = bool(notify)
             try:
                 req = urllib.request.Request(
-                    f"https://api.github.com/repos/{repo}/releases/latest",
+                    api_url,
                     headers={
                         "Accept": "application/vnd.github+json",
                         "User-Agent": "LoneWolf-Fang-Free-GUI",
                     },
                 )
                 with urllib.request.urlopen(req, timeout=6.0) as resp:
+                    status = str(getattr(resp, "status", "") or "unknown")
                     payload = json.loads((resp.read() or b"{}").decode("utf-8"))
-                notify_result = bool(notify)
                 if not isinstance(payload, dict):
+                    message = f"repo={repo} url={api_url} status={status} error=invalid_response"
+                    logger.warning("[update] latest check skipped: %s", message)
                     if notify_result:
-                        QTimer.singleShot(0, self._show_update_check_failed)
+                        self.sig_update_failed.emit(message)
                     return
                 latest = str(payload.get("tag_name") or payload.get("name") or "").strip()
                 release_url = str(payload.get("html_url") or self._release_latest_url()).strip()
                 current = str(APP_VERSION or "").strip()
                 if not latest or not current:
+                    message = f"repo={repo} url={api_url} status={status} error=missing_version latest={latest or '<empty>'} current={current or '<empty>'}"
+                    logger.warning("[update] latest check skipped: %s", message)
                     if notify_result:
-                        QTimer.singleShot(0, self._show_update_check_failed)
+                        self.sig_update_failed.emit(message)
                     return
+                response_log = f"[update] latest_response repo={repo} status={status} latest={latest} current={current} notify={notify_result}"
+                logger.info(response_log)
+                if notify_result:
+                    self.sig_log.emit(f"{response_log}\n")
                 if self._is_newer_version(latest, current):
                     if notify_result:
-                        QTimer.singleShot(
-                            0,
-                            lambda latest=latest, current=current, release_url=release_url: self._show_update_available(
-                                latest,
-                                current,
-                                release_url,
-                            ),
-                        )
+                        self.sig_update_available.emit(latest, current, release_url)
                     return
                 if notify_result:
-                    QTimer.singleShot(
-                        0,
-                        lambda latest=latest, current=current: self._show_update_not_available(latest, current),
-                    )
+                    self.sig_update_up_to_date.emit(latest, current)
             except Exception as exc:
-                self.sig_log.emit(f"[update] latest check skipped: {exc}\n")
-                notify_result = bool(notify)
+                message = f"repo={repo} url={api_url} error={exc.__class__.__name__}: {exc}"
+                logger.warning("[update] latest check skipped: %s", message)
                 if notify_result:
-                    QTimer.singleShot(0, self._show_update_check_failed)
+                    self.sig_update_failed.emit(message)
             finally:
                 self.sig_update_check_finished.emit()
 
@@ -2481,21 +2501,23 @@ class MainWindow(QWidget):
 
     def _show_update_not_available(self, latest: str, current: str) -> None:
         self._append(f"[update] up_to_date current={current} latest={latest}\n")
-        QMessageBox.information(self, "Update check", "お使いのクライアントは最新バージョンです。")
+        QMessageBox.information(self, self.tr("dialog.update_check.title"), self.tr("dialog.update_check.up_to_date"))
 
-    def _show_update_check_failed(self) -> None:
-        self._append("[update] latest_check_failed\n")
-        QMessageBox.warning(self, "Update check", "更新確認に失敗しました。")
+    def _show_update_check_failed(self, message: str = "") -> None:
+        detail = str(message or "").strip()
+        if detail:
+            self._append(f"[update] latest check skipped: {detail}\n")
+        else:
+            self._append("[update] latest_check_failed\n")
+        QMessageBox.warning(self, self.tr("dialog.update_check.title"), self.tr("dialog.update_check.failed"))
 
     def _show_update_available(self, latest: str, current: str, release_url: str) -> None:
         self._append(f"[update] latest_available current={current} latest={latest} url={release_url}\n")
         msg = (
-            f"A newer LoneWolf Fang Free release is available.\n\n"
-            f"Current: {current}\n"
-            f"Latest: {latest}\n\n"
-            "Open the GitHub Releases page?"
+            f"{self.tr('dialog.update_available.message', current=current, latest=latest)}\n\n"
+            f"{self.tr('dialog.update_available.open_question')}"
         )
-        result = QMessageBox.question(self, "Update available", msg)
+        result = QMessageBox.question(self, self.tr("dialog.update_available.title"), msg)
         if result == QMessageBox.StandardButton.Yes:
             QDesktopServices.openUrl(QUrl(str(release_url or self._release_latest_url())))
 

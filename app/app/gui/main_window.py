@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-08_free_gui_title_version_1_1_1_v1
 # BUILD_ID: 2026-04-08_free_update_check_manual_retry_v1
 # BUILD_ID: 2026-04-08_free_update_check_notify_latch_v1
 # BUILD_ID: 2026-04-08_free_manual_update_dialog_masked_keys_v1
@@ -143,11 +144,24 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-08_free_update_check_manual_retry_v1"
+BUILD_ID = "2026-04-08_free_gui_title_version_1_1_1_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
-APP_WINDOW_TITLE = f"{APP_DISPLAY_NAME} {APP_VERSION}".strip() if APP_VERSION else APP_DISPLAY_NAME
+
+
+def _make_app_window_title(display_name: str, version: str) -> str:
+    name = str(display_name or "").strip()
+    raw_version = str(version or "").strip()
+    if not raw_version:
+        return name
+    if name and raw_version.casefold().startswith(name.casefold()):
+        return raw_version
+    title_version = raw_version if raw_version.lower().startswith("v") else f"v{raw_version}"
+    return f"{name} {title_version}".strip()
+
+
+APP_WINDOW_TITLE = _make_app_window_title(APP_DISPLAY_NAME, APP_VERSION)
 
 _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
 _RUNTIME_LOG_LEVEL_VALUES = ("MINIMAL",)

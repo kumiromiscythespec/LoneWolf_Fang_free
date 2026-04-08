@@ -1,4 +1,5 @@
-﻿# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
+﻿# BUILD_ID: 2026-04-08_config_free_version_1_1_1_v1
+# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_config_standard_app_version_release_prep_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
@@ -22,9 +23,9 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
+BUILD_ID = "2026-04-08_config_free_version_1_1_1_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
-APP_VERSION = "v1.0.0-beta.2"
+APP_VERSION = "1.1.1"
 FREE_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_free"
 FREE_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_free/releases/latest"
 

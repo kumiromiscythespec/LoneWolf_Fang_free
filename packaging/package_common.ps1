@@ -207,6 +207,66 @@ function Get-NativeArtifactSourceKind {
     return 'source_candidate'
 }
 
+function Resolve-ManifestEntryRefreshSource {
+    param(
+        [string]$RepoRoot,
+        [string]$TargetRelativePath,
+        [string[]]$SourceCandidates
+    )
+
+    $target = Normalize-RelativePath $TargetRelativePath
+    $refreshCandidates = New-Object 'System.Collections.Generic.List[string]'
+    $seenRefreshCandidates = New-Object 'System.Collections.Generic.HashSet[string]'
+
+    foreach ($candidate in @($SourceCandidates)) {
+        $normalizedCandidate = Normalize-RelativePath ([string]$candidate)
+        if ([string]::IsNullOrWhiteSpace($normalizedCandidate)) {
+            continue
+        }
+        if ([string]::Equals($normalizedCandidate, $target, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        Add-UniqueString -List $refreshCandidates -Set $seenRefreshCandidates -Value $normalizedCandidate
+    }
+
+    if ($refreshCandidates.Count -eq 0) {
+        return $null
+    }
+
+    return Resolve-ManifestEntrySource -RepoRoot $RepoRoot -SourceCandidates @($refreshCandidates)
+}
+
+function Test-NativeArtifactRefreshNeeded {
+    param(
+        [string]$TargetPath,
+        [string]$CandidatePath
+    )
+
+    if ((-not (Test-Path -LiteralPath $TargetPath)) -or (-not (Test-Path -LiteralPath $CandidatePath))) {
+        return $false
+    }
+
+    $targetItem = Get-Item -LiteralPath $TargetPath
+    $candidateItem = Get-Item -LiteralPath $CandidatePath
+
+    if ($candidateItem.LastWriteTimeUtc -gt $targetItem.LastWriteTimeUtc) {
+        return $true
+    }
+
+    if ($candidateItem.LastWriteTimeUtc -lt $targetItem.LastWriteTimeUtc) {
+        return $false
+    }
+
+    if ($candidateItem.Length -ne $targetItem.Length) {
+        return $true
+    }
+
+    $targetHash = (Get-FileHash -LiteralPath $targetItem.FullName -Algorithm SHA256).Hash
+    $candidateHash = (Get-FileHash -LiteralPath $candidateItem.FullName -Algorithm SHA256).Hash
+    return (-not [string]::Equals($targetHash, $candidateHash, [System.StringComparison]::OrdinalIgnoreCase))
+}
+
 function Sync-PackageNativeArtifacts {
     param(
         [string]$RepoRoot,
@@ -222,6 +282,7 @@ function Sync-PackageNativeArtifacts {
         $targetPath = Join-NormalizedPath -BasePath $RepoRoot -RelativePath $targetRelativePath
         $sourceCandidates = @(Get-ManifestEntrySourceCandidates -Entry $entry)
         $resolvedSource = Resolve-ManifestEntrySource -RepoRoot $RepoRoot -SourceCandidates $sourceCandidates
+        $refreshSource = Resolve-ManifestEntryRefreshSource -RepoRoot $RepoRoot -TargetRelativePath $targetRelativePath -SourceCandidates $sourceCandidates
 
         $sourceRelativePath = ''
         $sourcePath = ''
@@ -231,7 +292,26 @@ function Sync-PackageNativeArtifacts {
         $wouldMaterializeToRepoRoot = $false
 
         $existsAtTarget = Test-Path -LiteralPath $targetPath
-        if ($existsAtTarget) {
+        if ($existsAtTarget -and $refreshSource -and (Test-NativeArtifactRefreshNeeded -TargetPath $targetPath -CandidatePath ([string]$refreshSource.source_path))) {
+            $sourceRelativePath = [string]$refreshSource.source_relative_path
+            $sourcePath = [string]$refreshSource.source_path
+            $sourceKind = Get-NativeArtifactSourceKind -TargetRelativePath $targetRelativePath -SourceRelativePath $sourceRelativePath
+            $wouldMaterializeToRepoRoot = ($sourceKind -ne 'repo_root')
+            $status = $sourceKind
+
+            if ($MaterializeToRepoRoot -and $wouldMaterializeToRepoRoot) {
+                $parentDir = Split-Path -Parent $targetPath
+                if ($parentDir) {
+                    $null = New-Item -ItemType Directory -Path $parentDir -Force
+                }
+                Copy-Item -LiteralPath $sourcePath -Destination $targetPath -Force
+                $wasMaterializedToRepoRoot = $true
+                $wouldMaterializeToRepoRoot = $false
+                $existsAtTarget = $true
+                $status = 'materialized_to_repo_root'
+            }
+        }
+        elseif ($existsAtTarget) {
             $sourceRelativePath = $targetRelativePath
             $sourcePath = (Resolve-Path -LiteralPath $targetPath).Path
             $sourceKind = 'repo_root'

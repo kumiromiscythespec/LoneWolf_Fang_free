@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot = "",
+    [string]$BootstrapSetupPath = "",
     [string]$DesktopDirOverride = "",
     [switch]$SkipShortcut,
     [switch]$SkipDesktopShortcut,
@@ -21,6 +22,7 @@ $skipDesktop = $SkipShortcut -or $SkipDesktopShortcut
     -ManifestPath (Join-Path $PSScriptRoot 'package_manifest_free.json') `
     -PackageCommonPath (Join-Path $PSScriptRoot 'package_common.ps1') `
     -InstallRoot $InstallRoot `
+    -BootstrapSetupPath $BootstrapSetupPath `
     -DesktopDirectoryOverride $DesktopDirOverride `
     -Force:$Force `
     -SkipInstallRootPythonPrecheck:$SkipInstallRootPythonPrecheck `

@@ -90,6 +90,7 @@ internal static class BootstrapRuntime
         var packageRoot = packageAcquisition.PackageRoot;
         var config = TryLoadInstallerConfig(packageRoot, preparation.Product) ?? preparation.InstallerConfig;
         var installRoot = ResolveInstallRoot(config, packageRoot, options.InstallRoot);
+        var protectedBootstrapSetupPaths = GetBootstrapSetupProtectedPaths(installRoot, preparation.ExePath);
         var installerScriptPath = Path.Combine(packageRoot, preparation.Product.InstallerScriptRelativePath);
         if (!File.Exists(installerScriptPath))
         {
@@ -112,6 +113,8 @@ internal static class BootstrapRuntime
         observer.AppendDetail($"installer_script_path={installerScriptPath}");
         observer.AppendDetail($"powershell_path={powerShellPath}");
         observer.AppendDetail($"install_root={installRoot}");
+        observer.AppendDetail($"detected_bootstrap_setup_path={FormatFieldForDisplay(preparation.ExePath)}");
+        observer.AppendDetail($"bootstrap_setup_in_install_root={protectedBootstrapSetupPaths.Count > 0}");
         observer.AppendDetail($"setup_log={preparation.SetupLogPath}");
         observer.AppendDetail($"backend_log={preparation.BackendLogPath}");
 
@@ -125,10 +128,13 @@ internal static class BootstrapRuntime
         logger.Info($"installer_script_path={installerScriptPath}");
         logger.Info($"powershell_path={powerShellPath}");
         logger.Info($"install_root={installRoot}");
+        logger.Info($"detected_bootstrap_setup_path={FormatFieldForDisplay(preparation.ExePath)}");
+        logger.Info($"bootstrap_setup_in_install_root={protectedBootstrapSetupPaths.Count > 0}");
+        logger.Info($"bootstrap_setup_protected_paths={(protectedBootstrapSetupPaths.Count == 0 ? "<none>" : string.Join(";", protectedBootstrapSetupPaths))}");
 
         observer.SetPhase(SetupPhase.RunningInstaller);
 
-        var bridgedArgs = BuildInstallerArguments(options, installRoot);
+        var bridgedArgs = BuildInstallerArguments(options, installRoot, preparation.ExePath);
         logger.Info($"bridged_args={FormatArguments(bridgedArgs)}");
 
         var processResult = await RunInstallerProcessAsync(
@@ -187,6 +193,7 @@ internal static class BootstrapRuntime
 
             var config = TryLoadInstallerConfig(packageAcquisition.PackageRoot, preparation.Product) ?? preparation.InstallerConfig;
             var installRoot = ResolveInstallRoot(config, packageAcquisition.PackageRoot, options.ExplicitInstallDir);
+            var protectedBootstrapSetupPaths = GetBootstrapSetupProtectedPaths(installRoot, preparation.ExePath);
             var installerScriptPath = Path.Combine(packageAcquisition.PackageRoot, preparation.Product.InstallerScriptRelativePath);
             if (!File.Exists(installerScriptPath))
             {
@@ -219,6 +226,8 @@ internal static class BootstrapRuntime
             Console.WriteLine($"installer_script_path={installerScriptPath}");
             Console.WriteLine($"powershell_path={powerShellPath}");
             Console.WriteLine($"install_root={installRoot}");
+            Console.WriteLine($"detected_bootstrap_setup_path={FormatFieldForDisplay(preparation.ExePath)}");
+            Console.WriteLine($"bootstrap_setup_in_install_root={protectedBootstrapSetupPaths.Count > 0}");
             Console.WriteLine($"setup_log={preparation.SetupLogPath}");
             Console.WriteLine($"backend_log={preparation.BackendLogPath}");
 
@@ -266,7 +275,7 @@ internal static class BootstrapRuntime
                     Console.WriteLine($"python_process_remaining_count={dryRunStopResult.RemainingProcesses.Count}");
                 }
 
-                Console.WriteLine($"bridged_args={FormatArguments(BuildInstallerArguments(dryRunOptions, installRoot))}");
+                Console.WriteLine($"bridged_args={FormatArguments(BuildInstallerArguments(dryRunOptions, installRoot, preparation.ExePath))}");
                 return 0;
             }
 
@@ -283,7 +292,7 @@ internal static class BootstrapRuntime
         }
     }
 
-    public static bool DirectoryHasExistingFiles(string targetRoot, string? packageRoot)
+    public static bool DirectoryHasExistingFiles(string targetRoot, string? packageRoot, string? bootstrapSetupPath)
     {
         if (string.IsNullOrWhiteSpace(targetRoot) || !Directory.Exists(targetRoot))
         {
@@ -299,7 +308,48 @@ internal static class BootstrapRuntime
             return false;
         }
 
-        return Directory.EnumerateFileSystemEntries(targetRoot).Any();
+        var protectedBootstrapSetupPaths = GetBootstrapSetupProtectedPaths(targetRoot, bootstrapSetupPath);
+        return Directory.EnumerateFileSystemEntries(targetRoot)
+            .Any(path => !IsProtectedBootstrapSetupPath(path, protectedBootstrapSetupPaths));
+    }
+
+    private static IReadOnlyList<string> GetBootstrapSetupProtectedPaths(string targetRoot, string? bootstrapSetupPath)
+    {
+        var normalizedTargetRoot = TryNormalizePath(targetRoot);
+        var normalizedBootstrapSetupPath = TryNormalizePath(bootstrapSetupPath);
+        if (string.IsNullOrWhiteSpace(normalizedTargetRoot) ||
+            string.IsNullOrWhiteSpace(normalizedBootstrapSetupPath) ||
+            !IsPathUnderRoot(normalizedBootstrapSetupPath, normalizedTargetRoot))
+        {
+            return Array.Empty<string>();
+        }
+
+        return GetBootstrapSetupArtifactFileNames()
+            .Select(fileName => TryNormalizePath(Path.Combine(normalizedTargetRoot, fileName)))
+            .Append(normalizedBootstrapSetupPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
+    private static bool IsProtectedBootstrapSetupPath(string candidatePath, IReadOnlyList<string> protectedPaths)
+    {
+        var normalizedCandidatePath = TryNormalizePath(candidatePath);
+        if (string.IsNullOrWhiteSpace(normalizedCandidatePath) || protectedPaths.Count == 0)
+        {
+            return false;
+        }
+
+        return protectedPaths.Any(path => string.Equals(path, normalizedCandidatePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<string> GetBootstrapSetupArtifactFileNames()
+    {
+        return new[]
+        {
+            "LoneWolf_Fang_Free_Setup.exe",
+            "LoneWolf_Fang_Standard_Setup.exe",
+        };
     }
 
     public static async Task<IReadOnlyList<PythonProcessInfo>> QueryPythonProcessesAsync(
@@ -845,7 +895,7 @@ internal static class BootstrapRuntime
         return null;
     }
 
-    private static IReadOnlyList<string> BuildInstallerArguments(InstallExecutionOptions options, string installRoot)
+    private static IReadOnlyList<string> BuildInstallerArguments(InstallExecutionOptions options, string installRoot, string? bootstrapSetupPath)
     {
         var arguments = new List<string>
         {
@@ -855,6 +905,12 @@ internal static class BootstrapRuntime
             "-Force",
             "-SkipInstallRootPythonPrecheck",
         };
+
+        if (!string.IsNullOrWhiteSpace(bootstrapSetupPath))
+        {
+            arguments.Add("-BootstrapSetupPath");
+            arguments.Add(bootstrapSetupPath);
+        }
 
         if (!options.CreateDesktopShortcut || options.DesktopShortcutMode == DesktopShortcutMode.Skip)
         {

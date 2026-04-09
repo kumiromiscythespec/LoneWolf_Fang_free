@@ -6,6 +6,7 @@ param(
     [string]$ManifestPath = "",
     [string]$PackageCommonPath = "",
     [string]$InstallRoot = "",
+    [string]$BootstrapSetupPath = "",
     [string]$DesktopDirectoryOverride = "",
     [switch]$Force,
     [switch]$SkipInstallRootPythonPrecheck,
@@ -236,6 +237,7 @@ function Resolve-InstallRootPath {
 function Confirm-OverwriteIfNeeded {
     param(
         [string]$TargetRoot,
+        [object]$BootstrapSetupProtection = $null,
         [switch]$ForceInstall,
         [switch]$NoPrompt
     )
@@ -245,7 +247,7 @@ function Confirm-OverwriteIfNeeded {
     if (-not (Test-Path -LiteralPath $TargetRoot)) {
         return
     }
-    $items = @(Get-ChildItem -LiteralPath $TargetRoot -Force -ErrorAction SilentlyContinue)
+    $items = @(Get-InstallTargetVisibleItems -TargetRoot $TargetRoot -BootstrapSetupProtection $BootstrapSetupProtection)
     if ($items.Count -eq 0) {
         return
     }
@@ -278,6 +280,108 @@ function Get-NormalizedDirectoryPrefix {
         $fullPath = $fullPath + $separator
     }
     return $fullPath
+}
+
+function Normalize-OptionalPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+    try {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    catch {
+        return ''
+    }
+}
+
+function Test-PathWithinRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+    $normalizedPath = Normalize-OptionalPath -Path $Path
+    $rootPrefix = Get-NormalizedDirectoryPrefix -Path $Root
+    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or [string]::IsNullOrWhiteSpace($rootPrefix)) {
+        return $false
+    }
+    return $normalizedPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-BootstrapSetupArtifactFileNames {
+    return @(
+        'LoneWolf_Fang_Free_Setup.exe',
+        'LoneWolf_Fang_Standard_Setup.exe'
+    )
+}
+
+function Get-BootstrapSetupProtection {
+    param(
+        [string]$BootstrapSetupPath,
+        [string]$TargetRoot
+    )
+
+    $detectedPath = Normalize-OptionalPath -Path $BootstrapSetupPath
+    $inInstallRoot = Test-PathWithinRoot -Path $detectedPath -Root $TargetRoot
+    $protectedPaths = New-Object 'System.Collections.Generic.List[string]'
+    $seenProtectedPaths = New-Object 'System.Collections.Generic.HashSet[string]'
+
+    if ($inInstallRoot) {
+        foreach ($fileName in @(Get-BootstrapSetupArtifactFileNames)) {
+            Add-UniqueString -List $protectedPaths -Set $seenProtectedPaths -Value (Normalize-OptionalPath -Path (Join-Path $TargetRoot $fileName))
+        }
+        Add-UniqueString -List $protectedPaths -Set $seenProtectedPaths -Value $detectedPath
+    }
+
+    return [pscustomobject]@{
+        detected_path    = $detectedPath
+        in_install_root  = $inInstallRoot
+        protected_paths  = @($protectedPaths)
+    }
+}
+
+function Test-IsProtectedBootstrapSetupPath {
+    param(
+        [string]$Path,
+        [object]$BootstrapSetupProtection
+    )
+
+    $normalizedPath = Normalize-OptionalPath -Path $Path
+    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or ($null -eq $BootstrapSetupProtection)) {
+        return $false
+    }
+
+    foreach ($protectedPath in @($BootstrapSetupProtection.protected_paths)) {
+        if ([string]::Equals($normalizedPath, [string]$protectedPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-InstallTargetVisibleItems {
+    param(
+        [string]$TargetRoot,
+        [object]$BootstrapSetupProtection = $null
+    )
+
+    $items = @(Get-ChildItem -LiteralPath $TargetRoot -Force -ErrorAction SilentlyContinue)
+    if (($null -eq $BootstrapSetupProtection) -or (-not [bool]$BootstrapSetupProtection.in_install_root)) {
+        return @($items)
+    }
+
+    $visibleItems = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($item in $items) {
+        $itemPath = Normalize-OptionalPath -Path $item.FullName
+        if (Test-IsProtectedBootstrapSetupPath -Path $itemPath -BootstrapSetupProtection $BootstrapSetupProtection) {
+            Write-InstallLog -Level 'INFO' -Message ("skip_bootstrap_setup_enumeration=true check=overwrite_prompt path={0}" -f $itemPath)
+            continue
+        }
+        $null = $visibleItems.Add($item)
+    }
+
+    return $visibleItems.ToArray()
 }
 
 function Write-InstallRootPythonProcessDetails {
@@ -684,7 +788,8 @@ function Get-AppEnvironmentMap {
 function Copy-PackagePayload {
     param(
         [object]$Plan,
-        [string]$TargetRoot
+        [string]$TargetRoot,
+        [object]$BootstrapSetupProtection = $null
     )
 
     foreach ($relativeDir in @($Plan.skeleton_dirs)) {
@@ -696,16 +801,13 @@ function Copy-PackagePayload {
         return 0
     }
 
-    $bootstrapSetupFileNames = @(
-        'LoneWolf_Fang_Free_Setup.exe',
-        'LoneWolf_Fang_Standard_Setup.exe'
-    )
+    $bootstrapSetupFileNames = @(Get-BootstrapSetupArtifactFileNames)
     $copiedCount = 0
     foreach ($candidate in @($Plan.candidate_files)) {
         $candidateRelativePath = Normalize-RelativePath ([string]$candidate.relative_path)
         $candidateFileName = [System.IO.Path]::GetFileName($candidateRelativePath)
         if ($candidateFileName -in $bootstrapSetupFileNames) {
-            Write-InstallLog -Level 'INFO' -Message ("payload_copy=skipped reason=bootstrap_setup_artifact relative_path={0}" -f $candidateRelativePath)
+            Write-InstallLog -Level 'INFO' -Message ("skip_bootstrap_setup_copy=true reason=bootstrap_setup_artifact relative_path={0}" -f $candidateRelativePath)
             continue
         }
 
@@ -713,6 +815,10 @@ function Copy-PackagePayload {
         $sourcePath = [System.IO.Path]::GetFullPath([string]$candidate.source_path)
         if ([string]::Equals($sourcePath, $destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             Write-InstallLog -Level 'INFO' -Message ("payload_copy=skipped reason=source_equals_destination relative_path={0}" -f $candidateRelativePath)
+            continue
+        }
+        if (Test-IsProtectedBootstrapSetupPath -Path $destinationPath -BootstrapSetupProtection $BootstrapSetupProtection) {
+            Write-InstallLog -Level 'INFO' -Message ("skip_bootstrap_setup_copy=true reason=protected_destination relative_path={0} destination_path={1}" -f $candidateRelativePath, $destinationPath)
             continue
         }
         Ensure-Directory -Path (Split-Path -Parent $destinationPath)
@@ -726,6 +832,10 @@ function Copy-PackagePayload {
             continue
         }
         $destinationPath = Join-NormalizedPath -BasePath $TargetRoot -RelativePath $relativePath
+        if (Test-IsProtectedBootstrapSetupPath -Path $destinationPath -BootstrapSetupProtection $BootstrapSetupProtection) {
+            Write-InstallLog -Level 'INFO' -Message ("skip_bootstrap_setup_copy=true reason=protected_destination_reinclude relative_path={0} destination_path={1}" -f $relativePath, $destinationPath)
+            continue
+        }
         Ensure-Directory -Path (Split-Path -Parent $destinationPath)
         Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
     }
@@ -865,7 +975,13 @@ try {
     $dataRoot = Join-Path $script:SharedRoot ('data\' + (Get-ConfigString -Config $config -Names @('data_name') -Default $script:ProductCode))
 
     Ensure-Directory -Path $targetRoot
-    Confirm-OverwriteIfNeeded -TargetRoot $targetRoot -ForceInstall:$Force -NoPrompt:$NonInteractive
+    $bootstrapSetupProtection = Get-BootstrapSetupProtection -BootstrapSetupPath $BootstrapSetupPath -TargetRoot $targetRoot
+    $detectedBootstrapSetupPath = if ([string]::IsNullOrWhiteSpace([string]$bootstrapSetupProtection.detected_path)) { '<none>' } else { [string]$bootstrapSetupProtection.detected_path }
+    $protectedBootstrapPaths = if (@($bootstrapSetupProtection.protected_paths).Count -eq 0) { '<none>' } else { (@($bootstrapSetupProtection.protected_paths) -join ';') }
+    Write-InstallLog -Level 'INFO' -Message ("detected_bootstrap_setup_path={0}" -f $detectedBootstrapSetupPath)
+    Write-InstallLog -Level 'INFO' -Message ("bootstrap_setup_in_install_root={0}" -f ([string]$bootstrapSetupProtection.in_install_root).ToLowerInvariant())
+    Write-InstallLog -Level 'INFO' -Message ("bootstrap_setup_protected_paths={0}" -f $protectedBootstrapPaths)
+    Confirm-OverwriteIfNeeded -TargetRoot $targetRoot -BootstrapSetupProtection $bootstrapSetupProtection -ForceInstall:$Force -NoPrompt:$NonInteractive
     if ($SkipInstallRootPythonPrecheck) {
         Write-InstallLog -Level 'INFO' -Message ("python_process_precheck_skipped target_root={0} reason=skip_install_root_python_precheck" -f $targetRoot)
     }
@@ -886,7 +1002,7 @@ try {
     Write-Host ('Installer Log   : {0}' -f $script:LogPath)
     Write-Host ''
 
-    $copiedFileCount = Copy-PackagePayload -Plan $plan -TargetRoot $targetRoot
+    $copiedFileCount = Copy-PackagePayload -Plan $plan -TargetRoot $targetRoot -BootstrapSetupProtection $bootstrapSetupProtection
     Ensure-DataDirectories -DataRoot $dataRoot
 
     $basePythonInfo = Resolve-BasePython

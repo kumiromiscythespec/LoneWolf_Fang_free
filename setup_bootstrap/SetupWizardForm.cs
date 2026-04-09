@@ -471,7 +471,7 @@ internal sealed class SetupWizardForm : Form, ISetupObserver
         _installPathTextBox.Text = installRoot;
 
         if (!_options.Force &&
-            BootstrapRuntime.DirectoryHasExistingFiles(installRoot, _preparation.LocalPackageRoot))
+            BootstrapRuntime.DirectoryHasExistingFiles(installRoot, _preparation.LocalPackageRoot, _preparation.ExePath))
         {
             var overwritePrompt = string.Join(
                 Environment.NewLine + Environment.NewLine,

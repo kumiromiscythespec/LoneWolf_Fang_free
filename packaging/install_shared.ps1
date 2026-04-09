@@ -696,11 +696,27 @@ function Copy-PackagePayload {
         return 0
     }
 
+    $bootstrapSetupFileNames = @(
+        'LoneWolf_Fang_Free_Setup.exe',
+        'LoneWolf_Fang_Standard_Setup.exe'
+    )
     $copiedCount = 0
     foreach ($candidate in @($Plan.candidate_files)) {
+        $candidateRelativePath = Normalize-RelativePath ([string]$candidate.relative_path)
+        $candidateFileName = [System.IO.Path]::GetFileName($candidateRelativePath)
+        if ($candidateFileName -in $bootstrapSetupFileNames) {
+            Write-InstallLog -Level 'INFO' -Message ("payload_copy=skipped reason=bootstrap_setup_artifact relative_path={0}" -f $candidateRelativePath)
+            continue
+        }
+
         $destinationPath = Join-NormalizedPath -BasePath $TargetRoot -RelativePath ([string]$candidate.relative_path)
+        $sourcePath = [System.IO.Path]::GetFullPath([string]$candidate.source_path)
+        if ([string]::Equals($sourcePath, $destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-InstallLog -Level 'INFO' -Message ("payload_copy=skipped reason=source_equals_destination relative_path={0}" -f $candidateRelativePath)
+            continue
+        }
         Ensure-Directory -Path (Split-Path -Parent $destinationPath)
-        Copy-Item -LiteralPath ([string]$candidate.source_path) -Destination $destinationPath -Force
+        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
         $copiedCount++
     }
 

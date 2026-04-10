@@ -37,3 +37,4 @@ launcher_native/bin/
 launcher_native/obj/
 setup_bootstrap/bin/
 setup_bootstrap/obj/
+runtime/settings.json

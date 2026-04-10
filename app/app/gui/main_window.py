@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-09_free_support_snapshot_v1
 # BUILD_ID: 2026-04-08_free_update_dialog_tr_texts_v1
 # BUILD_ID: 2026-04-08_free_update_check_signal_dispatch_v1
 # BUILD_ID: 2026-04-08_free_gui_title_version_1_1_1_v1
@@ -59,8 +60,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import config as C
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QTextCursor
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal, qVersion
+from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -113,6 +114,14 @@ from app.core.launch import (
 )
 from app.core.log_stream import start_log_threads
 from app.core.paths import ensure_runtime_dirs, get_paths
+from app.core.support_snapshot import (
+    SUPPORT_SNAPSHOT_SCREENSHOT_FILE,
+    build_support_snapshot_meta,
+    create_support_snapshot_dir,
+    resolve_support_snapshot_open_dir,
+    write_support_snapshot_log_tail,
+    write_support_snapshot_meta,
+)
 from app.core.dataset import (
     DatasetResolutionError,
     build_missing_dataset_message,
@@ -146,7 +155,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-08_free_update_dialog_tr_texts_v1"
+BUILD_ID = "2026-04-09_free_support_snapshot_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -225,6 +234,7 @@ _UI_TEXTS = {
         "placeholder.api_secret": "{exchange} シークレット",
         "placeholder.api_passphrase": "{exchange} passphrase",
         "placeholder.yyyy_mm": "YYYY-MM",
+        "action.support_snapshot": "Support Snapshot",
         "action.select_replay_data": "Replay Data を選択...",
         "action.select_dataset_root": "Dataset Root を選択...",
         "action.start_replay": "Replay 実行",
@@ -573,16 +583,20 @@ class MainWindow(QWidget):
         root.setSpacing(12)
         self.setLayout(root)
 
+        self.header_panel = QWidget()
         top_area = QHBoxLayout()
+        top_area.setContentsMargins(0, 0, 0, 0)
         top_area.setSpacing(16)
+        self.header_panel.setLayout(top_area)
         top_form = QVBoxLayout()
+        top_form.setContentsMargins(0, 0, 0, 0)
         top_form.setSpacing(8)
         top_area.addLayout(top_form, stretch=1)
         self._logo_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self._logo_label.setStyleSheet("background: transparent; border: none;")
         self._logo_label.setVisible(False)
         top_area.addWidget(self._logo_label, 0, Qt.AlignRight | Qt.AlignTop)
-        root.addLayout(top_area)
+        root.addWidget(self.header_panel)
 
         self.preset_label = QLabel("Preset")
         self.preset = QComboBox()
@@ -915,7 +929,7 @@ class MainWindow(QWidget):
 
         self.tools_group = QGroupBox("Diagnostics / Pipeline")
         self.tools_group.setCheckable(True)
-        tools_expanded = bool(getattr(self._settings, "gui_section_diagnostics_expanded", False))
+        tools_expanded = bool(getattr(self._settings, "gui_section_diagnostics_expanded", True))
         self.tools_group.setChecked(tools_expanded)
         tools_layout = QVBoxLayout()
         tools_layout.setContentsMargins(12, 10, 12, 12)
@@ -929,8 +943,10 @@ class MainWindow(QWidget):
         self.tools_container_layout.setVerticalSpacing(8)
         self.tools_container.setLayout(self.tools_container_layout)
 
+        self.btn_support_snapshot = QPushButton("Support Snapshot")
+        self.btn_support_open_folder = QPushButton("Open Folder")
         self.btn_diag = QPushButton("Run Diagnostics")
-        self.btn_bundle = QPushButton("Create Support Bundle")
+        self.btn_bundle = QPushButton("Support Bundle")
         self.pipeline_from_label = QLabel("From")
         self.pipeline_from_ym = QLineEdit(datetime.now().strftime("%Y-%m"))
         self.pipeline_from_ym.setPlaceholderText("YYYY-MM")
@@ -1002,6 +1018,8 @@ class MainWindow(QWidget):
         self.btn_start.clicked.connect(self.on_start)
         self.btn_stop.clicked.connect(self.on_stop)
         self.btn_report_out.clicked.connect(self.on_select_report_out)
+        self.btn_support_snapshot.clicked.connect(self.on_create_support_snapshot)
+        self.btn_support_open_folder.clicked.connect(self.on_open_support_snapshot_folder)
         self.btn_diag.clicked.connect(self.on_run_diagnostics)
         self.btn_bundle.clicked.connect(self.on_create_support_bundle)
         self.btn_pipeline.clicked.connect(self.on_run_pipeline)
@@ -1098,8 +1116,8 @@ class MainWindow(QWidget):
         if two_column:
             self.settings_right_column.setVisible(True)
             for widget in (
-                self.valuation_group,
                 self.tools_group,
+                self.valuation_group,
             ):
                 self.settings_left_column_layout.addWidget(widget)
             self.settings_left_column_layout.addStretch(1)
@@ -1113,10 +1131,10 @@ class MainWindow(QWidget):
             return
         self.settings_right_column.setVisible(False)
         for widget in (
+            self.tools_group,
             self.report_group,
             self.valuation_group,
             self.creds_group,
-            self.tools_group,
             self.activation_group,
         ):
             self.settings_left_column_layout.addWidget(widget)
@@ -1377,18 +1395,28 @@ class MainWindow(QWidget):
 
     def _apply_tools_layout(self, compact: bool) -> None:
         self._reset_grid_layout(self.tools_container_layout)
-        self.tools_container_layout.addWidget(self.btn_diag, 0, 0)
-        self.tools_container_layout.addWidget(self.btn_bundle, 0, 1)
+        self.tools_container_layout.setHorizontalSpacing(6 if compact else 8)
+        self.tools_container_layout.setVerticalSpacing(
+            COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
+        )
         if compact:
-            self.tools_container_layout.addWidget(self.pipeline_from_label, 1, 0)
-            self.tools_container_layout.addWidget(self.pipeline_from_ym, 1, 1)
-            self.tools_container_layout.addWidget(self.pipeline_to_label, 1, 2)
-            self.tools_container_layout.addWidget(self.pipeline_to_ym, 1, 3)
-            self.tools_container_layout.addWidget(self.pipeline_force, 2, 0, 1, 2)
-            self.tools_container_layout.addWidget(self.btn_pipeline, 2, 2, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_support_snapshot, 0, 0, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_support_open_folder, 0, 2, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_bundle, 1, 0, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_diag, 1, 2, 1, 2)
+            self.tools_container_layout.addWidget(self.pipeline_from_label, 2, 0)
+            self.tools_container_layout.addWidget(self.pipeline_from_ym, 2, 1)
+            self.tools_container_layout.addWidget(self.pipeline_to_label, 2, 2)
+            self.tools_container_layout.addWidget(self.pipeline_to_ym, 2, 3)
+            self.tools_container_layout.addWidget(self.pipeline_force, 3, 0, 1, 2)
+            self.tools_container_layout.addWidget(self.btn_pipeline, 3, 2, 1, 2)
             self.tools_container_layout.setColumnStretch(1, 1)
             self.tools_container_layout.setColumnStretch(3, 1)
             return
+        self.tools_container_layout.addWidget(self.btn_support_snapshot, 0, 0)
+        self.tools_container_layout.addWidget(self.btn_support_open_folder, 0, 1)
+        self.tools_container_layout.addWidget(self.btn_bundle, 0, 2)
+        self.tools_container_layout.addWidget(self.btn_diag, 0, 3)
         self.tools_container_layout.addWidget(self.pipeline_from_label, 1, 0)
         self.tools_container_layout.addWidget(self.pipeline_from_ym, 1, 1)
         self.tools_container_layout.addWidget(self.pipeline_to_label, 1, 2)
@@ -1397,7 +1425,7 @@ class MainWindow(QWidget):
         self.tools_container_layout.addWidget(self.btn_pipeline, 1, 5)
         self.tools_container_layout.setColumnStretch(1, 1)
         self.tools_container_layout.setColumnStretch(3, 1)
-        self.tools_container_layout.setColumnStretch(6, 1)
+        self.tools_container_layout.setColumnStretch(5, 1)
 
     def _set_log_minimum_height(self, compact: bool) -> None:
         if not hasattr(self, "log"):
@@ -1508,8 +1536,10 @@ class MainWindow(QWidget):
             if isinstance(passphrase_row, QWidget):
                 passphrase_row.setVisible(bool(option.passphrase_env))
         self.tools_group.setTitle(self.tr("group.diagnostics_pipeline"))
+        self.btn_support_snapshot.setText("Support Snapshot")
+        self.btn_support_open_folder.setText(self.tr("action.open_folder"))
         self.btn_diag.setText(self.tr("action.run_diagnostics"))
-        self.btn_bundle.setText(self.tr("action.create_support_bundle"))
+        self.btn_bundle.setText("Support Bundle")
         self.pipeline_from_label.setText(self.tr("label.from"))
         self.pipeline_from_ym.setPlaceholderText(self.tr("placeholder.yyyy_mm"))
         self.pipeline_to_label.setText(self.tr("label.to"))
@@ -2696,7 +2726,7 @@ class MainWindow(QWidget):
         previous_sections = {
             "gui_section_api_expanded": bool(getattr(self._settings, "gui_section_api_expanded", False)),
             "gui_section_activation_expanded": bool(getattr(self._settings, "gui_section_activation_expanded", False)),
-            "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", False)),
+            "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", True)),
         }
         try:
             self._update_chart_ui_state(chart_mode=chart_mode, chart_splitter_sizes=chart_splitter_sizes)
@@ -2707,7 +2737,7 @@ class MainWindow(QWidget):
             current_sections = {
                 "gui_section_api_expanded": bool(getattr(self._settings, "gui_section_api_expanded", False)),
                 "gui_section_activation_expanded": bool(getattr(self._settings, "gui_section_activation_expanded", False)),
-                "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", False)),
+                "gui_section_diagnostics_expanded": bool(getattr(self._settings, "gui_section_diagnostics_expanded", True)),
             }
             if self._chart_ui_state == previous and current_window == previous_window and current_sections == previous_sections:
                 return
@@ -2733,6 +2763,120 @@ class MainWindow(QWidget):
 
     def _result_export_folder_path(self, _data) -> str:
         return self._snapshot_exports_dir()
+
+    def _support_snapshot_capture_widgets(self) -> list[QWidget]:
+        widgets: list[QWidget] = []
+        for widget in (getattr(self, "header_panel", None), getattr(self, "tools_group", None)):
+            if isinstance(widget, QWidget) and widget.isVisible():
+                widgets.append(widget)
+        return widgets
+
+    def _support_snapshot_saved_message(self) -> str:
+        if self._selected_ui_language() == "ja":
+            return "Support Snapshot \u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002\u4fdd\u5b58\u5148\u30d5\u30a9\u30eb\u30c0\u3092\u958b\u304d\u307e\u3059\u304b\uff1f"
+        return "Support Snapshot has been saved. Open the folder now?"
+
+    def _support_snapshot_failed_message(self, detail: str) -> str:
+        if self._selected_ui_language() == "ja":
+            return f"Support Snapshot \u306e\u4f5c\u6210\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002\n{detail}"
+        return f"Could not create Support Snapshot.\n{detail}"
+
+    def _render_support_snapshot_pixmap(self) -> QPixmap:
+        grabbed: list[QPixmap] = []
+        for widget in self._support_snapshot_capture_widgets():
+            try:
+                pixmap = widget.grab()
+            except Exception:
+                pixmap = QPixmap()
+            if pixmap.isNull():
+                continue
+            grabbed.append(pixmap)
+        if not grabbed:
+            raise RuntimeError("support snapshot widgets are not available")
+        spacing = 12
+        total_width = max(pixmap.width() for pixmap in grabbed)
+        total_height = sum(pixmap.height() for pixmap in grabbed) + (spacing * max(0, len(grabbed) - 1))
+        canvas = QPixmap(total_width, total_height)
+        canvas.fill(self.palette().window().color())
+        painter = QPainter(canvas)
+        y_offset = 0
+        try:
+            for pixmap in grabbed:
+                painter.drawPixmap(0, y_offset, pixmap)
+                y_offset += pixmap.height() + spacing
+        finally:
+            painter.end()
+        return canvas
+
+    def _save_support_snapshot_screenshot(self, snapshot_dir: str) -> str:
+        screenshot_path = os.path.join(snapshot_dir, SUPPORT_SNAPSHOT_SCREENSHOT_FILE)
+        pixmap = self._render_support_snapshot_pixmap()
+        if pixmap.isNull():
+            raise RuntimeError("support snapshot screenshot is empty")
+        if not pixmap.save(screenshot_path, "PNG"):
+            raise RuntimeError(f"failed to save screenshot: {screenshot_path}")
+        return screenshot_path
+
+    def _support_snapshot_open_dir(self) -> str:
+        return resolve_support_snapshot_open_dir(self._paths)
+
+    def on_open_support_snapshot_folder(self) -> None:
+        folder = self._support_snapshot_open_dir()
+        try:
+            ok = self._open_folder_path(folder)
+        except Exception as exc:
+            self._append(f"[support] open_folder failed error={exc}\n")
+            return
+        if ok:
+            self._append(f"[support] open_folder path={folder}\n")
+            return
+        self._append(f"[support] open_folder failed path={folder}\n")
+
+    def on_create_support_snapshot(self) -> None:
+        try:
+            snapshot_dir, snapshot_id, timestamp_local, timestamp_utc = create_support_snapshot_dir(self._paths)
+            self._save_support_snapshot_screenshot(snapshot_dir)
+            write_support_snapshot_log_tail(snapshot_dir, self.log.toPlainText(), max_lines=200)
+            meta = build_support_snapshot_meta(
+                snapshot_id=snapshot_id,
+                timestamp_local=timestamp_local,
+                timestamp_utc=timestamp_utc,
+                app_display_name=APP_DISPLAY_NAME,
+                app_version=APP_VERSION,
+                build_id=BUILD_ID,
+                mode=self._selected_run_mode(),
+                exchange=self._selected_exchange_option().label,
+                symbol=self._selected_symbol(),
+                preset=str(self.preset.currentText() or "").strip(),
+                language=self._selected_ui_language(),
+                qt_version=qVersion(),
+                window_title=self.windowTitle(),
+                window_width=self.width(),
+                window_height=self.height(),
+            )
+            write_support_snapshot_meta(snapshot_dir, meta)
+            self._append(f"[support] snapshot_saved dir={snapshot_dir}\n")
+        except Exception as exc:
+            self._append(f"[support] snapshot_error={exc}\n")
+            QMessageBox.warning(self, "Support Snapshot", self._support_snapshot_failed_message(str(exc) or "unknown error"))
+            return
+        result = QMessageBox.question(
+            self,
+            "Support Snapshot",
+            self._support_snapshot_saved_message(),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            try:
+                opened = self._open_folder_path(snapshot_dir)
+            except Exception as exc:
+                self._append(f"[support] open_folder_after_save failed error={exc}\n")
+                return
+            if opened:
+                self._append(f"[support] open_folder_after_save path={snapshot_dir}\n")
+            else:
+                self._append(f"[support] open_folder_after_save failed path={snapshot_dir}\n")
 
     def _open_folder_path(self, path: str) -> bool:
         target = os.path.abspath(str(path or "").strip() or self._snapshot_exports_dir())

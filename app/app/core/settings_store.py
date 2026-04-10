@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-09_free_support_snapshot_v1
 # BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_free_salesafe_gui_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
@@ -17,7 +18,7 @@ from typing import Any, Dict
 from app.core.paths import ensure_runtime_dirs
 
 
-BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
+BUILD_ID = "2026-04-09_free_support_snapshot_v1"
 
 
 _CHART_MODES = {"Equity", "Net", "Max DD", "Trades", "Combined", "Candle"}
@@ -130,7 +131,7 @@ class AppSettings:
     main_window_height: int = _DEFAULT_MAIN_WINDOW_HEIGHT
     gui_section_api_expanded: bool = False
     gui_section_activation_expanded: bool = False
-    gui_section_diagnostics_expanded: bool = False
+    gui_section_diagnostics_expanded: bool = True
     gui_section_valuation_expanded: bool = True
     ui_language: str = "en"
     preview_mode: str = "Manual JPY"
@@ -192,7 +193,7 @@ def load_settings() -> AppSettings:
         )
         s.gui_section_diagnostics_expanded = _normalize_bool(
             raw.get("gui_section_diagnostics_expanded", s.gui_section_diagnostics_expanded),
-            default=False,
+            default=True,
         )
         s.gui_section_valuation_expanded = _normalize_bool(
             raw.get("gui_section_valuation_expanded", s.gui_section_valuation_expanded),
@@ -234,7 +235,7 @@ def save_settings(s: AppSettings) -> None:
     )
     data["gui_section_api_expanded"] = _normalize_bool(data.get("gui_section_api_expanded"), default=False)
     data["gui_section_activation_expanded"] = _normalize_bool(data.get("gui_section_activation_expanded"), default=False)
-    data["gui_section_diagnostics_expanded"] = _normalize_bool(data.get("gui_section_diagnostics_expanded"), default=False)
+    data["gui_section_diagnostics_expanded"] = _normalize_bool(data.get("gui_section_diagnostics_expanded"), default=True)
     data["gui_section_valuation_expanded"] = _normalize_bool(data.get("gui_section_valuation_expanded"), default=True)
     data["ui_language"] = _normalize_ui_language(data.get("ui_language"))
     data["preview_mode"] = _normalize_preview_mode(data.get("preview_mode"))

@@ -1,6 +1,5 @@
-﻿# BUILD_ID: 2026-04-08_config_free_version_1_1_1_v1
-# BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
-# BUILD_ID: 2026-04-03_config_standard_app_version_release_prep_v1
+﻿# BUILD_ID: 2026-04-08_config_standard_version_beta3_v1
+# BUILD_ID: 2026-04-08_standard_bitbank_okx_spot_exchange_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
 # BUILD_ID: 2026-03-21_runtime_logs_default_path_v1
@@ -11,7 +10,7 @@
 # BUILD_ID: 2026-03-20_config_btcjpy_market_data_root_v1
 # BUILD_ID: 2026-03-20_config_btcjpy_preset_backtest_defaults_v1
 # BUILD_ID: 2026-03-19_market_data_root_stage1_v1
-# BUILD_ID: 2026-04-08_config_free_update_check_v1
+# BUILD_ID: 2026-04-08_config_standard_update_check_v1
 # -*- coding: utf-8 -*-
 
 import importlib.util
@@ -23,11 +22,11 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-08_config_free_version_1_1_1_v1"
-APP_DISPLAY_NAME = "LoneWolf Fang Free"
-APP_VERSION = "1.1.1"
-FREE_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_free"
-FREE_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_free/releases/latest"
+BUILD_ID = "2026-04-08_config_standard_version_beta3_v1"
+APP_DISPLAY_NAME = "LoneWolf Fang Standard"
+APP_VERSION = "v1.0.0-beta.3"
+STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
+STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 
@@ -262,24 +261,14 @@ PAIR_REGISTRY = {
         "quote_ccy": "JPY",
         "account_ccy": "JPY",
         "settlement_ccy": "JPY",
-        "visible": True,
-        "experimental": False,
+        "visible": False,
+        "experimental": True,
     },
     "bitbank:BTC/JPY": {
         "exchange_id": "bitbank",
         "symbol": "BTC/JPY",
         "market_type": "spot",
         "base_ccy": "BTC",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": True,
-    },
-    "bitbank:ETH/JPY": {
-        "exchange_id": "bitbank",
-        "symbol": "ETH/JPY",
-        "market_type": "spot",
-        "base_ccy": "ETH",
         "quote_ccy": "JPY",
         "account_ccy": "JPY",
         "settlement_ccy": "JPY",
@@ -326,46 +315,6 @@ PAIR_REGISTRY = {
         "settlement_ccy": "USDC",
         "visible": True,
     },
-    "binance:BTC/USDT": {
-        "exchange_id": "binance",
-        "symbol": "BTC/USDT",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "binance:ETH/USDT": {
-        "exchange_id": "binance",
-        "symbol": "ETH/USDT",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "binance:BTC/USDC": {
-        "exchange_id": "binance",
-        "symbol": "BTC/USDC",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": True,
-    },
-    "binance:ETH/USDC": {
-        "exchange_id": "binance",
-        "symbol": "ETH/USDC",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": True,
-    },
     "okx:BTC/USDT": {
         "exchange_id": "okx",
         "symbol": "BTC/USDT",
@@ -384,26 +333,6 @@ PAIR_REGISTRY = {
         "quote_ccy": "USDT",
         "account_ccy": "USDT",
         "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "okx:BTC/USDC": {
-        "exchange_id": "okx",
-        "symbol": "BTC/USDC",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": True,
-    },
-    "okx:ETH/USDC": {
-        "exchange_id": "okx",
-        "symbol": "ETH/USDC",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
         "visible": True,
     },
 }
@@ -594,6 +523,8 @@ FEE_BPS = {
     "mexc": {"maker": 1.0, "taker": 2.0},
     "binance": {"maker": 10.0, "taker": 10.0},
     "coincheck": {"maker": 0.0, "taker": 0.0},
+    "bitbank": {"maker": 0.0, "taker": 12.0},
+    "okx": {"maker": 8.0, "taker": 10.0},
 }
 
 PAPER_ENTRY_FEE_TYPE = "taker"
@@ -739,9 +670,10 @@ MIN_RR_AFTER_ADJUST = 1.2
 MIN_RR_ENTRY_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_NONE = 1.40
 MIN_RR_AFTER_ADJUST_TREND_SHORT = 1.50
-MIN_TP_COST_MULT = 3.0
-MIN_TP_BPS = 10.0
-RANGE_MIN_TP_BPS = 10.0
+PAPER_FEE_RATE = 0.0002
+MIN_TP_COST_MULT = 1.5
+MIN_TP_BPS = 6.0
+RANGE_MIN_TP_BPS = 6.0
 MIN_STOP_BPS = 4.0
 MAX_STOP_BPS = 30.0  # cap SL distance; trades needing wider SL are skipped
 RANGE_MAX_STOP_BPS = 80.0  # disable hard cap so RANGE_ATR_SL_MULT can actually affect stop distance

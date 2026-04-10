@@ -23,8 +23,8 @@ from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
 BUILD_ID = "2026-04-08_config_standard_version_beta3_v1"
-APP_DISPLAY_NAME = "LoneWolf Fang Standard"
-APP_VERSION = "v1.0.0-beta.3"
+APP_DISPLAY_NAME = "LoneWolf Fang Free"
+APP_VERSION = "1.2.0"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
 STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
 

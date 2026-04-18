@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_gui_settings_compact_two_column_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
 # BUILD_ID: 2026-04-08_free_update_dialog_tr_texts_v1
 # BUILD_ID: 2026-04-08_free_update_check_signal_dispatch_v1
@@ -78,6 +79,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QSplitter,
     QStackedWidget,
+    QSizePolicy,
 )
 
 from app.core.settings_store import AppSettings, get_gui_chart_state, load_settings, save_settings, set_gui_chart_state
@@ -155,7 +157,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-09_free_support_snapshot_v1"
+BUILD_ID = "2026-04-18_free_gui_settings_compact_two_column_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -178,11 +180,16 @@ _FREE_RUN_MODES = ("PAPER", "REPLAY", "BACKTEST")
 _RUNTIME_LOG_LEVEL_VALUES = ("MINIMAL",)
 FREE_BUILD_NOTE = "FREE build: PAPER / REPLAY / BACKTEST only"
 COMPACT_WIDTH_THRESHOLD = 980
-SETTINGS_TWO_COLUMN_WIDTH_THRESHOLD = 1180
+SETTINGS_TWO_COLUMN_WIDTH_THRESHOLD = 900
 DEFAULT_LOG_MIN_HEIGHT = 180
 COMPACT_LOG_MIN_HEIGHT = 120
 DEFAULT_SECTION_VERTICAL_SPACING = 8
 COMPACT_SECTION_VERTICAL_SPACING = 6
+SETTINGS_COLUMN_SPACING = 8
+SETTINGS_GROUP_SPACING = 8
+COMPRESSIBLE_FIELD_MIN_WIDTH = 120
+SHORT_FIELD_MAX_WIDTH = 96
+MEDIUM_FIELD_MAX_WIDTH = 160
 DEFAULT_MAIN_WINDOW_WIDTH = 840
 DEFAULT_MAIN_WINDOW_HEIGHT = 620
 PROC_POLL_ACTIVE_INTERVAL_MS = 500
@@ -985,6 +992,7 @@ class MainWindow(QWidget):
         self._refresh_report_preview()
         self._refresh_valuation_preview()
         self._sync_mode_ui()
+        self._configure_settings_widget_policies()
         self._apply_responsive_layout(force=True)
 
         # Log + result view
@@ -1105,6 +1113,107 @@ class MainWindow(QWidget):
 
     def _is_settings_two_column_width(self) -> bool:
         return int(self.width()) >= SETTINGS_TWO_COLUMN_WIDTH_THRESHOLD
+
+    def _set_horizontal_policy(
+        self,
+        widget: QWidget,
+        horizontal_policy: QSizePolicy.Policy,
+        *,
+        min_width: int | None = None,
+        max_width: int | None = None,
+    ) -> None:
+        policy = widget.sizePolicy()
+        widget.setSizePolicy(horizontal_policy, policy.verticalPolicy())
+        if min_width is not None:
+            widget.setMinimumWidth(min_width)
+        if max_width is not None:
+            widget.setMaximumWidth(max_width)
+
+    def _configure_settings_widget_policies(self) -> None:
+        compressible_fields = [
+            self.replay_data,
+            self.report_out,
+            self.report_preview,
+            self.valuation_preview_jpy,
+            self.valuation_fx_source,
+            self.valuation_estimated_band,
+            self.license_seat_key,
+            self.license_status,
+            self.license_meta,
+        ]
+        for field in compressible_fields:
+            self._set_horizontal_policy(
+                field,
+                QSizePolicy.Policy.Ignored,
+                min_width=COMPRESSIBLE_FIELD_MIN_WIDTH,
+            )
+
+        for field in (
+            self.replay_since_ym,
+            self.replay_until_ym,
+            self.pipeline_from_ym,
+            self.pipeline_to_ym,
+        ):
+            self._set_horizontal_policy(field, QSizePolicy.Policy.Maximum, max_width=SHORT_FIELD_MAX_WIDTH)
+
+        for field in (
+            self.valuation_native_balance,
+            self.valuation_manual_jpy_balance,
+            self.valuation_usdjpy,
+            self.valuation_usdtjpy,
+            self.valuation_usdcjpy,
+        ):
+            self._set_horizontal_policy(field, QSizePolicy.Policy.Maximum, max_width=MEDIUM_FIELD_MAX_WIDTH)
+
+        for creds in self._credential_inputs.values():
+            for key in ("key", "secret", "passphrase"):
+                field = creds.get(key)
+                if isinstance(field, QLineEdit):
+                    self._set_horizontal_policy(
+                        field,
+                        QSizePolicy.Policy.Ignored,
+                        min_width=COMPRESSIBLE_FIELD_MIN_WIDTH,
+                    )
+
+        for button in (
+            self.btn_select_replay,
+            self.btn_select_replay_dir,
+            self.btn_report_out,
+            self.btn_license_activate,
+            self.btn_license_refresh,
+            self.btn_license_clear,
+            self.btn_license_reset_local,
+            self.btn_support_snapshot,
+            self.btn_support_open_folder,
+            self.btn_diag,
+            self.btn_bundle,
+            self.btn_pipeline,
+            self.btn_save,
+            self.btn_clear,
+            self.btn_start,
+            self.btn_stop,
+        ):
+            self._set_horizontal_policy(button, QSizePolicy.Policy.Maximum)
+
+    def _apply_group_layout_density(self, compact: bool) -> None:
+        margins = (8, 8, 8, 8) if compact else (12, 10, 12, 12)
+        section_spacing = SETTINGS_GROUP_SPACING if compact else 12
+        group_spacing = COMPACT_SECTION_VERTICAL_SPACING if compact else DEFAULT_SECTION_VERTICAL_SPACING
+        self.settings_sections_layout.setSpacing(SETTINGS_COLUMN_SPACING if compact else 12)
+        self.settings_left_column_layout.setSpacing(section_spacing)
+        self.settings_right_column_layout.setSpacing(section_spacing)
+        for layout in (
+            self.replay_group.layout(),
+            self.report_group.layout(),
+            self.valuation_group.layout(),
+            self.creds_group.layout(),
+            self.activation_group.layout(),
+            self.tools_group.layout(),
+        ):
+            if layout is None:
+                continue
+            layout.setContentsMargins(*margins)
+            layout.setSpacing(group_spacing)
 
     def _reset_box_layout(self, layout) -> None:
         while layout.count():
@@ -1434,13 +1543,14 @@ class MainWindow(QWidget):
 
     def _apply_responsive_layout(self, compact: bool | None = None, *, force: bool = False) -> None:
         mode = self._is_compact_width() if compact is None else bool(compact)
-        settings_two_column = (not mode) and self._is_settings_two_column_width()
+        settings_two_column = self._is_settings_two_column_width()
         section_compact = mode or settings_two_column
         if (not force) and (self._compact_mode == mode) and (self._settings_two_column_mode == settings_two_column):
             return
         self._compact_mode = mode
         self._settings_two_column_mode = settings_two_column
         self._apply_controls_layout(mode)
+        self._apply_group_layout_density(section_compact)
         self._apply_settings_sections_layout(settings_two_column)
         self._apply_report_layout(section_compact)
         self._apply_valuation_layout(section_compact)

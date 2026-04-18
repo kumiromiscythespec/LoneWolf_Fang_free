@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
+# BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-21_backtest_final_residual_comment_cleanup_v1
 # BUILD_ID: 2026-03-20_backtest_ethusdc_size_sizing_diag_v1
@@ -107,6 +107,7 @@ import config as C
 import runner as R
 import math
 from trace_bar_policy import attach_bar_snapshot as _trace_attach_bar_snapshot
+from app.core.data_pipeline import auto_prepare_runtime_data, resolve_prepare_month_window
 from app.core.dataset import (
     DatasetResolutionError,
     build_missing_dataset_message,
@@ -120,6 +121,7 @@ from app.core.dataset import (
 from app.core.fees import resolve_paper_fees
 from app.core.market_meta import MarketMeta, load_cached_meta, market_meta_cache_path, maybe_refresh_market_meta, resolve_quote_ccy
 from app.core.paths import ensure_runtime_dirs
+from app.core.source_provenance import record_path_source_event_once
 from app.core.export_paths import (
     build_run_export_dir,
     is_legacy_exports_path,
@@ -127,12 +129,14 @@ from app.core.export_paths import (
     write_last_run_json,
 )
 
-BUILD_ID = "2026-03-29_free_final_polish_v1"
+BUILD_ID = "2026-04-18_free_shared_market_data_fallback_v1"
 
 OPEN_COST_DIAG_LIMIT_DEFAULT = 8
 _CURRENT_EXPORT_DIR = ""
 _CURRENT_RUN_ID = ""
 _CURRENT_EXPORT_SYMBOL = ""
+_PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
+_AUTO_PREPARE_REQUESTS: set[str] = set()
 
 
 def _resolve_backtest_symbols(raw_symbols: str) -> tuple[list[str], str]:
@@ -1918,13 +1922,95 @@ def _load_precomputed_indicator_series_fast(
     return out
 
 
-def _resolve_precomputed_root(path: str) -> str:
-    raw = str(path or "").strip() or os.path.join("exports", "precomputed_indicators")
-    expanded = os.path.expanduser(os.path.expandvars(raw))
-    if os.path.isabs(expanded):
-        return os.path.abspath(expanded)
-    repo_root = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(repo_root, expanded))
+def _resolve_precomputed_root(path: str, *, repo_root: str = "") -> str:
+    raw = str(path or "").strip()
+    repo_abs = os.path.abspath(str(repo_root or os.path.dirname(os.path.abspath(__file__))))
+    if raw:
+        expanded = os.path.expanduser(os.path.expandvars(raw))
+        if os.path.isabs(expanded):
+            return os.path.abspath(expanded)
+        return os.path.abspath(os.path.join(repo_abs, expanded))
+    try:
+        return os.path.abspath(
+            str(
+                ensure_runtime_dirs().precomputed_indicators_dir
+                or os.path.join(repo_abs, "market_data", "precomputed_indicators")
+            )
+        )
+    except Exception:
+        return os.path.abspath(os.path.join(repo_abs, "market_data", "precomputed_indicators"))
+
+
+def _preferred_precomputed_root(out_root: str) -> str:
+    runtime_paths = ensure_runtime_dirs()
+    repo_root = os.path.abspath(str(getattr(runtime_paths, "repo_root", "") or os.getcwd()))
+    canonical_root = os.path.abspath(
+        str(
+            getattr(runtime_paths, "precomputed_indicators_dir", "")
+            or os.path.join(repo_root, "market_data", "precomputed_indicators")
+        )
+    )
+    configured_root = _resolve_precomputed_root(out_root, repo_root=repo_root)
+    return configured_root or canonical_root
+
+
+def _iter_precomputed_root_candidates(out_root: str) -> List[tuple[str, str]]:
+    runtime_paths = ensure_runtime_dirs()
+    repo_root = os.path.abspath(str(getattr(runtime_paths, "repo_root", "") or os.getcwd()))
+    configured_root = _resolve_precomputed_root(out_root, repo_root=repo_root)
+    known_sources: Dict[str, str] = {}
+    for source, root in tuple(getattr(runtime_paths, "precomputed_candidates", ()) or ()):
+        root_abs = os.path.abspath(str(root or "").strip())
+        if not root_abs:
+            continue
+        source_text = "canonical" if str(source or "").strip() == "canonical_shared_root" else str(source or "").strip()
+        known_sources[os.path.normcase(root_abs)] = source_text
+
+    out: List[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(root_value: str, source: str) -> None:
+        root_abs = os.path.abspath(str(root_value or "").strip())
+        if not root_abs:
+            return
+        root_key = os.path.normcase(root_abs)
+        if root_key in seen:
+            return
+        seen.add(root_key)
+        out.append((root_abs, str(source or "").strip() or "configured_override"))
+
+    if configured_root:
+        configured_key = os.path.normcase(configured_root)
+        _add(configured_root, known_sources.get(configured_key, "configured_override"))
+    for source, root in tuple(getattr(runtime_paths, "precomputed_candidates", ()) or ()):
+        source_text = "canonical" if str(source or "").strip() == "canonical_shared_root" else str(source or "").strip()
+        _add(str(root or ""), source_text)
+    return out
+
+
+def _resolve_precomputed_indicator_paths_with_source(
+    out_root: str,
+    symbol: str,
+    tf: str,
+    ind_name: str,
+) -> tuple[List[str], str, str]:
+    symbol_fs = str(symbol).replace("/", "").replace(":", "").replace("-", "")
+    symbol_raw = str(symbol).strip()
+    tf_text = str(tf)
+    for root_abs, source in _iter_precomputed_root_candidates(out_root):
+        alt_root_abs = os.path.join(root_abs, "precomputed_indicators")
+        candidate_dirs = [
+            os.path.join(root_abs, symbol_raw, tf_text),
+            os.path.join(alt_root_abs, symbol_raw, tf_text),
+            os.path.join(root_abs, symbol_fs, tf_text),
+            os.path.join(alt_root_abs, symbol_fs, tf_text),
+        ]
+        for candidate_dir in candidate_dirs:
+            pattern = os.path.join(candidate_dir, f"{ind_name}-*.csv")
+            paths = sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
+            if paths:
+                return (paths, os.path.abspath(candidate_dir), source)
+    return ([], "", "")
 
 
 def _resolve_precomputed_indicator_path(
@@ -1933,29 +2019,101 @@ def _resolve_precomputed_indicator_path(
     tf: str,
     ind_name: str,
 ) -> List[str]:
-    """Resolve indicator csv paths for given symbol/tf/ind_name.
+    return _resolve_precomputed_indicator_paths_with_source(out_root, symbol, tf, ind_name)[0]
 
-    Convention:
-      <out_root>/<symbol>/<tf>/<IND>-*.csv
-      e.g. exports/precomputed_indicators/ETHUSDT/5m/EMA9-ETHUSDT-5m-2021-01.csv
-    """
-    # Normalize symbol for filesystem: "ETH/USDT" -> "ETHUSDT"
-    symbol_fs = str(symbol).replace("/", "").replace(":", "").replace("-", "")
-    out_root_abs = _resolve_precomputed_root(out_root)
-    alt_root_abs = os.path.join(out_root_abs, "precomputed_indicators")
-    symbol_raw = str(symbol).strip()
-    candidate_dirs = [
-        os.path.join(out_root_abs, symbol_raw, str(tf)),
-        os.path.join(alt_root_abs, symbol_raw, str(tf)),
-        os.path.join(out_root_abs, symbol_fs, str(tf)),
-        os.path.join(alt_root_abs, symbol_fs, str(tf)),
-    ]
-    for d in candidate_dirs:
-        pattern = os.path.join(d, f"{ind_name}-*.csv")
-        paths = sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
-        if paths:
-            return paths
-    return []
+
+def _resolve_precomputed_source_root(path: str) -> str:
+    path_text = str(path or "").strip()
+    if not path_text:
+        return ""
+    return os.path.abspath(os.path.join(os.path.abspath(path_text), os.pardir, os.pardir))
+
+
+def _record_precomputed_source_event(
+    *,
+    component: str,
+    mode: str,
+    build_id: str,
+    scope: str,
+    symbol: str,
+    tf: str,
+    indicator: str,
+    source: str,
+    path: str,
+    preferred_root: str = "",
+) -> None:
+    source_text = str(source or "").strip()
+    resolved_root = _resolve_precomputed_source_root(path)
+    if (not source_text) or (not resolved_root):
+        return
+    preferred_root_text = str(preferred_root or "").strip()
+    payload = {
+        "build_id": str(build_id or BUILD_ID),
+        "symbol": str(symbol or "").strip(),
+        "tf": str(tf or "").strip(),
+        "indicator": str(indicator or "").strip(),
+        "mode": str(mode or "").strip(),
+        "preferred_root": os.path.abspath(preferred_root_text) if preferred_root_text else resolved_root,
+        "resolved_kind": str(scope or "").strip(),
+    }
+    record_path_source_event_once(
+        component=str(component or "").strip(),
+        event="precomputed_source_resolved",
+        source=source_text,
+        path=resolved_root,
+        extra=payload,
+    )
+    if source_text not in ("canonical", "canonical_market_data", "canonical_shared_root"):
+        record_path_source_event_once(
+            component=str(component or "").strip(),
+            event="precomputed_source_noncanonical_used",
+            source=source_text,
+            path=resolved_root,
+            extra=payload,
+        )
+
+
+def _log_precomputed_source(
+    *,
+    scope: str,
+    symbol: str,
+    tf: str,
+    indicator: str,
+    source: str,
+    path: str,
+    preferred_root: str = "",
+) -> None:
+    _record_precomputed_source_event(
+        component="backtest",
+        mode="backtest",
+        build_id=BUILD_ID,
+        scope=scope,
+        symbol=symbol,
+        tf=tf,
+        indicator=indicator,
+        source=source,
+        path=path,
+        preferred_root=preferred_root,
+    )
+    source_text = str(source or "").strip()
+    if source_text in ("canonical", "canonical_market_data", "canonical_shared_root"):
+        return
+    path_text = os.path.abspath(str(path or "").strip())
+    if not path_text:
+        return
+    key = (str(scope).upper(), str(symbol), str(tf), str(indicator), path_text)
+    if key in _PRECOMPUTED_SOURCE_LOGGED:
+        return
+    logger.info(
+        "[PRECOMPUTED][%s] symbol=%s tf=%s indicator=%s source=%s path=%s",
+        str(scope).upper(),
+        str(symbol),
+        str(tf),
+        str(indicator),
+        source_text,
+        path_text,
+    )
+    _PRECOMPUTED_SOURCE_LOGGED.add(key)
 
 
 def _handle_missing_precomputed(
@@ -1979,6 +2137,207 @@ def _handle_missing_precomputed(
     reason = "no symbol-specific precomputed files found" if not found_any else "strict disabled"
     logger.warning("%s -> fallback to on-the-fly calc (%s=%s)", msg, scope, reason)
     return False
+
+
+def _unique_paths(paths: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for path in list(paths or []):
+        path_text = str(path or "").strip()
+        if not path_text:
+            continue
+        path_abs = os.path.abspath(path_text)
+        path_key = os.path.normcase(path_abs)
+        if path_key in seen:
+            continue
+        seen.add(path_key)
+        out.append(path_abs)
+    return out
+
+
+def _collect_missing_precomputed_labels(
+    *,
+    symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+    year: Optional[int],
+    years: Optional[List[int]],
+) -> tuple[List[str], List[str]]:
+    try:
+        pre_enabled = bool(getattr(C, "PRECOMPUTED_INDICATORS_ENABLED", False))
+    except Exception:
+        pre_enabled = False
+    preferred_root = _preferred_precomputed_root(str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "") or ""))
+    searched_paths: List[str] = [preferred_root]
+    for candidate_root, _candidate_source in _iter_precomputed_root_candidates(str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "") or "")):
+        searched_paths.append(candidate_root)
+    if not pre_enabled:
+        return ([], _unique_paths(searched_paths))
+
+    rsi_period = int(getattr(C, "RSI_PERIOD", 14))
+    atr_period = int(getattr(C, "ATR_PERIOD", 14))
+    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", 14))
+    ema_fast_span = int(getattr(C, "EMA_FAST", 20))
+    ema_slow_span = int(getattr(C, "EMA_SLOW", 50))
+    entry_indicators = ["EMA9", "EMA21", f"RSI{rsi_period}", f"ATR{atr_period}"]
+    filter_indicators = [f"ADX{adx_period}", f"EMA{ema_fast_span}", f"EMA{ema_slow_span}"]
+    missing: List[str] = []
+    time_start = int(since_ms) if since_ms is not None else None
+    time_end = int(until_ms) if until_ms is not None else None
+    if time_start is None or time_end is None:
+        from_ym, to_ym = resolve_prepare_month_window(
+            since_ms=since_ms,
+            until_ms=until_ms,
+            year=year,
+            years=years,
+        )
+        try:
+            start_dt = datetime.strptime(f"{from_ym}-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            end_year = int(str(to_ym).split("-", 1)[0])
+            end_month = int(str(to_ym).split("-", 1)[1])
+            if end_month >= 12:
+                end_dt = datetime(end_year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                end_dt = datetime(end_year, end_month + 1, 1, tzinfo=timezone.utc)
+            time_start = int(start_dt.timestamp() * 1000.0)
+            time_end = int(end_dt.timestamp() * 1000.0)
+        except Exception:
+            time_start = time_start
+            time_end = time_end
+
+    for indicator_name in entry_indicators:
+        paths, selected_dir, _source = _resolve_precomputed_indicator_paths_with_source(preferred_root, symbol, entry_tf, indicator_name)
+        if paths and time_start is not None and time_end is not None:
+            paths = _filter_month_files_by_ts(paths, int(time_start), int(time_end))
+        if not paths:
+            missing.append(f"entry:{indicator_name}")
+        elif selected_dir:
+            searched_paths.append(selected_dir)
+
+    if str(filter_tf).lower() == "1h":
+        for indicator_name in filter_indicators:
+            paths, selected_dir, _source = _resolve_precomputed_indicator_paths_with_source(preferred_root, symbol, filter_tf, indicator_name)
+            if paths and time_start is not None and time_end is not None:
+                paths = _filter_month_files_by_ts(paths, int(time_start), int(time_end))
+            if not paths:
+                missing.append(f"filter:{indicator_name}")
+            elif selected_dir:
+                searched_paths.append(selected_dir)
+
+    return (missing, _unique_paths(searched_paths))
+
+
+def _maybe_auto_prepare_runtime_data_for_run(
+    *,
+    context: str,
+    runtime_symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+    dataset_year: Optional[int],
+    dataset_years: Optional[List[int]],
+    dataset_root: str,
+    prefix: str,
+    default_dir_5m: str,
+    default_glob_5m: str,
+    default_dir_1h: str,
+    default_glob_1h: str,
+) -> None:
+    symbol_text = str(runtime_symbol or "").strip()
+    if not symbol_text:
+        return
+    years_list = [int(y) for y in list(dataset_years or []) if int(y) > 0]
+    prep_key = json.dumps(
+        {
+            "context": str(context or "").upper(),
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "since_ms": int(since_ms) if since_ms is not None else None,
+            "until_ms": int(until_ms) if until_ms is not None else None,
+            "year": int(dataset_year) if dataset_year is not None else None,
+            "years": list(years_list),
+        },
+        sort_keys=True,
+    )
+    if prep_key in _AUTO_PREPARE_REQUESTS:
+        return
+
+    missing_items: List[str] = []
+    searched_paths: List[str] = []
+    try:
+        dataset_spec = resolve_dataset(
+            dataset_root=str(dataset_root),
+            prefix=str(prefix),
+            year=(int(dataset_year) if dataset_year is not None else None),
+            years=(list(years_list) if years_list else None),
+            tf_dirs=("5m", "1h"),
+            default_dir_5m=str(default_dir_5m),
+            default_glob_5m=str(default_glob_5m),
+            default_dir_1h=str(default_dir_1h),
+            default_glob_1h=str(default_glob_1h),
+            runtime_symbol=str(symbol_text),
+            context=str(context),
+        )
+        dataset_diag = dict(dataset_spec.diagnostics or {})
+        searched_paths.extend(list(dataset_diag.get("searched_paths_5m", []) or []))
+        searched_paths.extend(list(dataset_diag.get("searched_paths_1h", []) or []))
+        if not list(dataset_spec.paths_5m or []):
+            missing_items.append(f"chart:{str(entry_tf)}")
+        if str(filter_tf).lower() == "1h" and not list(dataset_spec.paths_1h or []):
+            missing_items.append(f"chart:{str(filter_tf)}")
+    except DatasetResolutionError as exc:
+        dataset_diag = dict(exc.diagnostics or {})
+        searched_paths.extend(list(dataset_diag.get("searched_paths_5m", []) or []))
+        searched_paths.extend(list(dataset_diag.get("searched_paths_1h", []) or []))
+        missing_items.append(f"chart:{str(entry_tf)}")
+        if str(filter_tf).lower() == "1h":
+            missing_items.append(f"chart:{str(filter_tf)}")
+
+    pre_missing, pre_paths = _collect_missing_precomputed_labels(
+        symbol=str(symbol_text),
+        entry_tf=str(entry_tf),
+        filter_tf=str(filter_tf),
+        since_ms=since_ms,
+        until_ms=until_ms,
+        year=dataset_year,
+        years=years_list,
+    )
+    missing_items.extend(pre_missing)
+    searched_paths.extend(pre_paths)
+    missing_items = sorted(set([str(item) for item in missing_items if str(item or "").strip()]))
+    searched_paths = _unique_paths(searched_paths)
+    if not missing_items:
+        return
+
+    _AUTO_PREPARE_REQUESTS.add(prep_key)
+    try:
+        auto_prepare_runtime_data(
+            symbol=str(symbol_text),
+            context=str(context),
+            since_ms=since_ms,
+            until_ms=until_ms,
+            year=dataset_year,
+            years=years_list,
+            missing_items=list(missing_items),
+            searched_paths=list(searched_paths),
+            fallback_sources=["chart_download", "precompute_generation"],
+        )
+    except Exception as exc:
+        from_ym, to_ym = resolve_prepare_month_window(
+            since_ms=since_ms,
+            until_ms=until_ms,
+            year=dataset_year,
+            years=years_list,
+        )
+        raise RuntimeError(
+            f"[AUTO_PREP][{str(context or '').upper()}] failed symbol={symbol_text} "
+            f"from={from_ym} to={to_ym} missing={','.join(missing_items)} "
+            f"searched_paths={' | '.join(searched_paths)} fallback_attempted=run_pipeline error={exc}"
+        ) from exc
 
 def _ym_index_from_ts_utc(ts_ms: int) -> int:
     dt = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=timezone.utc)
@@ -3175,6 +3534,22 @@ def run_backtest(
         resolved_dataset_year = infer_year_from_ms(
             effective_trade_since_ms if effective_trade_since_ms is not None else since_ms
         )
+    _maybe_auto_prepare_runtime_data_for_run(
+        context="BACKTEST",
+        runtime_symbol=str(runtime_symbol or csv_symbol),
+        entry_tf=str(entry_tf),
+        filter_tf=str(filter_tf),
+        since_ms=(int(effective_trade_since_ms) if effective_trade_since_ms is not None else since_ms),
+        until_ms=until_ms,
+        dataset_year=(int(resolved_dataset_year) if resolved_dataset_year is not None else None),
+        dataset_years=([int(y) for y in list(dataset_years or [])] if dataset_years else None),
+        dataset_root=os.path.abspath(str(getattr(ensure_runtime_dirs(), "market_data_dir", ".") or ".")),
+        prefix=str(csv_prefix),
+        default_dir_5m=str(csv_dir_5m_default),
+        default_glob_5m=str(csv_glob_5m_default),
+        default_dir_1h=str(csv_dir_1h_default),
+        default_glob_1h=str(csv_glob_1h_default),
+    )
     try:
         dataset_spec = resolve_dataset(
             dataset_root=os.path.abspath(str(getattr(ensure_runtime_dirs(), "market_data_dir", ".") or ".")),
@@ -3477,6 +3852,7 @@ def run_backtest(
         pre_root = _resolve_precomputed_root(
             str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
         )
+        preferred_precomputed_root = _preferred_precomputed_root(pre_root)
         pre_strict = bool(getattr(C, "PRECOMPUTED_INDICATORS_STRICT", True))
         # Use run_backtest() arg to keep CLI/config overrides consistent
         warmup_bars_pre = int(warmup_bars or 0)
@@ -3506,12 +3882,26 @@ def run_backtest(
             ts0 = int(e["ts"][0])
             ts1 = int(e["ts"][-1])
             for nm in ind_names:
-                paths = _resolve_precomputed_indicator_path(pre_root, sym, entry_tf, nm)
+                paths, selected_dir, selected_source = _resolve_precomputed_indicator_paths_with_source(
+                    pre_root,
+                    sym,
+                    entry_tf,
+                    nm,
+                )
                 paths = _filter_month_files_by_ts(paths, ts0, ts1)
                 if not paths:
                     missing.append(nm)
                     continue
                 found_any_entry_precomputed = True
+                _log_precomputed_source(
+                    scope="entry",
+                    symbol=str(sym),
+                    tf=str(entry_tf),
+                    indicator=str(nm),
+                    source=selected_source,
+                    path=selected_dir,
+                    preferred_root=preferred_precomputed_root,
+                )
                 ind_paths[nm] = paths
 
             if not _handle_missing_precomputed(
@@ -3519,7 +3909,7 @@ def run_backtest(
                 tf=str(entry_tf),
                 missing=missing,
                 found_any=bool(found_any_entry_precomputed),
-                root=pre_root,
+                root=preferred_precomputed_root,
                 strict=pre_strict,
                 scope="entry",
             ):
@@ -3540,7 +3930,7 @@ def run_backtest(
                         sym,
                         entry_tf,
                         ",".join(ind_names),
-                        pre_root,
+                        preferred_precomputed_root,
                     )
                     e_ema9 = _load_precomputed_indicator_series_fast(
                         e["ts"],
@@ -3643,12 +4033,26 @@ def run_backtest(
             f_missing: List[str] = []
             found_any_filter_precomputed = False
             for nm in f_ind_names:
-                paths = _resolve_precomputed_indicator_path(pre_root, sym, filter_tf, nm)
+                paths, selected_dir, selected_source = _resolve_precomputed_indicator_paths_with_source(
+                    pre_root,
+                    sym,
+                    filter_tf,
+                    nm,
+                )
                 paths = _filter_month_files_by_ts(paths, f_ts0, f_ts1)
                 if not paths:
                     f_missing.append(nm)
                     continue
                 found_any_filter_precomputed = True
+                _log_precomputed_source(
+                    scope="filter",
+                    symbol=str(sym),
+                    tf=str(filter_tf),
+                    indicator=str(nm),
+                    source=selected_source,
+                    path=selected_dir,
+                    preferred_root=preferred_precomputed_root,
+                )
                 f_ind_paths[nm] = paths
 
             if not _handle_missing_precomputed(
@@ -3656,7 +4060,7 @@ def run_backtest(
                 tf=str(filter_tf),
                 missing=f_missing,
                 found_any=bool(found_any_filter_precomputed),
-                root=pre_root,
+                root=preferred_precomputed_root,
                 strict=pre_strict,
                 scope="filter",
             ):
@@ -3677,7 +4081,7 @@ def run_backtest(
                         sym,
                         filter_tf,
                         ",".join(f_ind_names),
-                        pre_root,
+                        preferred_precomputed_root,
                     )
                     f_adx_list = _load_precomputed_indicator_series_fast(
                         f["ts"],

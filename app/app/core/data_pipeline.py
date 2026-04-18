@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-03-29_free_port_standard_gui_nonlive_improvements_v1
 # BUILD_ID: 2026-03-20_pipeline_precompute_lookback_diag_v1
 # BUILD_ID: 2026-03-20_pipeline_precompute_until_bound_v1
@@ -24,12 +25,16 @@ import urllib.parse
 import zipfile
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from app.core.dataset import symbol_to_prefix
 from app.core.paths import get_paths
+from app.core.source_provenance import iter_source_root_candidates, record_path_source_event_once
 
 
-BUILD_ID = "2026-03-29_free_port_standard_gui_nonlive_improvements_v1"
+BUILD_ID = "2026-04-18_free_shared_market_data_fallback_v1"
+
+_PIPELINE_DIAG_ONCE: set[str] = set()
 
 
 def _parse_yyyy_mm(raw: str) -> tuple[int, int]:
@@ -121,30 +126,195 @@ def _safe_remove(path: str) -> None:
         pass
 
 
-def _market_data_root(repo_root: str) -> str:
-    repo_abs = os.path.abspath(str(repo_root or "").strip() or os.getcwd())
+def _pipeline_diag_once(key: str, message: str) -> None:
+    once_key = str(key or "").strip()
+    if not once_key or once_key in _PIPELINE_DIAG_ONCE:
+        return
+    _PIPELINE_DIAG_ONCE.add(once_key)
+    print(message, flush=True)
+
+
+def _record_pipeline_path_event(
+    *,
+    event: str,
+    source: str,
+    path: str,
+    extra: dict | None = None,
+) -> None:
+    try:
+        payload = dict(extra or {})
+        payload.setdefault("build_id", BUILD_ID)
+        record_path_source_event_once(
+            component="data_pipeline",
+            event=str(event or "").strip(),
+            source=str(source or "").strip(),
+            path=os.path.abspath(str(path or "").strip() or os.getcwd()),
+            extra=payload,
+        )
+    except Exception:
+        return
+
+
+def _resolve_pipeline_paths(repo_root: str) -> tuple[str, str, str]:
+    repo_raw = str(repo_root or "").strip()
+    cwd_abs = os.path.abspath(os.getcwd())
     try:
         p = get_paths()
-        p_repo = os.path.abspath(str(getattr(p, "repo_root", "") or repo_abs))
-        p_market = str(getattr(p, "market_data_dir", "") or "").strip()
-        if p_market and p_repo == repo_abs:
-            return os.path.abspath(p_market)
+        market_root = str(getattr(p, "market_data_dir", "") or "").strip()
+        if market_root:
+            market_abs = os.path.abspath(market_root)
+            chart_cache_root = str(getattr(p, "chart_cache_dir", "") or "").strip()
+            precomputed_root = str(getattr(p, "precomputed_indicators_dir", "") or "").strip()
+            chart_cache_abs = (
+                os.path.abspath(chart_cache_root)
+                if chart_cache_root
+                else os.path.abspath(os.path.join(market_abs, "chart_cache"))
+            )
+            precomputed_abs = (
+                os.path.abspath(precomputed_root)
+                if precomputed_root
+                else os.path.abspath(os.path.join(market_abs, "precomputed_indicators"))
+            )
+            _pipeline_diag_once(
+                "pipeline_paths:canonical_market_data",
+                f"[PIPELINE][DIAG] source=canonical_market_data market_data_root={market_abs} "
+                f"chart_cache_root={chart_cache_abs} precomputed_root={precomputed_abs}",
+            )
+            _record_pipeline_path_event(
+                event="pipeline_root_resolved",
+                source="canonical_market_data",
+                path=market_abs,
+                extra={
+                    "chart_cache_root": chart_cache_abs,
+                    "precomputed_root": precomputed_abs,
+                },
+            )
+            return (market_abs, chart_cache_abs, precomputed_abs)
     except Exception:
         pass
-    return os.path.abspath(os.path.join(repo_abs, "market_data"))
+
+    if repo_raw:
+        repo_abs = os.path.abspath(repo_raw)
+        market_abs = os.path.abspath(os.path.join(repo_abs, "market_data"))
+        chart_cache_abs = os.path.abspath(os.path.join(market_abs, "chart_cache"))
+        precomputed_abs = os.path.abspath(os.path.join(market_abs, "precomputed_indicators"))
+        _pipeline_diag_once(
+            "pipeline_paths:legacy_repo_root",
+            f"[PIPELINE][DIAG] source=legacy_repo_root repo_root={repo_abs} market_data_root={market_abs} "
+            f"chart_cache_root={chart_cache_abs} precomputed_root={precomputed_abs}",
+        )
+        _record_pipeline_path_event(
+            event="pipeline_root_resolved",
+            source="legacy_repo_root",
+            path=market_abs,
+            extra={
+                "chart_cache_root": chart_cache_abs,
+                "precomputed_root": precomputed_abs,
+                "repo_root": repo_abs,
+            },
+        )
+        return (market_abs, chart_cache_abs, precomputed_abs)
+
+    market_abs = os.path.abspath(os.path.join(cwd_abs, "market_data"))
+    chart_cache_abs = os.path.abspath(os.path.join(market_abs, "chart_cache"))
+    precomputed_abs = os.path.abspath(os.path.join(market_abs, "precomputed_indicators"))
+    _pipeline_diag_once(
+        "pipeline_paths:cwd_fallback",
+        f"[PIPELINE][DIAG] source=cwd_fallback cwd={cwd_abs} market_data_root={market_abs} "
+        f"chart_cache_root={chart_cache_abs} precomputed_root={precomputed_abs}",
+    )
+    _record_pipeline_path_event(
+        event="pipeline_root_resolved",
+        source="cwd_fallback",
+        path=market_abs,
+        extra={
+            "chart_cache_root": chart_cache_abs,
+            "precomputed_root": precomputed_abs,
+            "cwd": cwd_abs,
+        },
+    )
+    return (market_abs, chart_cache_abs, precomputed_abs)
+
+
+def _resolve_pipeline_roots(repo_root: str) -> tuple[str, str]:
+    market_abs, _chart_cache_abs, precomputed_abs = _resolve_pipeline_paths(repo_root)
+    return (market_abs, precomputed_abs)
+
+
+def _market_data_root(repo_root: str) -> str:
+    return _resolve_pipeline_paths(repo_root)[0]
+
+
+def _chart_cache_root(repo_root: str) -> str:
+    return _resolve_pipeline_paths(repo_root)[1]
 
 
 def _precomputed_out_root(repo_root: str) -> str:
-    repo_abs = os.path.abspath(str(repo_root or "").strip() or os.getcwd())
+    return _resolve_pipeline_paths(repo_root)[2]
+
+
+def _source_root_has_month_dirs(root: str, prefix: str, tf: str, years: list[int]) -> bool:
+    root_abs = os.path.abspath(str(root or "").strip() or os.getcwd())
+    return any(os.path.isdir(os.path.join(root_abs, f"{prefix}_{tf}_{int(year)}")) for year in (years or []))
+
+
+def _resolve_precompute_source_root(
+    *,
+    repo_root: str,
+    prefix: str,
+    tf: str,
+    years_in_range: list[int],
+) -> tuple[str, str]:
+    market_root = _market_data_root(repo_root)
+    repo_raw = str(repo_root or "").strip()
+    repo_abs = os.path.abspath(repo_raw or os.getcwd())
+    repo_candidate = repo_abs if repo_raw else ""
     try:
-        p = get_paths()
-        p_repo = os.path.abspath(str(getattr(p, "repo_root", "") or repo_abs))
-        p_pre = str(getattr(p, "precomputed_indicators_dir", "") or "").strip()
-        if p_pre and p_repo == repo_abs:
-            return os.path.abspath(p_pre)
+        candidates = iter_source_root_candidates(
+            "",
+            market_root,
+            repo_candidate,
+            include_explicit_parent=False,
+            include_cwd=True,
+        )
     except Exception:
-        pass
-    return os.path.abspath(os.path.join(_market_data_root(repo_abs), "precomputed_indicators"))
+        candidates = [("canonical_market_data", market_root)]
+        if repo_candidate:
+            candidates.append(("legacy_repo_root", repo_abs))
+        candidates.append(("cwd_fallback", os.path.abspath(os.getcwd())))
+
+    for source, root in candidates:
+        if not _source_root_has_month_dirs(root, prefix, tf, years_in_range):
+            continue
+        if source in ("legacy_repo_root", "cwd_fallback", "legacy_env_root", "legacy_product_root"):
+            _pipeline_diag_once(
+                f"precompute_source:{source}:{prefix}:{tf}",
+                f"[PIPELINE][DIAG] precompute source={source} tf={tf} prefix={prefix} "
+                f"src_dir={root} preferred_src_dir={market_root}",
+            )
+        _record_pipeline_path_event(
+            event="precompute_source_resolved",
+            source=source,
+            path=root,
+            extra={
+                "prefix": prefix,
+                "tf": tf,
+                "preferred_src_dir": market_root,
+            },
+        )
+        return (root, source)
+
+    _record_pipeline_path_event(
+        event="precompute_source_resolved",
+        source="canonical_market_data",
+        path=market_root,
+        extra={
+            "prefix": prefix,
+            "tf": tf,
+            "preferred_src_dir": market_root,
+        },
+    )
+    return (market_root, "canonical_market_data")
 
 
 def _legacy_month_dirs(repo_root: str, prefix: str, tf: str, years: list[int]) -> list[str]:
@@ -944,15 +1114,16 @@ def _run_precompute_for_range(
     until_ymd: str,
 ) -> None:
     market_root = _market_data_root(repo_root)
-    src_dir = market_root
     file_glob = f"{prefix}-{tf}-20*.csv"
     start = _parse_yyyy_mm(since_ymd[:7])
     end = _parse_yyyy_mm(until_ymd[:7])
     years_in_range = sorted({int(year) for year, _month in _iter_months(start, end)})
-    has_market_dirs = any(os.path.isdir(os.path.join(market_root, f"{prefix}_{tf}_{int(year)}")) for year in years_in_range)
-    has_legacy_dirs = any(os.path.isdir(os.path.join(repo_root, f"{prefix}_{tf}_{int(year)}")) for year in years_in_range)
-    if (not has_market_dirs) and has_legacy_dirs:
-        src_dir = repo_root
+    src_dir, src_source = _resolve_precompute_source_root(
+        repo_root=repo_root,
+        prefix=prefix,
+        tf=tf,
+        years_in_range=years_in_range,
+    )
     script = os.path.join(repo_root, "precompute_indicators.py")
     out_root = _precomputed_out_root(repo_root)
     _warn_legacy_chart_paths(
@@ -963,10 +1134,11 @@ def _run_precompute_for_range(
         using_src_dir=src_dir,
         using_out_root=out_root,
     )
-    if (not has_market_dirs) and (not has_legacy_dirs):
+    if not _source_root_has_month_dirs(src_dir, prefix, tf, years_in_range):
         print(
             f"[PIPELINE][DIAG] precompute skipped tf={tf} prefix={prefix} "
-            f"reason=source_dirs_missing checked_market_root={market_root} checked_repo_root={os.path.abspath(repo_root)}",
+            f"reason=source_dirs_missing checked_market_root={market_root} checked_repo_root={os.path.abspath(repo_root)} "
+            f"resolved_source={src_source} resolved_src_dir={src_dir}",
             flush=True,
         )
         return
@@ -1051,6 +1223,89 @@ def _run_precompute_for_range(
             shutil.rmtree(staged_src_dir, ignore_errors=True)
     if int(cp.returncode) != 0:
         raise RuntimeError(f"precompute failed tf={tf} since={since_ymd} until={until_ymd} code={cp.returncode}")
+
+
+def _ym_from_ts_ms(ts_ms: int, *, exclusive_end: bool = False) -> str:
+    ref_ms = int(ts_ms)
+    if exclusive_end:
+        ref_ms = max(0, int(ref_ms) - 1)
+    dt = datetime.fromtimestamp(int(ref_ms) / 1000.0, tz=timezone.utc)
+    return f"{int(dt.year):04d}-{int(dt.month):02d}"
+
+
+def resolve_prepare_month_window(
+    *,
+    since_ms: int | None = None,
+    until_ms: int | None = None,
+    year: int | None = None,
+    years: list[int] | None = None,
+) -> tuple[str, str]:
+    years_list = sorted({int(y) for y in list(years or []) if int(y) > 0})
+    if years_list:
+        return (f"{int(years_list[0]):04d}-01", f"{int(years_list[-1]):04d}-12")
+    if year is not None and int(year) > 0:
+        return (f"{int(year):04d}-01", f"{int(year):04d}-12")
+
+    since_value = int(since_ms) if since_ms is not None else None
+    until_value = int(until_ms) if until_ms is not None else None
+    if since_value is not None and until_value is not None:
+        return (
+            _ym_from_ts_ms(int(since_value), exclusive_end=False),
+            _ym_from_ts_ms(int(until_value), exclusive_end=True),
+        )
+    if since_value is not None:
+        ym = _ym_from_ts_ms(int(since_value), exclusive_end=False)
+        return (ym, ym)
+    if until_value is not None:
+        ym = _ym_from_ts_ms(int(until_value), exclusive_end=True)
+        return (ym, ym)
+
+    now = datetime.now(timezone.utc)
+    ym_now = f"{int(now.year):04d}-{int(now.month):02d}"
+    return (ym_now, ym_now)
+
+
+def auto_prepare_runtime_data(
+    *,
+    symbol: str,
+    context: str,
+    since_ms: int | None = None,
+    until_ms: int | None = None,
+    year: int | None = None,
+    years: list[int] | None = None,
+    missing_items: list[str] | None = None,
+    searched_paths: list[str] | None = None,
+    fallback_sources: list[str] | None = None,
+) -> dict[str, Any]:
+    from_ym, to_ym = resolve_prepare_month_window(
+        since_ms=since_ms,
+        until_ms=until_ms,
+        year=year,
+        years=years,
+    )
+    missing_text = ",".join([str(item) for item in list(missing_items or []) if str(item or "").strip()]) or "unspecified"
+    searched_text = " | ".join([os.path.abspath(str(path)) for path in list(searched_paths or []) if str(path or "").strip()])
+    fallback_text = ", ".join([str(item) for item in list(fallback_sources or []) if str(item or "").strip()]) or "pipeline_download+precompute"
+    print(
+        f"[AUTO_PREP][{str(context or 'runtime').upper()}] symbol={symbol} from={from_ym} to={to_ym} "
+        f"missing={missing_text} fallback={fallback_text}",
+        flush=True,
+    )
+    if searched_text:
+        print(
+            f"[AUTO_PREP][{str(context or 'runtime').upper()}] searched_paths={searched_text}",
+            flush=True,
+        )
+    run_pipeline(symbol=str(symbol), from_ym=str(from_ym), to_ym=str(to_ym))
+    return {
+        "symbol": str(symbol),
+        "context": str(context or "").upper(),
+        "from_ym": str(from_ym),
+        "to_ym": str(to_ym),
+        "missing_items": list(missing_items or []),
+        "searched_paths": [os.path.abspath(str(path)) for path in list(searched_paths or []) if str(path or "").strip()],
+        "fallback_sources": list(fallback_sources or []),
+    }
 
 
 def run_pipeline(*, symbol: str, from_ym: str, to_ym: str) -> int:

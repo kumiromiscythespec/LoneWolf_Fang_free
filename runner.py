@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-28_standard_live_equity_currency_auto_quote_v1
 # BUILD_ID: 2026-03-28_standard_kill_floor_by_ccy_v1
@@ -175,7 +176,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-05_free_runner_user_runtime_state_fix_v1"
+BUILD_ID = "2026-04-18_free_shared_market_data_fallback_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -230,6 +231,7 @@ _ORDER_SKIP_MIN_LOG_KEYS: set[tuple[str, int, str]] = set()
 _DIFF_TRACE_META_WRITTEN: set[str] = set()
 _DIFF_TRACE_SOURCE = "live"  # "live" or "replay" (set by _run_replay)
 _REPLAY_DATASET_INFO: dict[str, Any] = {}
+_REPLAY_PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
 _REPLAY_SIZING_STATE: dict[str, float] = {}
 _CURRENT_EXPORT_RUN_ID = ""
 _CURRENT_EXPORT_SYMBOL = ""
@@ -10679,6 +10681,22 @@ def _load_replay_ohlcv(
     dataset_year = infer_year_from_ms(dataset_year_ref_ms)
     dir_5m_default, glob_5m_default = _prefer_requested_year_defaults(dir_5m_default, glob_5m_default, dataset_year)
     dir_1h_default, glob_1h_default = _prefer_requested_year_defaults(dir_1h_default, glob_1h_default, dataset_year)
+    BT._maybe_auto_prepare_runtime_data_for_run(
+        context="REPLAY",
+        runtime_symbol=str(runtime_symbol or csv_symbol),
+        entry_tf=str(tf_entry),
+        filter_tf=str(tf_filter),
+        since_ms=(int(requested_since_ms) if requested_since_ms is not None else (int(since_ms) if since_ms is not None else None)),
+        until_ms=(int(requested_until_ms) if requested_until_ms is not None else (int(until_ms) if until_ms is not None else None)),
+        dataset_year=(int(dataset_year) if dataset_year is not None else None),
+        dataset_years=None,
+        dataset_root=str(dataset_root_default),
+        prefix=str(csv_prefix),
+        default_dir_5m=str(dir_5m_default),
+        default_glob_5m=str(glob_5m_default),
+        default_dir_1h=str(dir_1h_default),
+        default_glob_1h=str(glob_1h_default),
+    )
 
     try:
         dataset_spec = resolve_dataset(
@@ -10883,6 +10901,49 @@ def _load_replay_ohlcv(
     return out
 
 
+def _log_replay_precomputed_source(
+    *,
+    scope: str,
+    symbol: str,
+    tf: str,
+    indicator: str,
+    source: str,
+    path: str,
+    preferred_root: str = "",
+) -> None:
+    BT._record_precomputed_source_event(
+        component="runner",
+        mode="replay",
+        build_id=BUILD_ID,
+        scope=scope,
+        symbol=symbol,
+        tf=tf,
+        indicator=indicator,
+        source=source,
+        path=path,
+        preferred_root=preferred_root,
+    )
+    source_text = str(source or "").strip()
+    if source_text in ("canonical", "canonical_market_data", "canonical_shared_root"):
+        return
+    path_text = os.path.abspath(str(path or "").strip())
+    if not path_text:
+        return
+    key = (str(scope).upper(), str(symbol), str(tf), str(indicator), path_text)
+    if key in _REPLAY_PRECOMPUTED_SOURCE_LOGGED:
+        return
+    logger.info(
+        "[REPLAY][PRECOMPUTED][%s] symbol=%s tf=%s indicator=%s source=%s path=%s",
+        str(scope).upper(),
+        str(symbol),
+        str(tf),
+        str(indicator),
+        source_text,
+        path_text,
+    )
+    _REPLAY_PRECOMPUTED_SOURCE_LOGGED.add(key)
+
+
 def _load_replay_filter_precomputed(
     *,
     ohlcv_map: dict[str, dict[str, list[list[float]]]],
@@ -10899,6 +10960,7 @@ def _load_replay_filter_precomputed(
         return out
 
     pre_root = str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
+    preferred_precomputed_root = BT._preferred_precomputed_root(pre_root)
     pre_strict = bool(getattr(C, "PRECOMPUTED_INDICATORS_STRICT", True))
     adx_period = int(getattr(C, "ADX_PERIOD_FILTER", 14))
     ema_fast = int(getattr(C, "EMA_FAST", 20))
@@ -10913,11 +10975,53 @@ def _load_replay_filter_precomputed(
         if (not ts_list) or (len(ts_list) != len(close_list)):
             continue
         try:
-            adx_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_filter), f"ADX{adx_period}")
-            ema_fast_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_filter), f"EMA{ema_fast}")
-            ema_slow_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_filter), f"EMA{ema_slow}")
+            adx_paths, adx_dir, adx_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_filter),
+                f"ADX{adx_period}",
+            )
+            ema_fast_paths, ema_fast_dir, ema_fast_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_filter),
+                f"EMA{ema_fast}",
+            )
+            ema_slow_paths, ema_slow_dir, ema_slow_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_filter),
+                f"EMA{ema_slow}",
+            )
             if (not adx_paths) or (not ema_fast_paths) or (not ema_slow_paths):
                 continue
+            _log_replay_precomputed_source(
+                scope="filter",
+                symbol=str(sym),
+                tf=str(tf_filter),
+                indicator=f"ADX{adx_period}",
+                source=adx_source,
+                path=adx_dir,
+                preferred_root=preferred_precomputed_root,
+            )
+            _log_replay_precomputed_source(
+                scope="filter",
+                symbol=str(sym),
+                tf=str(tf_filter),
+                indicator=f"EMA{ema_fast}",
+                source=ema_fast_source,
+                path=ema_fast_dir,
+                preferred_root=preferred_precomputed_root,
+            )
+            _log_replay_precomputed_source(
+                scope="filter",
+                symbol=str(sym),
+                tf=str(tf_filter),
+                indicator=f"EMA{ema_slow}",
+                source=ema_slow_source,
+                path=ema_slow_dir,
+                preferred_root=preferred_precomputed_root,
+            )
             adx_arr = BT._load_precomputed_indicator_series_fast(
                 ts_list,
                 adx_paths,
@@ -10977,6 +11081,7 @@ def _load_replay_entry_precomputed(
         return out
 
     pre_root = str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
+    preferred_precomputed_root = BT._preferred_precomputed_root(pre_root)
     pre_strict = bool(getattr(C, "PRECOMPUTED_INDICATORS_STRICT", True))
     rsi_period = int(getattr(C, "RSI_PERIOD", 14))
     atr_period = int(getattr(C, "ATR_PERIOD", 14))
@@ -10999,10 +11104,30 @@ def _load_replay_entry_precomputed(
         ):
             continue
         try:
-            ema9_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_entry), "EMA9")
-            ema21_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_entry), "EMA21")
-            rsi_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_entry), f"RSI{rsi_period}")
-            atr_paths = BT._resolve_precomputed_indicator_path(pre_root, str(sym), str(tf_entry), f"ATR{atr_period}")
+            ema9_paths, ema9_dir, ema9_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_entry),
+                "EMA9",
+            )
+            ema21_paths, ema21_dir, ema21_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_entry),
+                "EMA21",
+            )
+            rsi_paths, rsi_dir, rsi_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_entry),
+                f"RSI{rsi_period}",
+            )
+            atr_paths, atr_dir, atr_source = BT._resolve_precomputed_indicator_paths_with_source(
+                pre_root,
+                str(sym),
+                str(tf_entry),
+                f"ATR{atr_period}",
+            )
             if hasattr(BT, "_filter_month_files_by_ts") and ts_list:
                 ts0 = int(ts_list[0])
                 ts1 = int(ts_list[-1])
@@ -11012,6 +11137,42 @@ def _load_replay_entry_precomputed(
                 atr_paths = BT._filter_month_files_by_ts(atr_paths, ts0, ts1)
             if (not ema9_paths) or (not ema21_paths) or (not rsi_paths) or (not atr_paths):
                 continue
+            _log_replay_precomputed_source(
+                scope="entry",
+                symbol=str(sym),
+                tf=str(tf_entry),
+                indicator="EMA9",
+                source=ema9_source,
+                path=ema9_dir,
+                preferred_root=preferred_precomputed_root,
+            )
+            _log_replay_precomputed_source(
+                scope="entry",
+                symbol=str(sym),
+                tf=str(tf_entry),
+                indicator="EMA21",
+                source=ema21_source,
+                path=ema21_dir,
+                preferred_root=preferred_precomputed_root,
+            )
+            _log_replay_precomputed_source(
+                scope="entry",
+                symbol=str(sym),
+                tf=str(tf_entry),
+                indicator=f"RSI{rsi_period}",
+                source=rsi_source,
+                path=rsi_dir,
+                preferred_root=preferred_precomputed_root,
+            )
+            _log_replay_precomputed_source(
+                scope="entry",
+                symbol=str(sym),
+                tf=str(tf_entry),
+                indicator=f"ATR{atr_period}",
+                source=atr_source,
+                path=atr_dir,
+                preferred_root=preferred_precomputed_root,
+            )
             ema9_arr = BT._load_precomputed_indicator_series_fast(
                 ts_list,
                 ema9_paths,

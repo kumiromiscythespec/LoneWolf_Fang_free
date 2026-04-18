@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_precompute_shared_root_v1
 # BUILD_ID: 2026-03-14_precompute_multiyear_boundary_safe_v1
 # BUILD_ID=2026-02-26_precompute_support_ETHUSDC_dir_v1
 
@@ -14,16 +15,166 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from app.core.paths import get_paths
+from app.core.source_provenance import (
+    is_legacy_source,
+    iter_source_root_candidates,
+    record_path_source_event_once,
+)
 
 # Project indicators (same as backtest.py uses)
 from indicators import ema, rsi, atr, adx  # type: ignore
 
-BUILD_ID="2026-03-14_precompute_multiyear_boundary_safe_v1"
+BUILD_ID="2026-04-18_free_precompute_shared_root_v1"
 
 # ======================================================================================
 # Logging
 # ======================================================================================
 log = logging.getLogger("precompute_indicators")
+_SOURCE_DIAG_ONCE: set[str] = set()
+
+
+def _app_repo_root() -> str:
+    try:
+        return os.path.abspath(str(get_paths().repo_root or os.getcwd()))
+    except Exception:
+        return os.path.abspath(os.getcwd())
+
+
+def _canonical_market_data_dir() -> str:
+    try:
+        return os.path.abspath(str(get_paths().market_data_dir or os.path.join(_app_repo_root(), "market_data")))
+    except Exception:
+        return os.path.abspath(os.path.join(_app_repo_root(), "market_data"))
+
+
+def _canonical_precomputed_out_root() -> str:
+    try:
+        return os.path.abspath(
+            str(
+                get_paths().precomputed_indicators_dir
+                or os.path.join(_canonical_market_data_dir(), "precomputed_indicators")
+            )
+        )
+    except Exception:
+        return os.path.abspath(os.path.join(_canonical_market_data_dir(), "precomputed_indicators"))
+
+
+def _source_diag_once(level: str, key: str, message: str) -> None:
+    once_key = str(key or "").strip()
+    if not once_key or once_key in _SOURCE_DIAG_ONCE:
+        return
+    _SOURCE_DIAG_ONCE.add(once_key)
+    getattr(log, str(level).lower(), log.info)(message)
+
+
+def _record_precompute_source_event(
+    *,
+    event: str,
+    source: str,
+    path: str,
+    symbol: str,
+    tf: str,
+    file_glob: str = "",
+) -> None:
+    extra = {
+        "build_id": BUILD_ID,
+        "symbol": str(symbol or "").strip(),
+        "tf": str(tf or "").strip(),
+    }
+    if file_glob:
+        extra["file_glob"] = str(file_glob)
+    record_path_source_event_once(
+        component="precompute_indicators",
+        event=event,
+        source=source,
+        path=path,
+        extra=extra,
+    )
+
+
+def _candidate_layout_search_roots_with_sources(src_dir: str, *, include_parent: bool) -> List[Tuple[str, str]]:
+    return [
+        (root_path, source)
+        for source, root_path in iter_source_root_candidates(
+            str(src_dir),
+            _canonical_market_data_dir(),
+            _app_repo_root(),
+            include_explicit_parent=include_parent,
+            include_cwd=True,
+        )
+    ]
+
+
+def _iter_source_files_with_provenance(
+    *,
+    src_dir: str,
+    file_glob: str,
+    symbol: str,
+    tf: str,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> Tuple[List[str], str, str]:
+    explicit_root = os.path.abspath(str(src_dir or "").strip())
+    direct_matches = _iter_source_files(explicit_root, file_glob)
+    if direct_matches:
+        _record_precompute_source_event(
+            event="precompute_source_resolved",
+            source="explicit_src_dir",
+            path=explicit_root,
+            symbol=symbol,
+            tf=tf,
+            file_glob=file_glob,
+        )
+        return (direct_matches, explicit_root, "explicit_src_dir")
+
+    if since_ms is None or until_ms is None:
+        return ([], explicit_root, "explicit_src_dir")
+    try:
+        y0 = int(datetime.fromtimestamp(int(since_ms) / 1000.0, tz=timezone.utc).year)
+        y1 = int(datetime.fromtimestamp(int(until_ms) / 1000.0, tz=timezone.utc).year)
+    except Exception:
+        return ([], explicit_root, "explicit_src_dir")
+    if y0 > y1:
+        y0, y1 = y1, y0
+
+    symbol_dir_prefix = str(symbol or "").replace("/", "").replace(":", "").replace("-", "").strip().upper()
+    tf_s = str(tf or "").strip()
+    if not symbol_dir_prefix or not tf_s:
+        return ([], explicit_root, "explicit_src_dir")
+
+    for root, source in _candidate_layout_search_roots_with_sources(src_dir, include_parent=False):
+        matches: List[str] = []
+        for year in range(int(y0), int(y1) + 1):
+            year_dir = os.path.join(root, f"{symbol_dir_prefix}_{tf_s}_{int(year)}")
+            if not os.path.isdir(year_dir):
+                continue
+            matches.extend(sorted([p for p in glob.glob(os.path.join(year_dir, "*.csv")) if os.path.isfile(p)]))
+        if matches:
+            _record_precompute_source_event(
+                event="precompute_source_resolved",
+                source=source,
+                path=root,
+                symbol=symbol_dir_prefix,
+                tf=tf_s,
+                file_glob=file_glob,
+            )
+            if is_legacy_source(source):
+                _record_precompute_source_event(
+                    event="precompute_source_legacy_used",
+                    source=source,
+                    path=root,
+                    symbol=symbol_dir_prefix,
+                    tf=tf_s,
+                    file_glob=file_glob,
+                )
+                _source_diag_once(
+                    "warning",
+                    f"layout_source:{source}:{root}:{symbol_dir_prefix}:{tf_s}",
+                    f"SOURCE PROVENANCE: source={source} root={root} symbol={symbol_dir_prefix} tf={tf_s}",
+                )
+            return (sorted(matches), root, source)
+    return ([], explicit_root, "explicit_src_dir")
 
 def _setup_logging(level: str) -> None:
     lvl = getattr(logging, str(level).upper(), logging.INFO)
@@ -445,7 +596,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Precompute indicators from OHLCV CSVs.")
     p.add_argument("--src-dir", type=str, default="binance_ethusdt_5m_all", help="Source directory containing OHLCV CSV files.")
     p.add_argument("--glob", type=str, default="ETHUSDT-5m-20*.csv", help="Glob pattern of OHLCV CSV files.")
-    p.add_argument("--out-root", type=str, default="exports/precomputed_indicators", help="Root output directory.")
+    p.add_argument("--out-root", type=str, default=_canonical_precomputed_out_root(), help="Root output directory.")
     p.add_argument("--tf", type=str, required=True, help="Timeframe label used in filenames (e.g., 5m).")
     p.add_argument("--symbol", type=str, required=True, help="Symbol label used in filenames (e.g., ETHUSDT).")
 
@@ -492,18 +643,17 @@ def main() -> int:
         raise SystemExit("--since must be <= --until")
 
     # Determine file list first (we keep per-file outputs, matching your example naming)
-    src_files = _iter_source_files(str(args.src_dir), str(args.glob))
-    if not src_files:
-        src_files = _iter_source_files_layout_fallback(
-            src_dir=str(args.src_dir),
-            symbol=str(args.symbol),
-            tf=str(args.tf),
-            since_ms=since_ms,
-            until_ms=until_ms,
-        )
+    src_files, selected_src_root, selected_source = _iter_source_files_with_provenance(
+        src_dir=str(args.src_dir),
+        file_glob=str(args.glob),
+        symbol=str(args.symbol),
+        tf=str(args.tf),
+        since_ms=since_ms,
+        until_ms=until_ms,
+    )
     src_files = _augment_source_files_with_history(
         src_files=src_files,
-        src_dir=str(args.src_dir),
+        src_dir=str(selected_src_root or args.src_dir),
         symbol=str(args.symbol),
         tf=str(args.tf),
         since_ms=since_ms,
@@ -511,11 +661,20 @@ def main() -> int:
     if not src_files:
         raise SystemExit(f"No source files matched: dir={args.src_dir} glob={args.glob}")
 
-    out_root = os.path.abspath(str(args.out_root))
+    out_root = os.path.abspath(str(args.out_root or _canonical_precomputed_out_root()))
     tf = str(args.tf).strip()
     sym = str(args.symbol).strip()
 
-    log.info("RUN: src_dir=%s glob=%s out_root=%s tf=%s symbol=%s", args.src_dir, args.glob, out_root, tf, sym)
+    log.info(
+        "RUN: src_dir=%s glob=%s out_root=%s tf=%s symbol=%s source=%s selected_src_root=%s",
+        args.src_dir,
+        args.glob,
+        out_root,
+        tf,
+        sym,
+        selected_source,
+        selected_src_root,
+    )
     log.info("RUN: since_ms=%s (%s) until_ms=%s (%s)",
              str(since_ms) if since_ms is not None else "",
              _iso_utc(int(since_ms)) if since_ms is not None else "",

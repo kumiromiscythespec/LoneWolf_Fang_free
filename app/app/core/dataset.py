@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_dataset_shared_root_fallback_v1
 # BUILD_ID: 2026-03-20_settings_bridge_effective_defaults_v1
 # BUILD_ID: 2026-03-20_market_data_stage2_strict_cross_root_guard_v1
 # BUILD_ID: 2026-03-20_market_data_stage2_legacy_fallback_diag_v2
@@ -16,9 +17,10 @@ from typing import Any, Iterable
 
 from app.core.instrument_registry import list_instruments
 from app.core.paths import get_paths
+from app.core.source_provenance import record_path_source_event_once
 
 
-BUILD_ID = "2026-03-20_settings_bridge_effective_defaults_v1"
+BUILD_ID = "2026-04-18_free_dataset_shared_root_fallback_v1"
 
 _DIR_RE = re.compile(r"^([A-Za-z0-9]+)_(5m|1h)_(\d{4})$", flags=re.IGNORECASE)
 _FILE_RE = re.compile(r"^([A-Za-z0-9]+)-(5m|1h)-(\d{4})-(\d{2})\.csv$", flags=re.IGNORECASE)
@@ -685,6 +687,134 @@ def _resolve_effective_default_dataset_hints(
     }
 
 
+def _market_data_root_candidates(root_default: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(source: str, root: str) -> None:
+        root_txt = str(root or "").strip()
+        if not root_txt:
+            return
+        root_abs = _resolve_dataset_root(root_txt)
+        root_key = os.path.normcase(root_abs)
+        if root_key in seen:
+            return
+        seen.add(root_key)
+        out.append((str(source or "").strip() or "dataset_root", root_abs))
+
+    _add("canonical_market_data", root_default)
+    try:
+        for source, root in tuple(getattr(get_paths(), "market_data_candidates", ()) or ()):
+            source_text = "canonical_market_data" if str(source or "").strip() == "canonical_shared_root" else str(source or "").strip()
+            _add(source_text, str(root or ""))
+    except Exception:
+        pass
+    return out
+
+
+def _candidate_default_dir_for_root(default_dir_abs: str, candidate_root: str) -> str:
+    dir_txt = str(default_dir_abs or "").strip().rstrip("/\\")
+    candidate_root_abs = _resolve_dataset_root(candidate_root)
+    if (not dir_txt) or (not candidate_root_abs):
+        return ""
+    if _path_is_under_root(candidate_root_abs, dir_txt):
+        return os.path.abspath(dir_txt)
+    base_name = os.path.basename(dir_txt)
+    if not base_name:
+        return ""
+    return os.path.abspath(os.path.join(candidate_root_abs, base_name))
+
+
+def _search_candidate_tf_paths(
+    *,
+    candidate_root: str,
+    prefix: str,
+    tf: str,
+    years: list[int],
+    month: int | None,
+    default_dir_abs: str,
+    default_glob: str,
+    searched_dirs: list[str],
+) -> tuple[list[str], list[int], list[int], str]:
+    candidate_root_abs = _resolve_dataset_root(candidate_root)
+    if not candidate_root_abs:
+        return ([], [], list(years or []), "")
+
+    selected_dir = ""
+    found_years: list[int] = []
+    missing_years: list[int] = []
+    paths: list[str] = []
+    for year_it in list(years or []):
+        dir_year = os.path.abspath(os.path.join(candidate_root_abs, f"{symbol_to_prefix(prefix)}_{str(tf).lower()}_{int(year_it)}"))
+        if dir_year not in searched_dirs:
+            searched_dirs.append(dir_year)
+        found = _collect_tf_paths(
+            dir_path=dir_year,
+            prefix=prefix,
+            tf=tf,
+            year=int(year_it),
+            month=month,
+        )
+        if found:
+            paths.extend(found)
+            found_years.append(int(year_it))
+            if not selected_dir:
+                selected_dir = dir_year if len(list(years or [])) == 1 else candidate_root_abs
+        else:
+            missing_years.append(int(year_it))
+
+    if paths or len(list(years or [])) != 1:
+        return (paths, found_years, missing_years, selected_dir)
+
+    fallback_dir = _candidate_default_dir_for_root(default_dir_abs, candidate_root_abs)
+    if fallback_dir and fallback_dir not in searched_dirs:
+        searched_dirs.append(fallback_dir)
+    year_single = int(list(years or [0])[0] or 0)
+    fallback_paths = _collect_tf_paths(
+        dir_path=fallback_dir,
+        prefix=prefix,
+        tf=tf,
+        year=year_single,
+        month=month,
+    )
+    if (not fallback_paths) and str(default_glob or "").strip():
+        fallback_paths = _collect_glob_paths(dir_path=fallback_dir, pattern=default_glob)
+    if fallback_paths:
+        return (list(fallback_paths), [year_single], [], fallback_dir)
+    return ([], [], list(years or []), fallback_dir)
+
+
+def _record_dataset_root_event(
+    *,
+    context: str,
+    source: str,
+    tf: str,
+    path: str,
+    prefix: str,
+    years_requested: Iterable[int],
+) -> None:
+    path_text = str(path or "").strip()
+    source_text = str(source or "").strip()
+    if (not path_text) or (not source_text):
+        return
+    try:
+        record_path_source_event_once(
+            component="dataset",
+            event="dataset_root_resolved",
+            source=source_text,
+            path=os.path.abspath(path_text),
+            extra={
+                "build_id": BUILD_ID,
+                "context": str(context or "DATASET").upper(),
+                "tf": str(tf or "").strip().lower(),
+                "prefix": symbol_to_prefix(prefix),
+                "years_requested": [int(y) for y in list(years_requested or [])],
+            },
+        )
+    except Exception:
+        return
+
+
 def _settings_root_is_generic_for_defaults(settings_root: str, *, root_default: str, default_root: str) -> bool:
     settings_root_abs = _resolve_dataset_root(settings_root) if str(settings_root or "").strip() else ""
     if not settings_root_abs:
@@ -696,6 +826,8 @@ def _settings_root_is_generic_for_defaults(settings_root: str, *, root_default: 
         _resolve_dataset_root(getattr(paths, "repo_root", "")),
         _resolve_dataset_root(getattr(paths, "market_data_dir", "")),
     }
+    for _source, candidate_root in tuple(getattr(paths, "market_data_candidates", ()) or ()):
+        generic_roots.add(_resolve_dataset_root(str(candidate_root or "")))
     return settings_root_abs in {str(x or "").strip() for x in generic_roots if str(x or "").strip()}
 
 
@@ -1021,6 +1153,8 @@ def resolve_dataset(
     )
     legacy_fallback_5m_used = False
     legacy_fallback_1h_used = False
+    dir_5m_source = str(source or "canonical_market_data")
+    dir_1h_source = str(source or "canonical_market_data")
 
     if (
         source == "default"
@@ -1052,6 +1186,7 @@ def resolve_dataset(
                 found_years_5m = [y]
                 missing_years_5m = []
                 legacy_fallback_5m_used = True
+                dir_5m_source = "default_fallback"
 
     if (
         source == "default"
@@ -1083,6 +1218,52 @@ def resolve_dataset(
                 found_years_1h = [y]
                 missing_years_1h = []
                 legacy_fallback_1h_used = True
+                dir_1h_source = "default_fallback"
+
+    if source == "default":
+        for candidate_source, candidate_root in _market_data_root_candidates(resolved_root):
+            if os.path.normcase(_resolve_dataset_root(candidate_root)) == os.path.normcase(resolved_root):
+                continue
+            if (not paths_5m) or missing_years_5m:
+                candidate_paths_5m, candidate_found_5m, candidate_missing_5m, candidate_dir_5m = _search_candidate_tf_paths(
+                    candidate_root=candidate_root,
+                    prefix=resolved_prefix,
+                    tf=tf_5m,
+                    years=resolved_years,
+                    month=resolved_month,
+                    default_dir_abs=default_dir_5m_abs,
+                    default_glob=default_glob_5m,
+                    searched_dirs=searched_5m,
+                )
+                if candidate_paths_5m:
+                    dir_5m = str(candidate_dir_5m or candidate_root)
+                    paths_5m = list(candidate_paths_5m)
+                    found_years_5m = list(candidate_found_5m)
+                    missing_years_5m = list(candidate_missing_5m)
+                    legacy_fallback_5m_used = str(candidate_source) != "canonical_market_data"
+                    legacy_fallback_5m_reason = "cross_root_legacy"
+                    dir_5m_source = str(candidate_source)
+            if (not paths_1h) or missing_years_1h:
+                candidate_paths_1h, candidate_found_1h, candidate_missing_1h, candidate_dir_1h = _search_candidate_tf_paths(
+                    candidate_root=candidate_root,
+                    prefix=resolved_prefix,
+                    tf=tf_1h,
+                    years=resolved_years,
+                    month=resolved_month,
+                    default_dir_abs=default_dir_1h_abs,
+                    default_glob=default_glob_1h,
+                    searched_dirs=searched_1h,
+                )
+                if candidate_paths_1h:
+                    dir_1h = str(candidate_dir_1h or candidate_root)
+                    paths_1h = list(candidate_paths_1h)
+                    found_years_1h = list(candidate_found_1h)
+                    missing_years_1h = list(candidate_missing_1h)
+                    legacy_fallback_1h_used = str(candidate_source) != "canonical_market_data"
+                    legacy_fallback_1h_reason = "cross_root_legacy"
+                    dir_1h_source = str(candidate_source)
+            if paths_5m and paths_1h and (not missing_years_5m) and (not missing_years_1h):
+                break
 
     if len(resolved_years) == 1:
         glob_5m = f"{resolved_prefix}-{tf_5m}-{y:04d}-*.csv"
@@ -1210,6 +1391,8 @@ def resolve_dataset(
         "month": resolved_month,
         "dir_5m": dir_5m,
         "dir_1h": dir_1h,
+        "dir_5m_source": str(dir_5m_source),
+        "dir_1h_source": str(dir_1h_source),
         "paths_5m": list(paths_5m),
         "paths_1h": list(paths_1h),
         "paths_5m_count": int(len(paths_5m)),
@@ -1236,6 +1419,10 @@ def resolve_dataset(
         "explicit_csv_override_active": bool(explicit_csv_override_active),
         "explicit_prefixes_5m": list(explicit_prefixes_5m),
         "explicit_prefixes_1h": list(explicit_prefixes_1h),
+        "market_data_candidates": [
+            {"source": str(source_name), "path": str(root_path)}
+            for source_name, root_path in _market_data_root_candidates(resolved_root)
+        ],
         "expected_dirs": [os.path.join(resolved_root, f"{resolved_prefix}_{tf_5m}_{yy:04d}") for yy in resolved_years]
         + [os.path.join(resolved_root, f"{resolved_prefix}_{tf_1h}_{yy:04d}") for yy in resolved_years],
         "expected_files": [
@@ -1246,6 +1433,23 @@ def resolve_dataset(
     }
     if settings_bridge:
         diagnostics["settings_bridge"] = settings_bridge
+
+    _record_dataset_root_event(
+        context=context,
+        source=dir_5m_source,
+        tf=tf_5m,
+        path=dir_5m,
+        prefix=resolved_prefix,
+        years_requested=resolved_years,
+    )
+    _record_dataset_root_event(
+        context=context,
+        source=dir_1h_source,
+        tf=tf_1h,
+        path=dir_1h,
+        prefix=resolved_prefix,
+        years_requested=resolved_years,
+    )
 
     missing_tf = ""
     searched_dir = ""

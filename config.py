@@ -22,13 +22,23 @@ from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-08_config_standard_version_beta3_v1"
+BUILD_ID = "2026-04-18_config_shared_market_data_root_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
 APP_VERSION = "1.2.0"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
 STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
+_CANONICAL_CONFIGS_DIR = str(
+    _RUNTIME_LAYOUT_PATHS.configs_dir or os.path.join(os.path.dirname(__file__), "configs")
+)
+_CANONICAL_MARKET_DATA_DIR = str(
+    _RUNTIME_LAYOUT_PATHS.market_data_dir or os.path.join(os.path.dirname(__file__), "market_data")
+)
+_CANONICAL_PRECOMPUTED_INDICATORS_DIR = str(
+    _RUNTIME_LAYOUT_PATHS.precomputed_indicators_dir
+    or os.path.join(_CANONICAL_MARKET_DATA_DIR, "precomputed_indicators")
+)
 
 
 def _repo_relative_path(path_value: str) -> str:
@@ -508,7 +518,7 @@ REPORT_RISK_FREE_RATE = 0.0
 # Precomputed indicators (optional)
 # =========================
 PRECOMPUTED_INDICATORS_ENABLED = True
-PRECOMPUTED_INDICATORS_OUT_ROOT = "market_data/precomputed_indicators"
+PRECOMPUTED_INDICATORS_OUT_ROOT = _repo_relative_path(_CANONICAL_PRECOMPUTED_INDICATORS_DIR)
 PRECOMPUTED_INDICATORS_STRICT = False
 # maker fee
 PAPER_FEE_RATE_MAKER = 0.0001  # 0.01%
@@ -956,3 +966,4 @@ _apply_symbol_preset(_ACTIVE_SYMBOL_PRESET)
 # this preset into paper/live operation, and define a stop condition for
 # degraded execution quality.
 
+# BUILD_ID: 2026-04-18_config_shared_market_data_root_v1

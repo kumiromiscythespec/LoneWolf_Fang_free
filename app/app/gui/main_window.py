@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_gui_preflight_failure_notice_v1
 # BUILD_ID: 2026-04-18_free_gui_settings_compact_two_column_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
 # BUILD_ID: 2026-04-08_free_update_dialog_tr_texts_v1
@@ -157,7 +158,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-18_free_gui_settings_compact_two_column_v1"
+BUILD_ID = "2026-04-18_free_gui_preflight_failure_notice_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -490,6 +491,81 @@ def _default_preset() -> str:
     return "SELL_SAFE"
 
 
+def _extract_runtime_preflight_token(text: str, key: str) -> str:
+    match = re.search(rf"(?:^|\s){re.escape(str(key or ''))}=(?P<value>\S+)", str(text or ""))
+    if not match:
+        return ""
+    return str(match.group("value") or "").strip()
+
+
+def _extract_runtime_preflight_segment(text: str, start_marker: str, end_marker: str | None = None) -> str:
+    source = str(text or "")
+    start = source.find(str(start_marker or ""))
+    if start < 0:
+        return ""
+    start += len(str(start_marker or ""))
+    if end_marker is None:
+        return str(source[start:] or "").strip()
+    end = source.find(str(end_marker or ""), start)
+    if end < 0:
+        return ""
+    return str(source[start:end] or "").strip()
+
+
+def _summarize_runtime_preflight_path(path: str, *, limit: int = 160) -> str:
+    text = " ".join(str(path or "").split())
+    if len(text) <= int(limit):
+        return text
+    return text[: max(0, int(limit) - 3)].rstrip() + "..."
+
+
+def _parse_runtime_preflight_failure(text: str) -> dict[str, object] | None:
+    compact = " ".join(str(text or "").replace("[stderr] ", "").split())
+    if not compact:
+        return None
+    required_markers = (
+        "symbol=",
+        "tf_entry=",
+        "tf_filter=",
+        "from=",
+        "to=",
+        "missing_items=",
+        "searched_paths=",
+        "fallback_attempted=",
+    )
+    if not all(marker in compact for marker in required_markers):
+        return None
+    if "precomputed runtime data are missing" not in compact.lower():
+        return None
+
+    symbol = _extract_runtime_preflight_token(compact, "symbol")
+    tf_entry = _extract_runtime_preflight_token(compact, "tf_entry")
+    tf_filter = _extract_runtime_preflight_token(compact, "tf_filter")
+    from_ym = _extract_runtime_preflight_token(compact, "from")
+    to_ym = _extract_runtime_preflight_token(compact, "to")
+    missing_items = _extract_runtime_preflight_segment(compact, "missing_items=", " searched_paths=")
+    searched_paths_text = _extract_runtime_preflight_segment(compact, "searched_paths=", " fallback_attempted=")
+    fallback_attempted = _extract_runtime_preflight_segment(compact, "fallback_attempted=", None)
+    if not all((symbol, tf_entry, tf_filter, from_ym, to_ym, missing_items, fallback_attempted)):
+        return None
+
+    searched_paths = [
+        str(part or "").strip()
+        for part in str(searched_paths_text or "").split(" | ")
+        if str(part or "").strip() and str(part or "").strip() != "<none>"
+    ]
+    return {
+        "symbol": symbol,
+        "tf_entry": tf_entry,
+        "tf_filter": tf_filter,
+        "from_ym": from_ym,
+        "to_ym": to_ym,
+        "missing_items": missing_items,
+        "searched_paths": searched_paths,
+        "fallback_attempted": fallback_attempted,
+    }
+
+
 class MainWindow(QWidget):
     sig_log = Signal(str)
     sig_update_check_finished = Signal()
@@ -527,6 +603,8 @@ class MainWindow(QWidget):
         self._auto_range_enabled: bool = True
         self._proc_role: str = "runner"
         self._stderr_ring = deque(maxlen=2000)
+        self._runtime_preflight_notice_shown: bool = False
+        self._runtime_preflight_notice_digest: str = ""
         self._replay_log_fp = None
         self._replay_log_path: str = ""
         self._live_log_fp = None
@@ -2033,6 +2111,7 @@ class MainWindow(QWidget):
             self.sig_log.emit(text)
             return
 
+        preflight_notice = _parse_runtime_preflight_failure(text)
         self._maybe_show_ip_whitelist_hint(text)
         self._capture_replay_artifact_paths(text)
         for ln in text.splitlines():
@@ -2051,6 +2130,85 @@ class MainWindow(QWidget):
         self.log.moveCursor(QTextCursor.End)
         self.log.insertPlainText(text)
         self.log.moveCursor(QTextCursor.End)
+        if preflight_notice is not None:
+            self._maybe_show_runtime_preflight_failure_notice(preflight_notice)
+
+    def _reset_runtime_preflight_failure_notice_state(self) -> None:
+        self._runtime_preflight_notice_shown = False
+        self._runtime_preflight_notice_digest = ""
+
+    def _runtime_preflight_failure_notice_strings(self) -> dict[str, str]:
+        if str(self._ui_language or "en").strip().lower() == "ja":
+            return {
+                "title": "\u5fc5\u8981\u306a\u5b9f\u884c\u30c7\u30fc\u30bf\u3092\u6e96\u5099\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f",
+                "intro": "\u81ea\u52d5\u6e96\u5099\u3092\u8a66\u307f\u307e\u3057\u305f\u304c\u3001\u5fc5\u8981\u306a\u5b9f\u884c\u30c7\u30fc\u30bf\u306e\u6e96\u5099\u304c\u5b8c\u4e86\u3057\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+                "details": "\u8a73\u7d30\u306f\u30ed\u30b0\u6b04\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+                "more_paths": "\u4ed6 {count} \u4ef6\u306e\u691c\u7d22\u30d1\u30b9\u306f\u30ed\u30b0\u6b04\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+            }
+        return {
+            "title": "Required runtime data could not be prepared",
+            "intro": "Automatic preparation was attempted, but the required runtime data is still unavailable.",
+            "details": "Check the log pane for details.",
+            "more_paths": "Check the log pane for the remaining {count} searched path(s).",
+        }
+
+    def _runtime_preflight_failure_notice_digest(self, info: dict[str, object]) -> str:
+        parts = (
+            str(info.get("symbol", "") or "").strip(),
+            str(info.get("tf_entry", "") or "").strip(),
+            str(info.get("tf_filter", "") or "").strip(),
+            str(info.get("from_ym", "") or "").strip(),
+            str(info.get("to_ym", "") or "").strip(),
+            str(info.get("missing_items", "") or "").strip(),
+            str(info.get("fallback_attempted", "") or "").strip(),
+        )
+        return "|".join(parts)
+
+    def _maybe_show_runtime_preflight_failure_notice(self, info: dict[str, object]) -> None:
+        if str(self._proc_role or "") not in {"runner", "replay", "backtest"}:
+            return
+        digest = self._runtime_preflight_failure_notice_digest(info)
+        if self._runtime_preflight_notice_shown:
+            return
+        if digest and digest == str(self._runtime_preflight_notice_digest or ""):
+            return
+        self._runtime_preflight_notice_shown = True
+        self._runtime_preflight_notice_digest = digest
+        self._show_runtime_preflight_failure_notice(info)
+
+    def _show_runtime_preflight_failure_notice(self, info: dict[str, object]) -> None:
+        texts = self._runtime_preflight_failure_notice_strings()
+        lines = [
+            str(texts.get("intro", "") or "").strip(),
+            "",
+            f"symbol={str(info.get('symbol', '') or '').strip()}",
+            f"tf_entry={str(info.get('tf_entry', '') or '').strip()}",
+            f"tf_filter={str(info.get('tf_filter', '') or '').strip()}",
+            f"from={str(info.get('from_ym', '') or '').strip()}",
+            f"to={str(info.get('to_ym', '') or '').strip()}",
+            f"missing_items={str(info.get('missing_items', '') or '').strip()}",
+        ]
+        fallback_attempted = str(info.get("fallback_attempted", "") or "").strip()
+        if fallback_attempted:
+            lines.append(f"fallback_attempted={fallback_attempted}")
+        searched_paths = [
+            _summarize_runtime_preflight_path(path)
+            for path in list(info.get("searched_paths", []) or [])[:3]
+            if str(path or "").strip()
+        ]
+        if searched_paths:
+            lines.append("searched_paths=")
+            for path in searched_paths:
+                lines.append(f"- {path}")
+            remaining = max(0, len(list(info.get("searched_paths", []) or [])) - len(searched_paths))
+            if remaining > 0:
+                lines.append(str(texts.get("more_paths", "") or "").format(count=remaining))
+        lines.extend(("", str(texts.get("details", "") or "").strip()))
+        QMessageBox.warning(
+            self,
+            str(texts.get("title", "") or "Runtime preflight failure"),
+            "\n".join([line for line in lines if line is not None]),
+        )
 
     def _selected_exchange_id(self) -> str:
         try:
@@ -3955,6 +4113,7 @@ class MainWindow(QWidget):
                 f"[UI] pipeline started exchange_id={exchange_id} symbol={symbol} "
                 f"from={from_ym} to={to_ym} force={env['LWF_PIPELINE_FORCE']}\n"
             )
+            self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             self._proc_role = "pipeline"
             self._close_replay_log_file()
@@ -4076,6 +4235,7 @@ class MainWindow(QWidget):
         try:
             self._last_replay_report_path = ""
             self._last_replay_trade_log_path = ""
+            self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             self._settings.dataset_root = str(data_arg)
             self._settings.dataset_prefix = str(prefix)
@@ -4147,6 +4307,7 @@ class MainWindow(QWidget):
         try:
             self._last_replay_report_path = ""
             self._last_replay_trade_log_path = ""
+            self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
@@ -4217,6 +4378,7 @@ class MainWindow(QWidget):
 
         try:
             self._ensure_report_parent()
+            self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             self._settings.dataset_root = str(prepared["data_arg"])
             self._settings.dataset_prefix = str(prepared["prefix"])
@@ -4378,6 +4540,7 @@ class MainWindow(QWidget):
         try:
             self._ip_whitelist_alerted = False
             self._ensure_report_parent()
+            self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             if str(run_mode).upper() == "LIVE":
                 try:

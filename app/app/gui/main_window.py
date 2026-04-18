@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_gui_preflight_prefix_prefer_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_failure_notice_v1
 # BUILD_ID: 2026-04-18_free_gui_settings_compact_two_column_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
@@ -158,7 +159,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-18_free_gui_preflight_failure_notice_v1"
+BUILD_ID = "2026-04-18_free_gui_preflight_prefix_prefer_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -519,10 +520,10 @@ def _summarize_runtime_preflight_path(path: str, *, limit: int = 160) -> str:
     return text[: max(0, int(limit) - 3)].rstrip() + "..."
 
 
-def _parse_runtime_preflight_failure(text: str) -> dict[str, object] | None:
-    compact = " ".join(str(text or "").replace("[stderr] ", "").split())
-    if not compact:
-        return None
+_RUNTIME_PREFLIGHT_FAILURE_PREFIX = "RUNTIME_PREFLIGHT_FAILURE:"
+
+
+def _parse_runtime_preflight_failure_from_line(compact_line: str, *, require_legacy_phrase: bool) -> dict[str, object] | None:
     required_markers = (
         "symbol=",
         "tf_entry=",
@@ -533,19 +534,19 @@ def _parse_runtime_preflight_failure(text: str) -> dict[str, object] | None:
         "searched_paths=",
         "fallback_attempted=",
     )
-    if not all(marker in compact for marker in required_markers):
+    if not all(marker in compact_line for marker in required_markers):
         return None
-    if "precomputed runtime data are missing" not in compact.lower():
+    if require_legacy_phrase and "precomputed runtime data are missing" not in compact_line.lower():
         return None
 
-    symbol = _extract_runtime_preflight_token(compact, "symbol")
-    tf_entry = _extract_runtime_preflight_token(compact, "tf_entry")
-    tf_filter = _extract_runtime_preflight_token(compact, "tf_filter")
-    from_ym = _extract_runtime_preflight_token(compact, "from")
-    to_ym = _extract_runtime_preflight_token(compact, "to")
-    missing_items = _extract_runtime_preflight_segment(compact, "missing_items=", " searched_paths=")
-    searched_paths_text = _extract_runtime_preflight_segment(compact, "searched_paths=", " fallback_attempted=")
-    fallback_attempted = _extract_runtime_preflight_segment(compact, "fallback_attempted=", None)
+    symbol = _extract_runtime_preflight_token(compact_line, "symbol")
+    tf_entry = _extract_runtime_preflight_token(compact_line, "tf_entry")
+    tf_filter = _extract_runtime_preflight_token(compact_line, "tf_filter")
+    from_ym = _extract_runtime_preflight_token(compact_line, "from")
+    to_ym = _extract_runtime_preflight_token(compact_line, "to")
+    missing_items = _extract_runtime_preflight_segment(compact_line, "missing_items=", " searched_paths=")
+    searched_paths_text = _extract_runtime_preflight_segment(compact_line, "searched_paths=", " fallback_attempted=")
+    fallback_attempted = _extract_runtime_preflight_segment(compact_line, "fallback_attempted=", None)
     if not all((symbol, tf_entry, tf_filter, from_ym, to_ym, missing_items, fallback_attempted)):
         return None
 
@@ -564,6 +565,21 @@ def _parse_runtime_preflight_failure(text: str) -> dict[str, object] | None:
         "searched_paths": searched_paths,
         "fallback_attempted": fallback_attempted,
     }
+
+
+def _parse_runtime_preflight_failure(text: str) -> dict[str, object] | None:
+    for raw_line in str(text or "").splitlines():
+        compact_line = str(raw_line or "").strip()
+        if compact_line.startswith("[stderr] "):
+            compact_line = str(compact_line[len("[stderr] "):] or "").strip()
+        if not compact_line.startswith(_RUNTIME_PREFLIGHT_FAILURE_PREFIX):
+            continue
+        return _parse_runtime_preflight_failure_from_line(compact_line, require_legacy_phrase=False)
+
+    compact = " ".join(str(text or "").replace("[stderr] ", "").split())
+    if not compact:
+        return None
+    return _parse_runtime_preflight_failure_from_line(compact, require_legacy_phrase=True)
 
 
 class MainWindow(QWidget):

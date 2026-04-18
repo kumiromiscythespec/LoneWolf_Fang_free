@@ -1,5 +1,7 @@
+# BUILD_ID: 2026-04-18_free_runner_preflight_stable_prefix_v1
 # BUILD_ID: 2026-04-18_free_runner_replay_live_paper_autoprepare_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
+# BUILD_ID: 2026-04-18_free_pullback_ab_parent_canonical_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-28_standard_live_equity_currency_auto_quote_v1
 # BUILD_ID: 2026-03-28_standard_kill_floor_by_ccy_v1
@@ -179,7 +181,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-18_free_runner_replay_live_paper_autoprepare_v1"
+BUILD_ID = "2026-04-18_free_runner_preflight_stable_prefix_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -3065,21 +3067,44 @@ def _kv_key_range_ema9_exit_cooldown(symbol: str) -> str:
 def _kv_key_pullback_ab(symbol: str) -> str:
     return f"pullback_ab:{symbol}"
 
+
+def _kv_key_pullback_ab_legacy(symbol: str) -> str:
+    return f"state.pullback_ab:{symbol}"
+
+
+def _normalize_pullback_ab_state(state: Any) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        return {"phase": "NONE", "since_ms": None, "last_reason": None}
+    out = {
+        "phase": str(state.get("phase") or "NONE"),
+        "since_ms": state.get("since_ms", None),
+        "last_reason": state.get("last_reason", None),
+    }
+    return out
+
 def _kv_get_pullback_ab(store: StateStore, symbol: str) -> Dict[str, Any]:
     key = _kv_key_pullback_ab(symbol)
-    v = store.get_kv(key, "")
-    if not v:
-        return {}
-    try:
-        obj = json.loads(v)
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+    legacy_key = _kv_key_pullback_ab_legacy(symbol)
+    for candidate_key in (key, legacy_key):
+        v = store.get_kv(candidate_key, "")
+        if not v:
+            continue
+        try:
+            obj = json.loads(v)
+        except Exception:
+            continue
+        state = _normalize_pullback_ab_state(obj)
+        if candidate_key != key:
+            _kv_put_pullback_ab(store, symbol, state)
+        return state
+    return _normalize_pullback_ab_state(None)
 
 def _kv_put_pullback_ab(store: StateStore, symbol: str, state: Dict[str, Any]) -> None:
     key = _kv_key_pullback_ab(symbol)
+    legacy_key = _kv_key_pullback_ab_legacy(symbol)
     try:
-        store.set_kv(key, json.dumps(state or {}, ensure_ascii=False))
+        store.set_kv(key, json.dumps(_normalize_pullback_ab_state(state), ensure_ascii=False))
+        store.del_kv(legacy_key)
     except Exception:
         # Never break trading loop due to KV write errors.
         pass
@@ -10370,6 +10395,64 @@ def _unique_abs_paths(paths: list[Any]) -> list[str]:
     return out
 
 
+def _runner_preflight_failure_prefix_line(
+    *,
+    context: str,
+    runtime_symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    from_ym: str,
+    to_ym: str,
+    missing_items: list[str],
+    searched_paths: list[str],
+    fallback_attempted: str,
+) -> str:
+    missing_text = ",".join([str(item) for item in list(missing_items or []) if str(item or "").strip()]) or "none"
+    searched_text = " | ".join(_unique_abs_paths(searched_paths)) or "<none>"
+    fallback_text = " ".join(str(fallback_attempted or "none").split()) or "none"
+    return (
+        "RUNTIME_PREFLIGHT_FAILURE: "
+        f"context={str(context or '').strip()} "
+        f"symbol={str(runtime_symbol or '').strip()} "
+        f"tf_entry={str(entry_tf or '').strip()} "
+        f"tf_filter={str(filter_tf or '').strip()} "
+        f"from={str(from_ym)} "
+        f"to={str(to_ym)} "
+        f"missing_items={missing_text} "
+        f"searched_paths={searched_text} "
+        f"fallback_attempted={fallback_text}"
+    )
+
+
+def _emit_runner_preflight_failure_prefix(
+    *,
+    context: str,
+    runtime_symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    from_ym: str,
+    to_ym: str,
+    missing_items: list[str],
+    searched_paths: list[str],
+    fallback_attempted: str,
+) -> None:
+    print(
+        _runner_preflight_failure_prefix_line(
+            context=context,
+            runtime_symbol=runtime_symbol,
+            entry_tf=entry_tf,
+            filter_tf=filter_tf,
+            from_ym=from_ym,
+            to_ym=to_ym,
+            missing_items=missing_items,
+            searched_paths=searched_paths,
+            fallback_attempted=fallback_attempted,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _runner_preflight_failure_message(
     *,
     context: str,
@@ -10648,6 +10731,17 @@ def _runner_runtime_data_preflight(
         },
     )
     if request_key in _AUTO_PREPARE_REQUESTS:
+        _emit_runner_preflight_failure_prefix(
+            context=str(context_text),
+            runtime_symbol=str(symbol_text),
+            entry_tf=str(entry_tf),
+            filter_tf=str(filter_tf),
+            from_ym=str(from_ym),
+            to_ym=str(to_ym),
+            missing_items=missing_items,
+            searched_paths=searched_paths,
+            fallback_attempted="run_pipeline_already_attempted",
+        )
         raise RuntimeError(
             _runner_preflight_failure_message(
                 context=str(context_text),
@@ -10705,6 +10799,17 @@ def _runner_runtime_data_preflight(
             fallback_sources=["chart_download", "precompute_generation"],
         )
     except Exception as exc:
+        _emit_runner_preflight_failure_prefix(
+            context=str(context_text),
+            runtime_symbol=str(symbol_text),
+            entry_tf=str(entry_tf),
+            filter_tf=str(filter_tf),
+            from_ym=str(from_ym),
+            to_ym=str(to_ym),
+            missing_items=missing_items,
+            searched_paths=searched_paths,
+            fallback_attempted=f"run_pipeline error={exc}",
+        )
         raise RuntimeError(
             _runner_preflight_failure_message(
                 context=str(context_text),
@@ -10724,6 +10829,17 @@ def _runner_runtime_data_preflight(
 
     missing_after, searched_after, dataset_diag_after, dataset_meta_after = _collect_missing_state()
     if missing_after:
+        _emit_runner_preflight_failure_prefix(
+            context=str(context_text),
+            runtime_symbol=str(symbol_text),
+            entry_tf=str(entry_tf),
+            filter_tf=str(filter_tf),
+            from_ym=str(from_ym),
+            to_ym=str(to_ym),
+            missing_items=missing_after,
+            searched_paths=searched_after,
+            fallback_attempted="run_pipeline",
+        )
         raise RuntimeError(
             _runner_preflight_failure_message(
                 context=str(context_text),

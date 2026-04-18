@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-19_free_gui_close_confirm_compact_layout_v1
 # BUILD_ID: 2026-04-18_free_settings_scroll_nonlive_parity_v1
 # BUILD_ID: 2026-04-18_free_nonlive_activation_strip_v1
 # BUILD_ID: 2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1
@@ -160,7 +161,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-04-18_free_settings_scroll_nonlive_parity_v1"
+BUILD_ID = "2026-04-19_free_gui_close_confirm_compact_layout_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -634,6 +635,7 @@ class MainWindow(QWidget):
         self._manual_stop_role: str = ""
         self._manual_stop_requested_at: float = 0.0
         self._stop_request_in_flight: bool = False
+        self._close_after_stop_requested: bool = False
         self._credential_inputs: dict[str, dict[str, QLineEdit]] = {}
         self._credential_ui_refs: dict[str, dict[str, object]] = {}
         self._credential_page_index: dict[str, int] = {}
@@ -1120,7 +1122,7 @@ class MainWindow(QWidget):
         self.bottom_splitter.setChildrenCollapsible(False)
         self.bottom_splitter.setHandleWidth(6)
         self.bottom_splitter.setMinimumHeight(MIN_BOTTOM_PANEL_VISIBLE_HEIGHT)
-        root.addWidget(self.bottom_splitter, stretch=1)
+        root.addWidget(self.bottom_splitter, stretch=2)
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -1219,11 +1221,113 @@ class MainWindow(QWidget):
         self._schedule_brand_logo_refresh()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self._can_close_immediately():
+            self._finalize_close_event(event)
+            return
+        if self._stop_request_in_flight or self._close_after_stop_requested:
+            self._show_close_stop_pending_message()
+            event.ignore()
+            return
+        if self._has_active_runtime_handle():
+            if self._confirm_close_with_active_task():
+                self._request_graceful_stop_for_close()
+            event.ignore()
+            return
+        self._finalize_close_event(event)
+
+    def _finalize_close_event(self, event) -> None:
+        event.accept()
         try:
             self._persist_chart_ui_state()
         except Exception:
             pass
         super().closeEvent(event)
+
+    def _has_active_runtime_handle(self) -> bool:
+        proc = self._proc
+        if proc is None:
+            return False
+        try:
+            return proc.poll() is None
+        except Exception:
+            return False
+
+    def _can_close_immediately(self) -> bool:
+        return (not self._stop_request_in_flight) and (not self._has_active_runtime_handle())
+
+    def _close_if_pending_when_safe(self) -> None:
+        if not self._close_after_stop_requested:
+            return
+        if not self._can_close_immediately():
+            return
+        self._close_after_stop_requested = False
+        QTimer.singleShot(0, self.close)
+
+    def _close_task_label(self) -> str:
+        current_role = str(self._proc_role or "").strip().lower()
+        if current_role == "pipeline":
+            return "Pipeline"
+        if current_role == "replay":
+            return "Replay"
+        if current_role == "backtest":
+            return "Backtest"
+        run_mode = str(self._selected_run_mode() or "").strip().upper()
+        if run_mode == "PAPER":
+            return "Paper"
+        if run_mode == "REPLAY":
+            return "Replay"
+        if run_mode == "BACKTEST":
+            return "Backtest"
+        return "Process"
+
+    def _confirm_close_with_active_task(self) -> bool:
+        task_label = self._close_task_label()
+        if self._ui_language == "ja":
+            title = "終了の確認"
+            text = (
+                f"{task_label} がまだ実行中です。\n"
+                "ここで終了すると実行中の処理が停止します。\n"
+                "停止して終了しますか？"
+            )
+            stop_and_close_text = "停止して終了"
+        else:
+            title = "Confirm Close"
+            text = (
+                f"{task_label} is still running.\n"
+                "Closing now will stop the running task.\n"
+                "Stop it and close the window?"
+            )
+            stop_and_close_text = "Stop and Close"
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(title)
+        dialog.setText(text)
+        cancel_button = dialog.addButton(self.tr("action.cancel"), QMessageBox.ButtonRole.RejectRole)
+        stop_button = dialog.addButton(stop_and_close_text, QMessageBox.ButtonRole.AcceptRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        return dialog.clickedButton() is stop_button
+
+    def _show_close_stop_pending_message(self) -> None:
+        if self._ui_language == "ja":
+            title = "停止処理中"
+            text = "停止処理を進めています。完了後にウィンドウを自動で閉じます。"
+        else:
+            title = "Stopping"
+            text = "A stop is already in progress. The window will close automatically after it finishes."
+        QMessageBox.information(self, title, text)
+
+    def _request_graceful_stop_for_close(self) -> None:
+        if self._stop_request_in_flight:
+            self._show_close_stop_pending_message()
+            return
+        if not self._has_active_runtime_handle():
+            self._close_after_stop_requested = False
+            QTimer.singleShot(0, self.close)
+            return
+        self._close_after_stop_requested = True
+        self.on_stop()
+        self._close_if_pending_when_safe()
 
     def _is_compact_width(self) -> bool:
         return int(self.width()) < COMPACT_WIDTH_THRESHOLD
@@ -1442,6 +1546,7 @@ class MainWindow(QWidget):
 
     def _on_collapsible_sections_changed(self, _checked: bool) -> None:
         self._sync_collapsible_section_settings()
+        QTimer.singleShot(0, self._update_settings_area_height_limit)
 
     def _sync_valuation_settings_from_inputs(self) -> None:
         if not isinstance(self._settings, AppSettings):
@@ -4578,6 +4683,7 @@ class MainWindow(QWidget):
         if self._proc is None:
             self._gui_perf_counters["proc_poll_idle_skips"] += 1
             self._set_proc_poll_activity(False)
+            self._close_if_pending_when_safe()
             return
         self._set_proc_poll_activity(True)
         code = self._proc.poll()
@@ -4620,6 +4726,7 @@ class MainWindow(QWidget):
         self.btn_run_replay.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pipeline.setEnabled(True)
+        self._close_if_pending_when_safe()
 
     def gui_perf_counters(self) -> dict[str, object]:
         counters = dict(self._gui_perf_counters)

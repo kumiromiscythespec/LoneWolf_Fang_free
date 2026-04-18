@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1
 # BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_prefix_prefer_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_failure_notice_v1
@@ -122,9 +123,10 @@ from app.core.paths import ensure_runtime_dirs, get_paths
 from app.core.support_snapshot import (
     SUPPORT_SNAPSHOT_SCREENSHOT_FILE,
     build_support_snapshot_meta,
-    collect_runtime_preflight_failures,
+    collect_runtime_preflight_failures_artifact,
     create_support_snapshot_dir,
     resolve_support_snapshot_open_dir,
+    serialize_runtime_preflight_failures_json,
     write_support_snapshot_log_tail,
     write_support_snapshot_meta,
     write_support_snapshot_runtime_preflight_failures,
@@ -162,7 +164,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-18_free_support_snapshot_preflight_failures_v1"
+BUILD_ID = "2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -3119,27 +3121,33 @@ class MainWindow(QWidget):
             return
         self._append(f"[support] open_folder failed path={folder}\n")
 
+    def _collect_runtime_preflight_failures_artifact(self, log_text: str) -> dict[str, object]:
+        return collect_runtime_preflight_failures_artifact(
+            text_sources=(
+                ("gui_log", str(log_text or "")),
+                ("stderr_ring", "\n".join(self._stderr_ring)),
+            ),
+            file_sources=(
+                ("replay_log", self._replay_log_path),
+                ("live_log", self._live_log_path),
+            ),
+        )
+
     def on_create_support_snapshot(self) -> None:
         try:
             snapshot_dir, snapshot_id, timestamp_local, timestamp_utc = create_support_snapshot_dir(self._paths)
             log_text = self.log.toPlainText()
             self._save_support_snapshot_screenshot(snapshot_dir)
             write_support_snapshot_log_tail(snapshot_dir, log_text, max_lines=200)
-            runtime_preflight_failures: list[dict[str, object]] = []
-            try:
-                runtime_preflight_failures = collect_runtime_preflight_failures(
-                    text_sources=(
-                        ("gui_log", log_text),
-                        ("stderr_ring", "\n".join(self._stderr_ring)),
-                    ),
-                    file_sources=(
-                        ("replay_log", self._replay_log_path),
-                        ("live_log", self._live_log_path),
-                    ),
+            runtime_preflight_artifact = self._collect_runtime_preflight_failures_artifact(log_text)
+            runtime_preflight_failures = list(runtime_preflight_artifact.get("records") or [])
+            runtime_preflight_collect_status = str(runtime_preflight_artifact.get("collect_status") or "ok").strip() or "ok"
+            runtime_preflight_collect_error = str(runtime_preflight_artifact.get("collect_error") or "").strip()
+            write_support_snapshot_runtime_preflight_failures(snapshot_dir, runtime_preflight_failures)
+            if runtime_preflight_collect_status != "ok":
+                self._append(
+                    f"[support] runtime_preflight_failures_error={runtime_preflight_collect_error or 'unknown error'}\n"
                 )
-                write_support_snapshot_runtime_preflight_failures(snapshot_dir, runtime_preflight_failures)
-            except Exception as exc:
-                self._append(f"[support] runtime_preflight_failures_error={exc}\n")
             meta = build_support_snapshot_meta(
                 snapshot_id=snapshot_id,
                 timestamp_local=timestamp_local,
@@ -3157,6 +3165,8 @@ class MainWindow(QWidget):
                 window_width=self.width(),
                 window_height=self.height(),
                 runtime_preflight_failures=runtime_preflight_failures,
+                runtime_preflight_failures_collect_status=runtime_preflight_collect_status,
+                runtime_preflight_failures_collect_error=runtime_preflight_collect_error,
             )
             write_support_snapshot_meta(snapshot_dir, meta)
             self._append(f"[support] snapshot_saved dir={snapshot_dir}\n")
@@ -3424,6 +3434,13 @@ class MainWindow(QWidget):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_zip = os.path.join(p.exports_dir, f"support_bundle_{ts}.zip")
         os.makedirs(p.exports_dir, exist_ok=True)
+        log_text = self.log.toPlainText()
+        runtime_preflight_artifact = self._collect_runtime_preflight_failures_artifact(log_text)
+        runtime_preflight_failures = list(runtime_preflight_artifact.get("records") or [])
+        runtime_preflight_collect_status = str(runtime_preflight_artifact.get("collect_status") or "ok").strip() or "ok"
+        runtime_preflight_collect_error = str(runtime_preflight_artifact.get("collect_error") or "").strip()
+        if runtime_preflight_collect_status != "ok":
+            self._append(f"[diag] runtime_preflight_failures_error={runtime_preflight_collect_error or 'unknown error'}\n")
 
         repo_exports = os.path.join(p.repo_root, "exports")
         last_run_export_dir = self._last_run_export_dir()
@@ -3472,8 +3489,12 @@ class MainWindow(QWidget):
                     except Exception:
                         arc = os.path.basename(fp)
                     zf.write(fp, arcname=arc)
-                zf.writestr("runtime/gui_log.txt", self.log.toPlainText())
-            self._append(f"[diag] support_bundle_created={out_zip} files={len(uniq)+1}\n")
+                zf.writestr("runtime/gui_log.txt", log_text)
+                zf.writestr(
+                    "runtime/runtime_preflight_failures.json",
+                    serialize_runtime_preflight_failures_json(runtime_preflight_failures),
+                )
+            self._append(f"[diag] support_bundle_created={out_zip} files={len(uniq)+2}\n")
         except Exception as e:
             self._append(f"[diag] support_bundle_error={e}\n")
 

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1
 # BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any, Iterable, Sequence
 from app.core.paths import AppPaths
 
 
-BUILD_ID = "2026-04-18_free_support_snapshot_preflight_failures_v1"
+BUILD_ID = "2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1"
 SUPPORT_SNAPSHOT_VERSION = 1
 SUPPORT_SNAPSHOT_TYPE = "support_snapshot"
 SUPPORT_SNAPSHOT_DIRNAME = "support_snapshots"
@@ -22,6 +23,9 @@ SUPPORT_SNAPSHOT_LOG_TAIL_FILE = "log_tail.txt"
 SUPPORT_SNAPSHOT_RUNTIME_PREFLIGHT_FAILURES_FILE = "runtime_preflight_failures.json"
 _KNOWN_APP_TIERS = ("free", "standard", "aggressive")
 _RUNTIME_PREFLIGHT_FAILURE_PREFIX = "RUNTIME_PREFLIGHT_FAILURE:"
+_RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK = "ok"
+_RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_ERROR = "error"
+_RUNTIME_PREFLIGHT_FAILURE_COLLECT_ERROR_MAX_LEN = 240
 
 
 def support_snapshot_root_dir(paths: AppPaths) -> str:
@@ -261,6 +265,77 @@ def collect_runtime_preflight_failures(
     return merge_runtime_preflight_failures(collected)
 
 
+def _normalize_runtime_preflight_failures_collect_status(status: str) -> str:
+    return (
+        _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_ERROR
+        if str(status or "").strip().lower() == _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_ERROR
+        else _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK
+    )
+
+
+def _truncate_runtime_preflight_failures_collect_error(
+    error: Any,
+    *,
+    max_len: int = _RUNTIME_PREFLIGHT_FAILURE_COLLECT_ERROR_MAX_LEN,
+) -> str:
+    text = str(error or "").strip()
+    if (not text) and (error is not None):
+        text = str(error.__class__.__name__ or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return f"{text[: max_len - 3].rstrip()}..."
+
+
+def build_runtime_preflight_failure_collect_meta(
+    *,
+    collect_status: str = _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK,
+    collect_error: str = "",
+) -> dict[str, str]:
+    normalized_status = _normalize_runtime_preflight_failures_collect_status(collect_status)
+    normalized_error = (
+        _truncate_runtime_preflight_failures_collect_error(collect_error)
+        if normalized_status == _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_ERROR
+        else ""
+    )
+    return {
+        "runtime_preflight_failures_collect_status": normalized_status,
+        "runtime_preflight_failures_collect_error": normalized_error,
+    }
+
+
+def collect_runtime_preflight_failures_artifact(
+    *,
+    text_sources: Sequence[tuple[str, str]] = (),
+    file_sources: Sequence[tuple[str, str]] = (),
+) -> dict[str, Any]:
+    try:
+        records = collect_runtime_preflight_failures(
+            text_sources=text_sources,
+            file_sources=file_sources,
+        )
+    except Exception as exc:
+        return {
+            "records": [],
+            "collect_status": _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_ERROR,
+            "collect_error": _truncate_runtime_preflight_failures_collect_error(exc),
+        }
+    return {
+        "records": records,
+        "collect_status": _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK,
+        "collect_error": "",
+    }
+
+
+def serialize_runtime_preflight_failures_json(records: Sequence[dict[str, Any]] | None) -> str:
+    payload = merge_runtime_preflight_failures(records or ())
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def build_runtime_preflight_failure_summary(records: Sequence[dict[str, Any]] | None) -> dict[str, Any]:
     failures = list(records or [])
     latest = failures[-1] if failures else {}
@@ -290,6 +365,8 @@ def build_support_snapshot_meta(
     window_width: int,
     window_height: int,
     runtime_preflight_failures: Sequence[dict[str, Any]] | None = None,
+    runtime_preflight_failures_collect_status: str = _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK,
+    runtime_preflight_failures_collect_error: str = "",
 ) -> dict[str, Any]:
     app_name, app_tier = infer_support_snapshot_app_info(app_display_name)
     meta = {
@@ -321,6 +398,12 @@ def build_support_snapshot_meta(
         },
     }
     meta.update(build_runtime_preflight_failure_summary(runtime_preflight_failures))
+    meta.update(
+        build_runtime_preflight_failure_collect_meta(
+            collect_status=runtime_preflight_failures_collect_status,
+            collect_error=runtime_preflight_failures_collect_error,
+        )
+    )
     return meta
 
 
@@ -347,7 +430,6 @@ def write_support_snapshot_runtime_preflight_failures(
     records: Sequence[dict[str, Any]] | None,
 ) -> str:
     target_path = os.path.join(str(snapshot_dir or "").strip(), SUPPORT_SNAPSHOT_RUNTIME_PREFLIGHT_FAILURES_FILE)
-    payload = merge_runtime_preflight_failures(records or ())
     with open(target_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write(serialize_runtime_preflight_failures_json(records))
     return target_path

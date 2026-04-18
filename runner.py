@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-19_free_paper_preflight_skip_v1
 # BUILD_ID: 2026-04-18_free_chart_state_canonical_writer_v1
 # BUILD_ID: 2026-04-18_free_runner_preflight_stable_prefix_v1
 # BUILD_ID: 2026-04-18_free_runner_replay_live_paper_autoprepare_v1
@@ -186,7 +187,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-18_free_chart_state_canonical_writer_v1"
+BUILD_ID = "2026-04-19_free_paper_preflight_skip_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -211,7 +212,17 @@ def _resolve_runtime_log_path(configured_path: Any, default_name: str) -> str:
 
 def _is_free_nonlive_build() -> bool:
     config_tier = str(getattr(C, "BUILD_TIER", "") or "").strip().upper()
-    return config_tier == "FREE"
+    if config_tier == "FREE":
+        return True
+    app_name = str(getattr(C, "APP_DISPLAY_NAME", "") or "").strip().upper()
+    if "FREE" in app_name:
+        return True
+    try:
+        from app.core.tier import get_build_tier
+
+        return str(get_build_tier() or "").strip().upper() == "RESEARCH"
+    except Exception:
+        return False
 
 
 def _reject_live_for_free_build(mode_name: str | None) -> None:
@@ -10581,6 +10592,41 @@ def _runner_runtime_data_preflight(
         return
 
     dataset_root_abs = os.path.abspath(str(dataset_root or ".") or ".")
+    if _is_free_nonlive_build() and context_text == "PAPER":
+        canonical_market_root = os.path.abspath(
+            str(getattr(_APP_PATHS, "market_data_dir", "") or dataset_root_abs)
+        )
+        canonical_precomputed_root = os.path.abspath(
+            str(
+                getattr(_APP_PATHS, "precomputed_indicators_dir", "")
+                or os.path.join(canonical_market_root, "precomputed_indicators")
+            )
+        )
+        _RUNTIME_PREFLIGHT_COMPLETED.add(request_key)
+        logger.warning(
+            "[PREP][PAPER] paper mode uses exchange bootstrap; dataset preflight is skipped "
+            "market_data_root=%s precomputed_root=%s",
+            canonical_market_root,
+            canonical_precomputed_root,
+        )
+        record_path_source_event_once(
+            component="runner",
+            event="runtime_preflight_skipped",
+            source="paper_exchange_bootstrap",
+            path=str(canonical_market_root),
+            extra={
+                "build_id": BUILD_ID,
+                "context": str(context_text),
+                "symbol": str(symbol_text),
+                "entry_tf": str(entry_tf),
+                "filter_tf": str(filter_tf),
+                "from_ym": str(from_ym),
+                "to_ym": str(to_ym),
+                "precomputed_root": str(canonical_precomputed_root),
+            },
+        )
+        return
+
     base_meta: dict[str, Any] = {
         "dir_5m": str(default_dir_5m),
         "dir_1h": str(default_dir_1h),

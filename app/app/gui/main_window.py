@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-04-19_free_gui_close_confirm_compact_layout_v1
+# BUILD_ID: 2026-04-19_free_gui_title_bar_version_1_1_1_v1
 # BUILD_ID: 2026-04-18_free_settings_scroll_nonlive_parity_v1
 # BUILD_ID: 2026-04-18_free_nonlive_activation_strip_v1
 # BUILD_ID: 2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1
@@ -161,7 +161,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-04-19_free_gui_close_confirm_compact_layout_v1"
+BUILD_ID = "2026-04-19_free_gui_title_bar_version_1_1_1_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -207,7 +207,7 @@ BRAND_LOGO_SIZE_STEP_PX = 8
 _UI_LANGUAGE_OPTIONS = (("ja", "日本語"), ("en", "English"))
 _UI_TEXTS = {
     "ja": {
-        "window.title": "LoneWolf Fang Free",
+        "window.title": APP_WINDOW_TITLE,
         "label.preset": "プリセット",
         "label.exchange": "取引所",
         "label.symbol": "通貨ペア",
@@ -317,7 +317,7 @@ _UI_TEXTS = {
         "dialog.backtest_guidance.range_out_of_data.action": "Since / Until へ移動",
     },
     "en": {
-        "window.title": "LoneWolf Fang Free",
+        "window.title": APP_WINDOW_TITLE,
         "label.preset": "Preset",
         "label.exchange": "Exchange",
         "label.symbol": "Symbol",

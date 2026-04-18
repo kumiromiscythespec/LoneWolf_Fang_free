@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
 from __future__ import annotations
 
@@ -6,19 +7,21 @@ import os
 import platform
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable, Sequence
 
 from app.core.paths import AppPaths
 
 
-BUILD_ID = "2026-04-09_free_support_snapshot_v1"
+BUILD_ID = "2026-04-18_free_support_snapshot_preflight_failures_v1"
 SUPPORT_SNAPSHOT_VERSION = 1
 SUPPORT_SNAPSHOT_TYPE = "support_snapshot"
 SUPPORT_SNAPSHOT_DIRNAME = "support_snapshots"
 SUPPORT_SNAPSHOT_SCREENSHOT_FILE = "screenshot.png"
 SUPPORT_SNAPSHOT_META_FILE = "meta.json"
 SUPPORT_SNAPSHOT_LOG_TAIL_FILE = "log_tail.txt"
+SUPPORT_SNAPSHOT_RUNTIME_PREFLIGHT_FAILURES_FILE = "runtime_preflight_failures.json"
 _KNOWN_APP_TIERS = ("free", "standard", "aggressive")
+_RUNTIME_PREFLIGHT_FAILURE_PREFIX = "RUNTIME_PREFLIGHT_FAILURE:"
 
 
 def support_snapshot_root_dir(paths: AppPaths) -> str:
@@ -105,6 +108,170 @@ def _format_iso_utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _extract_runtime_preflight_token(text: str, key: str) -> str:
+    match = re.search(rf"(?:^|\s){re.escape(str(key or ''))}=(?P<value>\S+)", str(text or ""))
+    if not match:
+        return ""
+    return str(match.group("value") or "").strip()
+
+
+def _extract_runtime_preflight_segment(text: str, start_marker: str, end_marker: str | None = None) -> str:
+    source = str(text or "")
+    start = source.find(str(start_marker or ""))
+    if start < 0:
+        return ""
+    start += len(str(start_marker or ""))
+    if end_marker is None:
+        return str(source[start:] or "").strip()
+    end = source.find(str(end_marker or ""), start)
+    if end < 0:
+        return ""
+    return str(source[start:end] or "").strip()
+
+
+def _normalize_runtime_preflight_failure_line(raw_line: str) -> str:
+    compact_line = str(raw_line or "").strip()
+    if compact_line.startswith("[stderr] "):
+        compact_line = str(compact_line[len("[stderr] "):] or "").strip()
+    return compact_line
+
+
+def _parse_runtime_preflight_failure_line(raw_line: str) -> dict[str, Any] | None:
+    compact_line = _normalize_runtime_preflight_failure_line(raw_line)
+    if not compact_line.startswith(_RUNTIME_PREFLIGHT_FAILURE_PREFIX):
+        return None
+
+    record: dict[str, Any] = {
+        "raw_line": compact_line,
+    }
+    symbol = _extract_runtime_preflight_token(compact_line, "symbol")
+    tf_entry = _extract_runtime_preflight_token(compact_line, "tf_entry")
+    tf_filter = _extract_runtime_preflight_token(compact_line, "tf_filter")
+    from_ym = _extract_runtime_preflight_token(compact_line, "from")
+    to_ym = _extract_runtime_preflight_token(compact_line, "to")
+    missing_items = _extract_runtime_preflight_segment(compact_line, "missing_items=", " searched_paths=")
+    searched_paths_text = _extract_runtime_preflight_segment(compact_line, "searched_paths=", " fallback_attempted=")
+    fallback_attempted = _extract_runtime_preflight_segment(compact_line, "fallback_attempted=", None)
+
+    if symbol:
+        record["symbol"] = symbol
+    if tf_entry:
+        record["tf_entry"] = tf_entry
+    if tf_filter:
+        record["tf_filter"] = tf_filter
+    if from_ym:
+        record["from_ym"] = from_ym
+    if to_ym:
+        record["to_ym"] = to_ym
+    if missing_items:
+        record["missing_items"] = missing_items
+    if searched_paths_text:
+        record["searched_paths"] = [
+            str(part or "").strip()
+            for part in str(searched_paths_text or "").split(" | ")
+            if str(part or "").strip() and str(part or "").strip() != "<none>"
+        ]
+    if fallback_attempted:
+        record["fallback_attempted"] = fallback_attempted
+    return record
+
+
+def _copy_runtime_preflight_failure_record(record: dict[str, Any]) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    for key, value in dict(record or {}).items():
+        if isinstance(value, list):
+            copied[key] = list(value)
+        else:
+            copied[key] = value
+    return copied
+
+
+def merge_runtime_preflight_failures(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    for record in records:
+        raw_line = str(dict(record or {}).get("raw_line", "") or "").strip()
+        if not raw_line:
+            continue
+        existing = seen.get(raw_line)
+        if existing is None:
+            copied = _copy_runtime_preflight_failure_record(dict(record or {}))
+            copied["raw_line"] = raw_line
+            merged.append(copied)
+            seen[raw_line] = copied
+            continue
+        for key, value in dict(record or {}).items():
+            if key == "raw_line":
+                continue
+            if key not in existing or existing.get(key) in (None, "", []):
+                existing[key] = list(value) if isinstance(value, list) else value
+    return merged
+
+
+def collect_runtime_preflight_failures_from_text(
+    text: str,
+    *,
+    context: str,
+    source_path: str = "",
+) -> list[dict[str, Any]]:
+    collected: list[dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        record = _parse_runtime_preflight_failure_line(raw_line)
+        if record is None:
+            continue
+        record["context"] = str(context or "").strip()
+        if str(source_path or "").strip():
+            record["source_path"] = os.path.abspath(str(source_path or "").strip())
+        collected.append(record)
+    return merge_runtime_preflight_failures(collected)
+
+
+def collect_runtime_preflight_failures_from_file(path: str, *, context: str) -> list[dict[str, Any]]:
+    target_path = os.path.abspath(str(path or "").strip())
+    if not target_path or (not os.path.isfile(target_path)):
+        return []
+    with open(target_path, "r", encoding="utf-8", errors="replace") as handle:
+        return collect_runtime_preflight_failures_from_text(
+            handle.read(),
+            context=context,
+            source_path=target_path,
+        )
+
+
+def collect_runtime_preflight_failures(
+    *,
+    text_sources: Sequence[tuple[str, str]] = (),
+    file_sources: Sequence[tuple[str, str]] = (),
+) -> list[dict[str, Any]]:
+    collected: list[dict[str, Any]] = []
+    for context, text in tuple(text_sources or ()):
+        collected.extend(
+            collect_runtime_preflight_failures_from_text(
+                text,
+                context=str(context or "").strip(),
+            )
+        )
+    for context, path in tuple(file_sources or ()):
+        collected.extend(
+            collect_runtime_preflight_failures_from_file(
+                str(path or "").strip(),
+                context=str(context or "").strip(),
+            )
+        )
+    return merge_runtime_preflight_failures(collected)
+
+
+def build_runtime_preflight_failure_summary(records: Sequence[dict[str, Any]] | None) -> dict[str, Any]:
+    failures = list(records or [])
+    latest = failures[-1] if failures else {}
+    return {
+        "runtime_preflight_failure_count": len(failures),
+        "runtime_preflight_failure_latest_symbol": str(latest.get("symbol", "") or "").strip(),
+        "runtime_preflight_failure_latest_from": str(latest.get("from_ym", "") or "").strip(),
+        "runtime_preflight_failure_latest_to": str(latest.get("to_ym", "") or "").strip(),
+    }
+
+
 def build_support_snapshot_meta(
     *,
     snapshot_id: str,
@@ -122,9 +289,10 @@ def build_support_snapshot_meta(
     window_title: str,
     window_width: int,
     window_height: int,
+    runtime_preflight_failures: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     app_name, app_tier = infer_support_snapshot_app_info(app_display_name)
-    return {
+    meta = {
         "snapshot_version": SUPPORT_SNAPSHOT_VERSION,
         "snapshot_type": SUPPORT_SNAPSHOT_TYPE,
         "snapshot_id": str(snapshot_id or "").strip(),
@@ -149,8 +317,11 @@ def build_support_snapshot_meta(
         "files": {
             "screenshot": SUPPORT_SNAPSHOT_SCREENSHOT_FILE,
             "log_tail": SUPPORT_SNAPSHOT_LOG_TAIL_FILE,
+            "runtime_preflight_failures": SUPPORT_SNAPSHOT_RUNTIME_PREFLIGHT_FAILURES_FILE,
         },
     }
+    meta.update(build_runtime_preflight_failure_summary(runtime_preflight_failures))
+    return meta
 
 
 def write_support_snapshot_meta(snapshot_dir: str, meta: dict[str, Any]) -> str:
@@ -168,4 +339,15 @@ def write_support_snapshot_log_tail(snapshot_dir: str, text: str, *, max_lines: 
     target_path = os.path.join(str(snapshot_dir or "").strip(), SUPPORT_SNAPSHOT_LOG_TAIL_FILE)
     with open(target_path, "w", encoding="utf-8") as handle:
         handle.write(tail_text)
+    return target_path
+
+
+def write_support_snapshot_runtime_preflight_failures(
+    snapshot_dir: str,
+    records: Sequence[dict[str, Any]] | None,
+) -> str:
+    target_path = os.path.join(str(snapshot_dir or "").strip(), SUPPORT_SNAPSHOT_RUNTIME_PREFLIGHT_FAILURES_FILE)
+    payload = merge_runtime_preflight_failures(records or ())
+    with open(target_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
     return target_path

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_prefix_prefer_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_failure_notice_v1
 # BUILD_ID: 2026-04-18_free_gui_settings_compact_two_column_v1
@@ -121,10 +122,12 @@ from app.core.paths import ensure_runtime_dirs, get_paths
 from app.core.support_snapshot import (
     SUPPORT_SNAPSHOT_SCREENSHOT_FILE,
     build_support_snapshot_meta,
+    collect_runtime_preflight_failures,
     create_support_snapshot_dir,
     resolve_support_snapshot_open_dir,
     write_support_snapshot_log_tail,
     write_support_snapshot_meta,
+    write_support_snapshot_runtime_preflight_failures,
 )
 from app.core.dataset import (
     DatasetResolutionError,
@@ -159,7 +162,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-18_free_gui_preflight_prefix_prefer_v1"
+BUILD_ID = "2026-04-18_free_support_snapshot_preflight_failures_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -3119,8 +3122,24 @@ class MainWindow(QWidget):
     def on_create_support_snapshot(self) -> None:
         try:
             snapshot_dir, snapshot_id, timestamp_local, timestamp_utc = create_support_snapshot_dir(self._paths)
+            log_text = self.log.toPlainText()
             self._save_support_snapshot_screenshot(snapshot_dir)
-            write_support_snapshot_log_tail(snapshot_dir, self.log.toPlainText(), max_lines=200)
+            write_support_snapshot_log_tail(snapshot_dir, log_text, max_lines=200)
+            runtime_preflight_failures: list[dict[str, object]] = []
+            try:
+                runtime_preflight_failures = collect_runtime_preflight_failures(
+                    text_sources=(
+                        ("gui_log", log_text),
+                        ("stderr_ring", "\n".join(self._stderr_ring)),
+                    ),
+                    file_sources=(
+                        ("replay_log", self._replay_log_path),
+                        ("live_log", self._live_log_path),
+                    ),
+                )
+                write_support_snapshot_runtime_preflight_failures(snapshot_dir, runtime_preflight_failures)
+            except Exception as exc:
+                self._append(f"[support] runtime_preflight_failures_error={exc}\n")
             meta = build_support_snapshot_meta(
                 snapshot_id=snapshot_id,
                 timestamp_local=timestamp_local,
@@ -3137,6 +3156,7 @@ class MainWindow(QWidget):
                 window_title=self.windowTitle(),
                 window_width=self.width(),
                 window_height=self.height(),
+                runtime_preflight_failures=runtime_preflight_failures,
             )
             write_support_snapshot_meta(snapshot_dir, meta)
             self._append(f"[support] snapshot_saved dir={snapshot_dir}\n")

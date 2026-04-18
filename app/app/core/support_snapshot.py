@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1
 # BUILD_ID: 2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1
 # BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-09_free_support_snapshot_v1
@@ -13,7 +14,7 @@ from typing import Any, Iterable, Sequence
 from app.core.paths import AppPaths
 
 
-BUILD_ID = "2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1"
+BUILD_ID = "2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1"
 SUPPORT_SNAPSHOT_VERSION = 1
 SUPPORT_SNAPSHOT_TYPE = "support_snapshot"
 SUPPORT_SNAPSHOT_DIRNAME = "support_snapshots"
@@ -345,6 +346,36 @@ def build_runtime_preflight_failure_summary(records: Sequence[dict[str, Any]] | 
         "runtime_preflight_failure_latest_from": str(latest.get("from_ym", "") or "").strip(),
         "runtime_preflight_failure_latest_to": str(latest.get("to_ym", "") or "").strip(),
     }
+
+
+def build_runtime_preflight_failures_bundle_meta(
+    records: Sequence[dict[str, Any]] | None,
+    *,
+    collect_status: str = _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK,
+    collect_error: str = "",
+) -> dict[str, Any]:
+    meta = build_runtime_preflight_failure_summary(records)
+    meta.update(
+        build_runtime_preflight_failure_collect_meta(
+            collect_status=collect_status,
+            collect_error=collect_error,
+        )
+    )
+    return meta
+
+
+def serialize_runtime_preflight_failures_bundle_meta_json(
+    records: Sequence[dict[str, Any]] | None,
+    *,
+    collect_status: str = _RUNTIME_PREFLIGHT_FAILURE_COLLECT_STATUS_OK,
+    collect_error: str = "",
+) -> str:
+    payload = build_runtime_preflight_failures_bundle_meta(
+        records,
+        collect_status=collect_status,
+        collect_error=collect_error,
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def build_support_snapshot_meta(

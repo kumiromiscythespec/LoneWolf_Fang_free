@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1
 # BUILD_ID: 2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1
 # BUILD_ID: 2026-04-18_free_support_snapshot_preflight_failures_v1
 # BUILD_ID: 2026-04-18_free_gui_preflight_prefix_prefer_v1
@@ -126,6 +127,7 @@ from app.core.support_snapshot import (
     collect_runtime_preflight_failures_artifact,
     create_support_snapshot_dir,
     resolve_support_snapshot_open_dir,
+    serialize_runtime_preflight_failures_bundle_meta_json,
     serialize_runtime_preflight_failures_json,
     write_support_snapshot_log_tail,
     write_support_snapshot_meta,
@@ -164,7 +166,7 @@ from app.gui.win_titlebar import apply_dark_titlebar
 from app.security.license_client import deactivate_license, default_license_base_url
 
 
-BUILD_ID = "2026-04-18_free_bundle_preflight_failures_and_snapshot_align_v1"
+BUILD_ID = "2026-04-18_free_bundle_preflight_failures_sidecar_meta_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -3494,7 +3496,15 @@ class MainWindow(QWidget):
                     "runtime/runtime_preflight_failures.json",
                     serialize_runtime_preflight_failures_json(runtime_preflight_failures),
                 )
-            self._append(f"[diag] support_bundle_created={out_zip} files={len(uniq)+2}\n")
+                zf.writestr(
+                    "runtime/runtime_preflight_failures_meta.json",
+                    serialize_runtime_preflight_failures_bundle_meta_json(
+                        runtime_preflight_failures,
+                        collect_status=runtime_preflight_collect_status,
+                        collect_error=runtime_preflight_collect_error,
+                    ),
+                )
+            self._append(f"[diag] support_bundle_created={out_zip} files={len(uniq)+3}\n")
         except Exception as e:
             self._append(f"[diag] support_bundle_error={e}\n")
 

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_runner_replay_live_paper_autoprepare_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-03-29_free_from_standard_nonlive_build_v1
 # BUILD_ID: 2026-03-28_standard_live_equity_currency_auto_quote_v1
@@ -134,6 +135,7 @@ from trace_bar_policy import (
     normalize_ref_ts_ms as _trace_policy_ref_ts_ms,
     snapshot_ohlc_at as _trace_policy_snapshot_ohlc_at,
 )
+from app.core.data_pipeline import auto_prepare_runtime_data, resolve_prepare_month_window
 from app.core.dataset import (
     DatasetResolutionError,
     build_missing_dataset_message,
@@ -151,6 +153,7 @@ from app.core.market_meta import (
     resolve_quote_ccy,
 )
 from app.core.paths import ensure_runtime_dirs
+from app.core.source_provenance import record_path_source_event_once
 from app.core.export_paths import (
     build_run_export_dir,
     is_legacy_exports_path,
@@ -176,7 +179,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-18_free_shared_market_data_fallback_v1"
+BUILD_ID = "2026-04-18_free_runner_replay_live_paper_autoprepare_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -233,6 +236,8 @@ _DIFF_TRACE_SOURCE = "live"  # "live" or "replay" (set by _run_replay)
 _REPLAY_DATASET_INFO: dict[str, Any] = {}
 _REPLAY_PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
 _REPLAY_SIZING_STATE: dict[str, float] = {}
+_AUTO_PREPARE_REQUESTS: set[str] = set()
+_RUNTIME_PREFLIGHT_COMPLETED: set[str] = set()
 _CURRENT_EXPORT_RUN_ID = ""
 _CURRENT_EXPORT_SYMBOL = ""
 _CURRENT_EXPORT_MODE = ""
@@ -6297,6 +6302,8 @@ def main(
 
     ex = ex_override if ex_override is not None else ExchangeClient()
     env_symbols = _symbols_from_env()
+    tf_entry = str(getattr(C, "ENTRY_TF", getattr(C, "TIMEFRAME_ENTRY", "5m")))
+    tf_filter = str(getattr(C, "FILTER_TF", getattr(C, "TIMEFRAME_FILTER", "1h")))
     if symbols_override is not None:
         symbols_seed = list(symbols_override)
     elif env_symbols:
@@ -6351,6 +6358,33 @@ def main(
     else:
         symbols = _select_symbols(ex, store)
     _LIVE_EQUITY_SYMBOLS = list(symbols)
+    if (not replay_mode) and (str(mode).upper() == "PAPER") and (not skip_startup_ops):
+        paper_since_ms, paper_until_ms = _live_like_preflight_window_ms()
+        paper_dataset_year = infer_year_from_ms(int(paper_since_ms))
+        if paper_dataset_year is None:
+            paper_dataset_year = int(datetime.fromtimestamp(int(paper_since_ms) / 1000.0, tz=timezone.utc).year)
+        paper_dataset_root = os.path.abspath(str(getattr(ensure_runtime_dirs(), "market_data_dir", ".") or "."))
+        for symbol in list(symbols or []):
+            symbol_text = str(symbol or "").strip()
+            if not symbol_text:
+                continue
+            symbol_prefix = symbol_to_prefix(symbol_text)
+            _runner_runtime_data_preflight(
+                context="PAPER",
+                runtime_symbol=str(symbol_text),
+                entry_tf=str(tf_entry),
+                filter_tf=str(tf_filter),
+                since_ms=int(paper_since_ms),
+                until_ms=int(paper_until_ms),
+                dataset_year=None,
+                dataset_years=None,
+                dataset_root=str(paper_dataset_root),
+                prefix=str(symbol_prefix),
+                default_dir_5m=str(os.path.join(paper_dataset_root, f"{symbol_prefix}_5m_{int(paper_dataset_year):04d}")),
+                default_glob_5m=str(f"{symbol_prefix}-5m-{int(paper_dataset_year):04d}-*.csv"),
+                default_dir_1h=str(os.path.join(paper_dataset_root, f"{symbol_prefix}_1h_{int(paper_dataset_year):04d}")),
+                default_glob_1h=str(f"{symbol_prefix}-1h-{int(paper_dataset_year):04d}-*.csv"),
+            )
     if not skip_startup_ops:
         for symbol in symbols[:1]:
             try:
@@ -6906,12 +6940,6 @@ def main(
     else:
         size_sizing_debug_log_enabled = bool(size_dbg_env)
     # NOTE: dd_ema is in-memory only and resets on process restart.
-
-    # NOTE:
-    # Use the same TF resolution defaults as backtest.py.
-    # "entry" is NOT a valid CCXT timeframe and can break fetch_ohlcv().
-    tf_entry = str(getattr(C, "ENTRY_TF", getattr(C, "TIMEFRAME_ENTRY", "5m")))
-    tf_filter = str(getattr(C, "FILTER_TF", getattr(C, "TIMEFRAME_FILTER", "1h")))
 
     phase_seq = 0
 
@@ -10326,6 +10354,428 @@ def _resolve_replay_dataset_root(replay_csv_base: str) -> str:
     return base_abs
 
 
+def _unique_abs_paths(paths: list[Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw_path in list(paths or []):
+        text = str(raw_path or "").strip()
+        if not text:
+            continue
+        abs_path = os.path.abspath(text)
+        key = os.path.normcase(abs_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(abs_path)
+    return out
+
+
+def _runner_preflight_failure_message(
+    *,
+    context: str,
+    runtime_symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: int | None,
+    until_ms: int | None,
+    dataset_year: int | None,
+    dataset_meta: dict[str, Any],
+    dataset_diag: dict[str, Any],
+    missing_items: list[str],
+    searched_paths: list[str],
+    fallback_attempted: str,
+) -> str:
+    from_ym, to_ym = resolve_prepare_month_window(
+        since_ms=since_ms,
+        until_ms=until_ms,
+        year=dataset_year,
+        years=None,
+    )
+    chart_missing = {str(item) for item in list(missing_items or []) if str(item).startswith("chart:")}
+    tf_focus = str(entry_tf)
+    searched_dir = str(dataset_meta.get("dir_5m") or "")
+    searched_glob = str(dataset_meta.get("glob_5m") or "")
+    if (f"chart:{str(filter_tf)}" in chart_missing) and (f"chart:{str(entry_tf)}" not in chart_missing):
+        tf_focus = str(filter_tf)
+        searched_dir = str(dataset_meta.get("dir_1h") or searched_dir)
+        searched_glob = str(dataset_meta.get("glob_1h") or searched_glob)
+    if chart_missing:
+        base_msg = build_missing_dataset_message(
+            context=str(context),
+            tf=str(tf_focus),
+            searched_dir=str(searched_dir),
+            searched_glob=str(searched_glob),
+            dataset_root=str(dataset_meta.get("root") or ""),
+            prefix=str(dataset_meta.get("prefix") or runtime_symbol),
+            year=(int(dataset_meta.get("year")) if dataset_meta.get("year") is not None else dataset_year),
+            tf_dirs=("5m", "1h"),
+            diagnostics=dict(dataset_diag or {}),
+        )
+    else:
+        base_msg = (
+            f"[{str(context)}] precomputed runtime data are missing. "
+            f"dataset_root={str(dataset_meta.get('root') or '')} "
+            f"prefix={str(dataset_meta.get('prefix') or runtime_symbol)}"
+        )
+    range_bits: list[str] = []
+    if since_ms is not None:
+        range_bits.append(f"since_ms={int(since_ms)}")
+    if until_ms is not None:
+        range_bits.append(f"until_ms={int(until_ms)}")
+    range_bits.append(f"from={from_ym}")
+    range_bits.append(f"to={to_ym}")
+    missing_text = ",".join([str(item) for item in list(missing_items or []) if str(item or "").strip()]) or "none"
+    searched_text = " | ".join(_unique_abs_paths(searched_paths))
+    if not searched_text:
+        searched_text = "<none>"
+    return (
+        f"{base_msg} symbol={str(runtime_symbol)} tf_entry={str(entry_tf)} tf_filter={str(filter_tf)} "
+        f"{' '.join(range_bits)} missing_items={missing_text} "
+        f"searched_paths={searched_text} fallback_attempted={str(fallback_attempted or 'none')}"
+    )
+
+
+def _runner_runtime_data_preflight(
+    *,
+    context: str,
+    runtime_symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: int | None,
+    until_ms: int | None,
+    dataset_year: int | None,
+    dataset_years: list[int] | None,
+    dataset_root: str,
+    prefix: str,
+    default_dir_5m: str,
+    default_glob_5m: str,
+    default_dir_1h: str,
+    default_glob_1h: str,
+) -> None:
+    symbol_text = str(runtime_symbol or "").strip()
+    if not symbol_text:
+        return
+    context_text = str(context or "").strip().upper() or "RUNNER"
+    years_list = sorted({int(y) for y in list(dataset_years or []) if int(y) > 0})
+    from_ym, to_ym = resolve_prepare_month_window(
+        since_ms=since_ms,
+        until_ms=until_ms,
+        year=dataset_year,
+        years=years_list,
+    )
+    request_key = json.dumps(
+        {
+            "context": context_text,
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "since_ms": int(since_ms) if since_ms is not None else None,
+            "until_ms": int(until_ms) if until_ms is not None else None,
+            "year": int(dataset_year) if dataset_year is not None else None,
+            "years": list(years_list),
+            "from_ym": str(from_ym),
+            "to_ym": str(to_ym),
+        },
+        sort_keys=True,
+    )
+    if request_key in _RUNTIME_PREFLIGHT_COMPLETED:
+        return
+
+    dataset_root_abs = os.path.abspath(str(dataset_root or ".") or ".")
+    base_meta: dict[str, Any] = {
+        "dir_5m": str(default_dir_5m),
+        "dir_1h": str(default_dir_1h),
+        "glob_5m": str(default_glob_5m),
+        "glob_1h": str(default_glob_1h),
+        "root": str(dataset_root_abs),
+        "prefix": str(prefix),
+        "year": (int(dataset_year) if dataset_year is not None else None),
+    }
+
+    def _collect_missing_state() -> tuple[list[str], list[str], dict[str, Any], dict[str, Any]]:
+        missing_items: list[str] = []
+        searched_paths: list[str] = []
+        dataset_diag: dict[str, Any] = {}
+        dataset_meta = dict(base_meta)
+        try:
+            dataset_spec = resolve_dataset(
+                dataset_root=str(dataset_root_abs),
+                prefix=str(prefix),
+                year=(int(dataset_year) if dataset_year is not None else None),
+                years=(list(years_list) if years_list else None),
+                tf_dirs=("5m", "1h"),
+                default_dir_5m=str(default_dir_5m),
+                default_glob_5m=str(default_glob_5m),
+                default_dir_1h=str(default_dir_1h),
+                default_glob_1h=str(default_glob_1h),
+                runtime_symbol=str(symbol_text),
+                context=str(context_text),
+            )
+            dataset_diag = dict(dataset_spec.diagnostics or {})
+            dataset_meta.update(
+                {
+                    "dir_5m": str(dataset_spec.dir_5m),
+                    "dir_1h": str(dataset_spec.dir_1h),
+                    "glob_5m": str(dataset_diag.get("glob_5m", default_glob_5m)),
+                    "glob_1h": str(dataset_diag.get("glob_1h", default_glob_1h)),
+                    "root": str(dataset_spec.root),
+                    "prefix": str(dataset_spec.prefix),
+                    "year": int(dataset_spec.year),
+                }
+            )
+            searched_paths.extend(list(dataset_diag.get("searched_paths_5m", []) or []))
+            searched_paths.extend(list(dataset_diag.get("searched_paths_1h", []) or []))
+            if not list(dataset_spec.paths_5m or []):
+                missing_items.append(f"chart:{str(entry_tf)}")
+            if str(filter_tf).lower() == "1h" and not list(dataset_spec.paths_1h or []):
+                missing_items.append(f"chart:{str(filter_tf)}")
+        except DatasetResolutionError as exc:
+            dataset_diag = dict(exc.diagnostics or {})
+            searched_paths.extend(list(dataset_diag.get("searched_paths_5m", []) or []))
+            searched_paths.extend(list(dataset_diag.get("searched_paths_1h", []) or []))
+            missing_items.append(f"chart:{str(entry_tf)}")
+            if str(filter_tf).lower() == "1h":
+                missing_items.append(f"chart:{str(filter_tf)}")
+
+        try:
+            pre_missing, pre_paths = BT._collect_missing_precomputed_labels(
+                symbol=str(symbol_text),
+                entry_tf=str(entry_tf),
+                filter_tf=str(filter_tf),
+                since_ms=since_ms,
+                until_ms=until_ms,
+                year=dataset_year,
+                years=years_list,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[PREP][%s] precomputed probe failed symbol=%s entry_tf=%s filter_tf=%s reason=%s",
+                context_text,
+                str(symbol_text),
+                str(entry_tf),
+                str(filter_tf),
+                exc,
+            )
+            pre_missing, pre_paths = ([], [])
+        missing_items.extend(list(pre_missing or []))
+        searched_paths.extend(list(pre_paths or []))
+        missing_items = sorted({str(item) for item in list(missing_items or []) if str(item or "").strip()})
+        searched_paths = _unique_abs_paths(searched_paths)
+        return (missing_items, searched_paths, dataset_diag, dataset_meta)
+
+    logger.info(
+        "[PREP][%s] start symbol=%s entry_tf=%s filter_tf=%s from=%s to=%s",
+        context_text,
+        str(symbol_text),
+        str(entry_tf),
+        str(filter_tf),
+        str(from_ym),
+        str(to_ym),
+    )
+    record_path_source_event_once(
+        component="runner",
+        event="runtime_preflight_start",
+        source="runner_preflight",
+        path=str(dataset_root_abs),
+        extra={
+            "build_id": BUILD_ID,
+            "context": str(context_text),
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "from_ym": str(from_ym),
+            "to_ym": str(to_ym),
+        },
+    )
+
+    missing_items, searched_paths, dataset_diag, dataset_meta = _collect_missing_state()
+    if not missing_items:
+        _RUNTIME_PREFLIGHT_COMPLETED.add(request_key)
+        logger.info(
+            "[PREP][%s] ok symbol=%s entry_tf=%s filter_tf=%s from=%s to=%s",
+            context_text,
+            str(symbol_text),
+            str(entry_tf),
+            str(filter_tf),
+            str(from_ym),
+            str(to_ym),
+        )
+        record_path_source_event_once(
+            component="runner",
+            event="runtime_preflight_resolved",
+            source=str(dataset_diag.get("source", "runner_preflight")),
+            path=str(dataset_meta.get("root") or dataset_root_abs),
+            extra={
+                "build_id": BUILD_ID,
+                "context": str(context_text),
+                "symbol": str(symbol_text),
+                "entry_tf": str(entry_tf),
+                "filter_tf": str(filter_tf),
+                "from_ym": str(from_ym),
+                "to_ym": str(to_ym),
+                "fallback_attempted": "none",
+            },
+        )
+        return
+
+    missing_text = ",".join(list(missing_items))
+    logger.warning(
+        "[PREP][%s] missing symbol=%s entry_tf=%s filter_tf=%s from=%s to=%s missing=%s searched_paths=%s",
+        context_text,
+        str(symbol_text),
+        str(entry_tf),
+        str(filter_tf),
+        str(from_ym),
+        str(to_ym),
+        str(missing_text),
+        " | ".join(list(searched_paths or [])) or "<none>",
+    )
+    record_path_source_event_once(
+        component="runner",
+        event="runtime_preflight_missing",
+        source=str(dataset_diag.get("source", "runner_preflight")),
+        path=str(dataset_meta.get("root") or dataset_root_abs),
+        extra={
+            "build_id": BUILD_ID,
+            "context": str(context_text),
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "from_ym": str(from_ym),
+            "to_ym": str(to_ym),
+            "missing_items": list(missing_items),
+            "searched_paths": list(searched_paths),
+        },
+    )
+    if request_key in _AUTO_PREPARE_REQUESTS:
+        raise RuntimeError(
+            _runner_preflight_failure_message(
+                context=str(context_text),
+                runtime_symbol=str(symbol_text),
+                entry_tf=str(entry_tf),
+                filter_tf=str(filter_tf),
+                since_ms=since_ms,
+                until_ms=until_ms,
+                dataset_year=dataset_year,
+                dataset_meta=dataset_meta,
+                dataset_diag=dataset_diag,
+                missing_items=missing_items,
+                searched_paths=searched_paths,
+                fallback_attempted="run_pipeline_already_attempted",
+            )
+        )
+
+    _AUTO_PREPARE_REQUESTS.add(request_key)
+    logger.info(
+        "[PREP][%s] auto_prepare symbol=%s entry_tf=%s filter_tf=%s from=%s to=%s missing=%s",
+        context_text,
+        str(symbol_text),
+        str(entry_tf),
+        str(filter_tf),
+        str(from_ym),
+        str(to_ym),
+        str(missing_text),
+    )
+    record_path_source_event_once(
+        component="runner",
+        event="runtime_preflight_auto_prepare",
+        source="run_pipeline",
+        path=str(dataset_meta.get("root") or dataset_root_abs),
+        extra={
+            "build_id": BUILD_ID,
+            "context": str(context_text),
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "from_ym": str(from_ym),
+            "to_ym": str(to_ym),
+            "missing_items": list(missing_items),
+        },
+    )
+    try:
+        auto_prepare_runtime_data(
+            symbol=str(symbol_text),
+            context=str(context_text),
+            since_ms=since_ms,
+            until_ms=until_ms,
+            year=(int(dataset_year) if dataset_year is not None else None),
+            years=(list(years_list) if years_list else None),
+            missing_items=list(missing_items),
+            searched_paths=list(searched_paths),
+            fallback_sources=["chart_download", "precompute_generation"],
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            _runner_preflight_failure_message(
+                context=str(context_text),
+                runtime_symbol=str(symbol_text),
+                entry_tf=str(entry_tf),
+                filter_tf=str(filter_tf),
+                since_ms=since_ms,
+                until_ms=until_ms,
+                dataset_year=dataset_year,
+                dataset_meta=dataset_meta,
+                dataset_diag=dataset_diag,
+                missing_items=missing_items,
+                searched_paths=searched_paths,
+                fallback_attempted=f"run_pipeline error={exc}",
+            )
+        ) from exc
+
+    missing_after, searched_after, dataset_diag_after, dataset_meta_after = _collect_missing_state()
+    if missing_after:
+        raise RuntimeError(
+            _runner_preflight_failure_message(
+                context=str(context_text),
+                runtime_symbol=str(symbol_text),
+                entry_tf=str(entry_tf),
+                filter_tf=str(filter_tf),
+                since_ms=since_ms,
+                until_ms=until_ms,
+                dataset_year=dataset_year,
+                dataset_meta=dataset_meta_after,
+                dataset_diag=dataset_diag_after,
+                missing_items=missing_after,
+                searched_paths=searched_after,
+                fallback_attempted="run_pipeline",
+            )
+        )
+
+    _RUNTIME_PREFLIGHT_COMPLETED.add(request_key)
+    logger.info(
+        "[PREP][%s] resolved symbol=%s entry_tf=%s filter_tf=%s from=%s to=%s fallback_attempted=run_pipeline",
+        context_text,
+        str(symbol_text),
+        str(entry_tf),
+        str(filter_tf),
+        str(from_ym),
+        str(to_ym),
+    )
+    record_path_source_event_once(
+        component="runner",
+        event="runtime_preflight_resolved",
+        source=str(dataset_diag_after.get("source", "runner_preflight")),
+        path=str(dataset_meta_after.get("root") or dataset_root_abs),
+        extra={
+            "build_id": BUILD_ID,
+            "context": str(context_text),
+            "symbol": str(symbol_text),
+            "entry_tf": str(entry_tf),
+            "filter_tf": str(filter_tf),
+            "from_ym": str(from_ym),
+            "to_ym": str(to_ym),
+            "fallback_attempted": "run_pipeline",
+        },
+    )
+
+
+def _live_like_preflight_window_ms(now_ms: int | None = None) -> tuple[int, int]:
+    end_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    end_dt = datetime.fromtimestamp(int(end_ms) / 1000.0, tz=timezone.utc)
+    start_dt = datetime(int(end_dt.year), int(end_dt.month), 1, tzinfo=timezone.utc)
+    return (int(start_dt.timestamp() * 1000.0), int(end_ms))
+
+
 class ReplayExchange:
     """
     ExchangeClient substitute for replay.
@@ -10681,7 +11131,7 @@ def _load_replay_ohlcv(
     dataset_year = infer_year_from_ms(dataset_year_ref_ms)
     dir_5m_default, glob_5m_default = _prefer_requested_year_defaults(dir_5m_default, glob_5m_default, dataset_year)
     dir_1h_default, glob_1h_default = _prefer_requested_year_defaults(dir_1h_default, glob_1h_default, dataset_year)
-    BT._maybe_auto_prepare_runtime_data_for_run(
+    _runner_runtime_data_preflight(
         context="REPLAY",
         runtime_symbol=str(runtime_symbol or csv_symbol),
         entry_tf=str(tf_entry),

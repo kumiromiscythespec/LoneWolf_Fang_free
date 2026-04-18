@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_chart_state_reader_parity_v1
 # BUILD_ID: 2026-03-29_free_gui_responsiveness_fix_v1
 # BUILD_ID: 2026-03-29_free_ui_text_cleanup_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
@@ -40,10 +41,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
+from app.core.chart_state_path import (
+    build_chart_state_path,
+    resolve_chart_state_read_path,
+    sanitize_symbol_for_chart_state,
+)
 
 
-BUILD_ID = "2026-03-29_free_gui_responsiveness_fix_v1"
+BUILD_ID = "2026-04-18_free_chart_state_reader_parity_v1"
 
 CHART_MODE_EQUITY = "Equity"
 CHART_MODE_NET = "Net"
@@ -245,6 +250,7 @@ class ChartPositionState:
 @dataclass
 class LiveChartState:
     path: str = ""
+    path_source: str = ""
     schema_version: str = ""
     updated_at: str = ""
     exchange_id: str = ""
@@ -467,12 +473,14 @@ def _load_live_chart_markers(raw: Any) -> list[ChartMarker]:
 def _empty_live_chart_state(
     path: str,
     *,
+    path_source: str = "canonical",
     reason: str,
     state_present: bool,
     parse_error: bool = False,
 ) -> LiveChartState:
     return LiveChartState(
         path=path,
+        path_source=str(path_source or "").strip() or "canonical",
         candle_source="empty",
         chart_state_reason=str(reason or "").strip(),
         state_present=bool(state_present),
@@ -482,19 +490,31 @@ def _empty_live_chart_state(
     )
 
 
-def load_live_chart_state(path: str) -> LiveChartState:
+def load_live_chart_state(path: str, *, path_source: str = "canonical") -> LiveChartState:
     target = _abs_path(path)
     if not target:
-        return _empty_live_chart_state("", reason="state_path_missing", state_present=False)
+        return _empty_live_chart_state("", path_source=path_source, reason="state_path_missing", state_present=False)
     if not os.path.isfile(target):
-        return _empty_live_chart_state(target, reason="state_file_absent", state_present=False)
+        return _empty_live_chart_state(target, path_source=path_source, reason="state_file_absent", state_present=False)
     try:
         with open(target, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except Exception:
-        return _empty_live_chart_state(target, reason="state_parse_failed", state_present=True, parse_error=True)
+        return _empty_live_chart_state(
+            target,
+            path_source=path_source,
+            reason="state_parse_failed",
+            state_present=True,
+            parse_error=True,
+        )
     if not isinstance(payload, dict):
-        return _empty_live_chart_state(target, reason="state_parse_failed", state_present=True, parse_error=True)
+        return _empty_live_chart_state(
+            target,
+            path_source=path_source,
+            reason="state_parse_failed",
+            state_present=True,
+            parse_error=True,
+        )
     position_raw = payload.get("position")
     markers_raw = payload.get("markers")
     pos = ChartPositionState()
@@ -526,6 +546,7 @@ def load_live_chart_state(path: str) -> LiveChartState:
         chart_state_reason = "candles_not_ready"
     state = LiveChartState(
         path=target,
+        path_source=str(path_source or "").strip() or "canonical",
         schema_version=str(payload.get("schema_version", "") or ""),
         updated_at=str(payload.get("updated_at", "") or ""),
         exchange_id=str(payload.get("exchange_id", "") or "").strip(),
@@ -548,9 +569,22 @@ def load_live_chart_state(path: str) -> LiveChartState:
     return state
 
 
-def load_live_chart_state_for_runtime(state_dir: str, exchange_id: str, run_mode: str, symbol: str) -> LiveChartState:
-    path = build_live_chart_state_path(state_dir, exchange_id, run_mode, symbol)
-    return load_live_chart_state(path)
+def load_live_chart_state_for_runtime(
+    state_dir: str,
+    exchange_id: str,
+    run_mode: str,
+    symbol: str,
+    *,
+    legacy_state_dir: str = "",
+) -> LiveChartState:
+    path, path_source = resolve_chart_state_read_path(
+        state_dir,
+        legacy_state_dir,
+        exchange_id,
+        run_mode,
+        symbol,
+    )
+    return load_live_chart_state(path, path_source=path_source)
 
 
 def with_live_chart_state(data: ResultChartData | None, state: LiveChartState | None) -> ResultChartData:

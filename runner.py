@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_chart_state_canonical_writer_v1
 # BUILD_ID: 2026-04-18_free_runner_preflight_stable_prefix_v1
 # BUILD_ID: 2026-04-18_free_runner_replay_live_paper_autoprepare_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
@@ -165,7 +166,11 @@ from app.core.export_paths import (
 from app.core.instrument_registry import default_quote_for_exchange
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import quote_for_symbol
-from app.core.chart_state_path import build_chart_state_path, sanitize_symbol_for_chart_state
+from app.core.chart_state_path import (
+    build_chart_state_path,
+    resolve_chart_state_read_path,
+    sanitize_symbol_for_chart_state,
+)
 from app.core.state_context import (
     StateContext,
     build_state_context,
@@ -181,12 +186,14 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-18_free_runner_preflight_stable_prefix_v1"
+BUILD_ID = "2026-04-18_free_chart_state_canonical_writer_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
 STATE_DIR = Path(_APP_PATHS.state_dir).resolve()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
+CHART_STATE_DIR = Path(_APP_PATHS.chart_state_dir).resolve()
+CHART_STATE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = STATE_DIR / "state.db"
 _FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
 
@@ -839,7 +846,16 @@ def _chart_state_persisted_snapshot_price(
     fallback_ts_ms: int,
     timeframe: str,
 ) -> tuple[float | None, int | None, str, int | None]:
-    path = Path(build_chart_state_path(str(state_root), exchange_id, run_mode, symbol))
+    path_text, _path_source = resolve_chart_state_read_path(
+        str(state_root),
+        str(STATE_DIR),
+        exchange_id,
+        run_mode,
+        symbol,
+    )
+    if not path_text:
+        return (None, None, "", None)
+    path = Path(path_text)
     try:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -1401,7 +1417,7 @@ def _emit_live_chart_states(store: StateStore, symbols: list[str], *, run_mode: 
     mode_text = str(run_mode or "").strip().upper()
     if mode_text not in ("LIVE", "PAPER"):
         return
-    state_root = Path(STATE_DIR)
+    state_root = Path(CHART_STATE_DIR)
     state_root.mkdir(parents=True, exist_ok=True)
     exchange_id = str(_resolve_exchange_id() or "").strip().lower() or "exchange"
     tf_text = str(timeframe or getattr(C, "ENTRY_TF", "5m") or "5m").strip() or "5m"
@@ -7063,7 +7079,7 @@ def main(
                 ex=ex,
                 timeframe=str(tf_entry),
                 store=store,
-                state_root=str(STATE_DIR),
+                state_root=str(CHART_STATE_DIR),
                 exchange_id=_resolve_exchange_id(),
                 run_mode=str(mode),
                 fallback_ts_ms=int(ts_ms_now),

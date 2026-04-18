@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_chart_state_dir_parity_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_root_v1
 # BUILD_ID: 2026-03-31_free_user_scope_data_root_v1
 # BUILD_ID: 2026-03-20_paths_market_data_define_fix_v1
@@ -8,7 +9,7 @@ import os
 from dataclasses import dataclass
 
 
-BUILD_ID = "2026-04-18_free_shared_market_data_root_v1"
+BUILD_ID = "2026-04-18_free_chart_state_dir_parity_v1"
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class AppPaths:
     logs_dir: str
     exports_dir: str
     state_dir: str
+    chart_state_dir: str
     configs_dir: str
     user_configs_dir: str
     market_data_dir: str
@@ -111,6 +113,7 @@ def get_paths() -> AppPaths:
     logs_dir = os.path.join(runtime_dir, "logs")
     exports_dir = os.path.join(runtime_dir, "exports")
     state_dir = os.path.join(runtime_dir, "state")
+    chart_state_dir = os.path.join(state_dir, "chart_state")
     configs_dir = configs_override or os.path.join(product_data_root, "configs")
     user_configs_dir = os.path.join(configs_dir, "user")
     market_data_dir = os.path.join(shared_data_root, "market_data")
@@ -152,6 +155,7 @@ def get_paths() -> AppPaths:
         logs_dir=logs_dir,
         exports_dir=exports_dir,
         state_dir=state_dir,
+        chart_state_dir=chart_state_dir,
         configs_dir=configs_dir,
         user_configs_dir=user_configs_dir,
         market_data_dir=market_data_dir,
@@ -169,6 +173,7 @@ def ensure_runtime_dirs() -> AppPaths:
     os.makedirs(p.logs_dir, exist_ok=True)
     os.makedirs(p.exports_dir, exist_ok=True)
     os.makedirs(p.state_dir, exist_ok=True)
+    os.makedirs(p.chart_state_dir, exist_ok=True)
     os.makedirs(p.configs_dir, exist_ok=True)
     os.makedirs(p.user_configs_dir, exist_ok=True)
     os.makedirs(p.market_data_dir, exist_ok=True)

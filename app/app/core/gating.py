@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_no_activation_gate_v1
 # BUILD_ID: 2026-03-22_standard_license_core_v1
 from __future__ import annotations
 
@@ -7,10 +8,9 @@ import os
 
 from app.core.paths import get_paths
 from app.core.tier import get_build_tier, tier_rank
-from app.security.keyring_store import load_license_state
 
 
-BUILD_ID = "2026-03-22_standard_license_core_v1"
+BUILD_ID = "2026-04-18_free_no_activation_gate_v1"
 CORE_MAX_REPLAY_DAYS = 31
 CORE_MAX_BACKTEST_DAYS = 365
 
@@ -75,45 +75,10 @@ def is_within_offline_grace(raw_offline_grace_until: str, now_utc: datetime | No
 
 def evaluate_live_license_gate(now_utc: datetime | None = None) -> LiveGateDecision:
     build_tier = get_build_tier()
-    if tier_rank() < tier_rank("EXECUTION"):
-        return LiveGateDecision(
-            allowed=False,
-            reason="build_tier_disallows_live",
-            build_tier=build_tier,
-        )
-
-    state = load_license_state()
-    if state is None:
-        return LiveGateDecision(
-            allowed=False,
-            reason="missing_license_state",
-            build_tier=build_tier,
-        )
-
-    if bool(state.live_allowed):
-        return LiveGateDecision(
-            allowed=True,
-            reason="activated",
-            build_tier=build_tier,
-            license_status=str(state.license_status or ""),
-            offline_grace_until=str(state.offline_grace_until or ""),
-        )
-
-    if is_within_offline_grace(state.offline_grace_until, now_utc=now_utc):
-        return LiveGateDecision(
-            allowed=True,
-            reason="within_offline_grace",
-            build_tier=build_tier,
-            license_status=str(state.license_status or ""),
-            offline_grace_until=str(state.offline_grace_until or ""),
-        )
-
     return LiveGateDecision(
         allowed=False,
-        reason="offline_grace_expired" if str(state.offline_grace_until or "").strip() else "live_not_allowed_by_entitlement",
+        reason="build_tier_disallows_live",
         build_tier=build_tier,
-        license_status=str(state.license_status or ""),
-        offline_grace_until=str(state.offline_grace_until or ""),
     )
 
 

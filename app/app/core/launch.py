@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-18_free_no_activation_startup_v1
 # BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_free_launch_salesafe_defaults_release_prep_v1
 # BUILD_ID: 2026-03-29_free_gui_multiyear_backtest_fix_v1
@@ -14,28 +15,11 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 
 import config as C
-from app.core.gating import evaluate_live_license_gate, is_within_offline_grace, require_live, require_live_activation
 from app.core.paths import ensure_runtime_dirs
 from app.core.tier import get_build_tier
-from app.security.keyring_store import (
-    LicenseState,
-    get_or_create_license_device_id,
-    load_license_seat_key,
-    load_license_state,
-    save_license_seat_key,
-    save_license_state,
-)
-from app.security.license_client import (
-    LicenseResponse,
-    activate_license,
-    compute_machine_hash,
-    default_license_base_url,
-    normalize_license_base_url,
-    refresh_license,
-)
 
 
-BUILD_ID = "2026-04-08_free_bitbank_okx_spot_only_v1"
+BUILD_ID = "2026-04-18_free_no_activation_startup_v1"
 
 _RUNTIME_LOG_LEVELS = {"MINIMAL", "OPS", "DEBUG"}
 _FREE_RUN_MODES = {"PAPER", "REPLAY", "BACKTEST"}
@@ -121,166 +105,22 @@ class BacktestSpec:
 
 
 class LicenseOperationError(RuntimeError):
-    def __init__(self, error_code: str, message: str = "", response: LicenseResponse | None = None):
-        self.error_code = str(error_code or "invalid_response").strip() or "invalid_response"
+    def __init__(self, error_code: str, message: str = ""):
+        self.error_code = str(error_code or "unsupported").strip() or "unsupported"
         self.detail = str(message or "").strip()
-        self.response = response
-        super().__init__(_license_error_text(self.error_code, self.detail))
+        super().__init__(self.detail or _FREE_BUILD_LIVE_MESSAGE)
 
 
-def _app_build_id() -> str:
-    raw = str(getattr(C, "BUILD_ID", "") or "").strip()
-    return raw or str(BUILD_ID)
+def activate_and_store_license(seat_key: str, *, base_url: str = "") -> None:
+    raise LicenseOperationError("unsupported", _FREE_BUILD_LIVE_MESSAGE)
 
 
-def _app_version() -> str:
-    raw = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
-    return raw
-
-
-def _ensure_live_license_base_url(raw: str = "") -> str:
-    base_url = str(raw or "").strip() or default_license_base_url()
-    return normalize_license_base_url(base_url)
-
-
-def _license_error_text(error_code: str, message: str = "") -> str:
-    code = str(error_code or "invalid_response").strip() or "invalid_response"
-    mapping = {
-        "invalid_seat_key": "invalid desktop activation seat key",
-        "license_revoked": "desktop activation was revoked",
-        "seat_already_bound": "seat is already bound to another device",
-        "device_mismatch": "stored device does not match the activated device",
-        "network_error": "license service is unavailable",
-        "invalid_response": "license service returned an invalid response",
-    }
-    text = mapping.get(code, code)
-    detail = str(message or "").strip()
-    return f"{text}: {detail}" if detail else text
-
-
-def _license_state_from_response(
-    response: LicenseResponse,
-    seat_key: str,
-    device_id: str,
-    *,
-    previous: LicenseState | None = None,
-) -> LicenseState:
-    prev = previous or LicenseState()
-    has_entitlements = isinstance(response.raw_body.get("entitlements"), dict)
-    product_code = str(response.product_code or prev.product_code or "standard").strip() or "standard"
-    license_status = str(response.device.status or response.error_code or response.outcome or prev.license_status or "").strip()
-    last_verified_at = str(
-        response.lease.verified_at or response.device.last_verified_at or prev.last_verified_at or ""
-    ).strip()
-    refresh_after = str(response.lease.refresh_after or (prev.refresh_after if response.ok else "") or "").strip()
-    offline_grace_until = str(
-        response.lease.offline_grace_until or (prev.offline_grace_until if response.ok else "") or ""
-    ).strip()
-
-    if has_entitlements:
-        standard_enabled = bool(response.entitlements.standard_enabled)
-        live_allowed = bool(response.entitlements.live_allowed)
-        paper_allowed = bool(response.entitlements.paper_allowed)
-        replay_allowed = bool(response.entitlements.replay_allowed)
-        backtest_allowed = bool(response.entitlements.backtest_allowed)
-        fallback_tier_on_failure = str(response.entitlements.fallback_tier_on_failure or "").strip()
-    else:
-        standard_enabled = bool(prev.standard_enabled if response.ok else False)
-        live_allowed = bool(prev.live_allowed if response.ok else False)
-        paper_allowed = bool(prev.paper_allowed if response.ok else False)
-        replay_allowed = bool(prev.replay_allowed if response.ok else False)
-        backtest_allowed = bool(prev.backtest_allowed if response.ok else False)
-        fallback_tier_on_failure = str(prev.fallback_tier_on_failure or "")
-
-    return LicenseState(
-        product_code=product_code,
-        seat_key=str(seat_key or "").strip(),
-        device_id=str(device_id or "").strip(),
-        machine_hash=compute_machine_hash(),
-        license_status=license_status,
-        seat_no=int(response.seat_no or prev.seat_no or 0),
-        last_verified_at=last_verified_at,
-        refresh_after=refresh_after,
-        offline_grace_until=offline_grace_until,
-        standard_enabled=standard_enabled,
-        live_allowed=live_allowed,
-        paper_allowed=paper_allowed,
-        replay_allowed=replay_allowed,
-        backtest_allowed=backtest_allowed,
-        fallback_tier_on_failure=fallback_tier_on_failure,
-    )
-
-
-def activate_and_store_license(seat_key: str, *, base_url: str = "") -> LicenseState:
-    clean_seat_key = str(seat_key or "").strip()
-    if not clean_seat_key:
-        raise LicenseOperationError("invalid_seat_key", "seat key is empty")
-    normalized_base_url = _ensure_live_license_base_url(base_url)
-    device_id = get_or_create_license_device_id()
-    response = activate_license(
-        clean_seat_key,
-        device_id,
-        base_url=normalized_base_url,
-        app_version=_app_version(),
-        build_id=_app_build_id(),
-        device_name=str(os.getenv("COMPUTERNAME") or os.getenv("HOSTNAME") or "").strip(),
-    )
-    if not response.ok:
-        raise LicenseOperationError(response.error_code, response.error_message, response)
-    state = _license_state_from_response(response, clean_seat_key, device_id)
-    save_license_seat_key(clean_seat_key)
-    save_license_state(state)
-    return state
-
-
-def refresh_and_store_license(*, base_url: str = "") -> LicenseState:
-    previous = load_license_state()
-    seat_key = str(load_license_seat_key() or (previous.seat_key if previous else "") or "").strip()
-    if not seat_key:
-        raise LicenseOperationError("invalid_seat_key", "stored seat key is missing")
-    device_id = get_or_create_license_device_id()
-    response = refresh_license(
-        seat_key,
-        device_id,
-        base_url=_ensure_live_license_base_url(base_url),
-        app_version=_app_version(),
-        build_id=_app_build_id(),
-    )
-    if response.error_code == "network_error":
-        raise LicenseOperationError(response.error_code, response.error_message, response)
-    state = _license_state_from_response(response, seat_key, device_id, previous=previous)
-    save_license_seat_key(seat_key)
-    save_license_state(state)
-    if not response.ok:
-        raise LicenseOperationError(response.error_code, response.error_message, response)
-    return state
+def refresh_and_store_license(*, base_url: str = "") -> None:
+    raise LicenseOperationError("unsupported", _FREE_BUILD_LIVE_MESSAGE)
 
 
 def ensure_live_license_or_raise(*, base_url: str = "", feature_name: str = "LIVE execution") -> None:
-    if _is_free_build():
-        raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
-    require_live(feature_name=feature_name)
-    local_state = load_license_state()
-    if local_state is None:
-        require_live_activation(feature_name=feature_name)
-        return
-    try:
-        refresh_and_store_license(base_url=base_url)
-    except LicenseOperationError as exc:
-        if exc.error_code == "invalid_seat_key":
-            raise SystemExit(
-                f"{feature_name} blocked: {_license_error_text(exc.error_code, exc.detail)} (reason=missing_license_state)."
-            )
-        if exc.error_code == "network_error":
-            if is_within_offline_grace(local_state.offline_grace_until):
-                return
-            raise SystemExit(
-                f"{feature_name} blocked: {_license_error_text(exc.error_code, exc.detail)} (reason=offline_grace_expired)."
-            )
-        raise SystemExit(
-            f"{feature_name} blocked: {_license_error_text(exc.error_code, exc.detail)} (reason={str(exc.error_code or 'license_refresh_failed')})."
-        )
-    require_live_activation(feature_name=feature_name)
+    raise SystemExit(_FREE_BUILD_LIVE_MESSAGE)
 
 
 def _build_env(spec: LaunchSpec) -> Dict[str, str]:

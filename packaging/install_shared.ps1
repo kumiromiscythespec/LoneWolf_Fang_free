@@ -1,4 +1,5 @@
 ﻿# BUILD_ID: 2026-04-03_install_root_python_precheck_skip_v1
+# BUILD_ID: 2026-04-19_free_shared_market_data_install_contract_v1
 [CmdletBinding()]
 param(
     [string]$InstallerBuildId = "",
@@ -741,7 +742,10 @@ function Ensure-Venv {
 }
 
 function Ensure-DataDirectories {
-    param([string]$DataRoot)
+    param(
+        [string]$DataRoot,
+        [string]$SharedMarketDataRoot
+    )
     foreach ($dir in @(
         $DataRoot,
         (Join-Path $DataRoot 'runtime'),
@@ -752,8 +756,9 @@ function Ensure-DataDirectories {
         (Join-Path $DataRoot 'runtime\state'),
         (Join-Path $DataRoot 'configs'),
         (Join-Path $DataRoot 'configs\user'),
-        (Join-Path $DataRoot 'market_data'),
-        (Join-Path $DataRoot 'market_data\precomputed_indicators')
+        $SharedMarketDataRoot,
+        (Join-Path $SharedMarketDataRoot 'chart_cache'),
+        (Join-Path $SharedMarketDataRoot 'precomputed_indicators')
     )) {
         Ensure-Directory -Path $dir
     }
@@ -761,8 +766,11 @@ function Ensure-DataDirectories {
 
 function Get-AppEnvironmentMap {
     param(
+        [string]$SharedRoot,
+        [string]$SharedDataRoot,
         [string]$TargetRoot,
         [string]$DataRoot,
+        [string]$SharedMarketDataRoot,
         [string[]]$PythonPathRelativeEntries
     )
     $pythonPathEntries = New-Object 'System.Collections.Generic.List[string]'
@@ -779,9 +787,12 @@ function Get-AppEnvironmentMap {
         PYTHONUTF8 = '1'
         PYTHONIOENCODING = 'utf-8'
         LWF_HOME = $TargetRoot
+        LWF_SHARED_ROOT = $SharedRoot
+        LWF_SHARED_DATA_ROOT = $SharedDataRoot
+        LWF_PRODUCT_DATA_ROOT = $DataRoot
         LWF_RUNTIME_ROOT = (Join-Path $DataRoot 'runtime')
         LWF_CONFIGS_ROOT = (Join-Path $DataRoot 'configs')
-        LWF_MARKET_DATA_ROOT = (Join-Path $DataRoot 'market_data')
+        LWF_MARKET_DATA_ROOT = $SharedMarketDataRoot
     }
 }
 
@@ -972,7 +983,9 @@ try {
     $targetRoot = Resolve-InstallRootPath -ExplicitRoot $InstallRoot -DefaultRoot $defaultInstallRoot -NoPrompt:$NonInteractive
     $targetRoot = [System.IO.Path]::GetFullPath($targetRoot)
     $venvRoot = Join-Path $script:SharedRoot ('venvs\' + (Get-ConfigString -Config $config -Names @('venv_name') -Default $script:ProductCode))
-    $dataRoot = Join-Path $script:SharedRoot ('data\' + (Get-ConfigString -Config $config -Names @('data_name') -Default $script:ProductCode))
+    $sharedDataRoot = Join-Path $script:SharedRoot 'data'
+    $sharedMarketDataRoot = Join-Path $sharedDataRoot 'market_data'
+    $dataRoot = Join-Path $sharedDataRoot (Get-ConfigString -Config $config -Names @('data_name') -Default $script:ProductCode)
 
     Ensure-Directory -Path $targetRoot
     $bootstrapSetupProtection = Get-BootstrapSetupProtection -BootstrapSetupPath $BootstrapSetupPath -TargetRoot $targetRoot
@@ -994,7 +1007,7 @@ try {
         throw ('Required package files are missing: ' + (@($plan.missing_required) -join ', '))
     }
 
-    Write-InstallLog -Level 'INFO' -Message ("build_id=$($script:BuildId) product=$($script:ProductCode) install_root=$targetRoot venv_root=$venvRoot data_root=$dataRoot manifest=$ManifestPath")
+    Write-InstallLog -Level 'INFO' -Message ("build_id=$($script:BuildId) product=$($script:ProductCode) install_root=$targetRoot venv_root=$venvRoot data_root=$dataRoot shared_market_data_root=$sharedMarketDataRoot manifest=$ManifestPath")
     Write-Host ('== {0} Installer ==' -f $script:ProductDisplayName)
     Write-Host ('BUILD_ID        : {0}' -f $script:BuildId)
     Write-Host ('Package Root    : {0}' -f $RepoRoot)
@@ -1003,13 +1016,13 @@ try {
     Write-Host ''
 
     $copiedFileCount = Copy-PackagePayload -Plan $plan -TargetRoot $targetRoot -BootstrapSetupProtection $bootstrapSetupProtection
-    Ensure-DataDirectories -DataRoot $dataRoot
+    Ensure-DataDirectories -DataRoot $dataRoot -SharedMarketDataRoot $sharedMarketDataRoot
 
     $basePythonInfo = Resolve-BasePython
     Write-InstallLog -Level 'INFO' -Message ("selected_python_path={0} selected_python_source={1} selected_python_version={2}" -f $basePythonInfo.Path, $basePythonInfo.Source, $basePythonInfo.Version)
 
     $requirementFiles = @(); foreach ($relativePath in @(Get-ConfigArray -Config $config -Names @('pip_requirement_files'))) { $requirementFiles += [System.IO.Path]::GetFullPath((Join-Path $targetRoot $relativePath)) }
-    $envMap = Get-AppEnvironmentMap -TargetRoot $targetRoot -DataRoot $dataRoot -PythonPathRelativeEntries @(Get-ConfigArray -Config $config -Names @('pythonpath_relative_entries'))
+    $envMap = Get-AppEnvironmentMap -SharedRoot $script:SharedRoot -SharedDataRoot $sharedDataRoot -TargetRoot $targetRoot -DataRoot $dataRoot -SharedMarketDataRoot $sharedMarketDataRoot -PythonPathRelativeEntries @(Get-ConfigArray -Config $config -Names @('pythonpath_relative_entries'))
     $venvInfo = Ensure-Venv -BasePython $basePythonInfo.Path -VenvRoot $venvRoot -RequirementFiles $requirementFiles
     $importCheck = Run-LauncherImportCheck -VenvPython $venvInfo.Python -EnvironmentMap $envMap -WorkingDirectory $targetRoot
 

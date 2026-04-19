@@ -1,4 +1,5 @@
 ﻿# BUILD_ID: 2026-04-02_free_shared_python_launcher_v2
+# BUILD_ID: 2026-04-19_free_shared_market_data_launcher_contract_v1
 [CmdletBinding()]
 param(
     [switch]$CheckOnly,
@@ -8,7 +9,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$BUILD_ID = '2026-04-02_free_shared_python_launcher_v2'
+$BUILD_ID = '2026-04-19_free_shared_market_data_launcher_contract_v1'
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = $ScriptRoot
 $ProductName = 'LoneWolf Fang free'
@@ -17,7 +18,10 @@ $AppEntryPath = Join-Path $RepoRoot 'app\app\cli\app_main.py'
 $SharedRoot = Join-Path $env:LOCALAPPDATA 'LoneWolfFang'
 $SharedStatePath = Join-Path $SharedRoot 'config\shared_python.json'
 $VenvRoot = Join-Path $SharedRoot 'venvs\free'
-$DataRoot = Join-Path $SharedRoot 'data\free'
+$SharedDataRoot = Join-Path $SharedRoot 'data'
+$ProductDataRoot = Join-Path $SharedDataRoot 'free'
+$SharedMarketDataRoot = Join-Path $SharedDataRoot 'market_data'
+$DataRoot = $ProductDataRoot
 $LogPath = Join-Path $SharedRoot 'logs\launcher_free.log'
 
 function Ensure-Directory {
@@ -86,17 +90,18 @@ function Resolve-BasePython {
 
 function Ensure-DataDirectories {
     foreach ($dir in @(
-        $DataRoot,
-        (Join-Path $DataRoot 'runtime'),
-        (Join-Path $DataRoot 'runtime\archives'),
-        (Join-Path $DataRoot 'runtime\exports'),
-        (Join-Path $DataRoot 'runtime\exports\runs'),
-        (Join-Path $DataRoot 'runtime\logs'),
-        (Join-Path $DataRoot 'runtime\state'),
-        (Join-Path $DataRoot 'configs'),
-        (Join-Path $DataRoot 'configs\user'),
-        (Join-Path $DataRoot 'market_data'),
-        (Join-Path $DataRoot 'market_data\precomputed_indicators')
+        $ProductDataRoot,
+        (Join-Path $ProductDataRoot 'runtime'),
+        (Join-Path $ProductDataRoot 'runtime\archives'),
+        (Join-Path $ProductDataRoot 'runtime\exports'),
+        (Join-Path $ProductDataRoot 'runtime\exports\runs'),
+        (Join-Path $ProductDataRoot 'runtime\logs'),
+        (Join-Path $ProductDataRoot 'runtime\state'),
+        (Join-Path $ProductDataRoot 'configs'),
+        (Join-Path $ProductDataRoot 'configs\user'),
+        $SharedMarketDataRoot,
+        (Join-Path $SharedMarketDataRoot 'chart_cache'),
+        (Join-Path $SharedMarketDataRoot 'precomputed_indicators')
     )) {
         Ensure-Directory -Path $dir
     }
@@ -180,10 +185,21 @@ Run $ProductName Setup to create or repair the venv.
 }
 
 Ensure-DataDirectories
-$envMap = @{ PYTHONPATH = (Join-Path $RepoRoot 'app'); PYTHONUTF8 = '1'; PYTHONIOENCODING = 'utf-8'; LWF_HOME = $RepoRoot; LWF_RUNTIME_ROOT = (Join-Path $DataRoot 'runtime'); LWF_CONFIGS_ROOT = (Join-Path $DataRoot 'configs'); LWF_MARKET_DATA_ROOT = (Join-Path $DataRoot 'market_data') }
+$envMap = @{
+    PYTHONPATH = (Join-Path $RepoRoot 'app')
+    PYTHONUTF8 = '1'
+    PYTHONIOENCODING = 'utf-8'
+    LWF_HOME = $RepoRoot
+    LWF_SHARED_ROOT = $SharedRoot
+    LWF_SHARED_DATA_ROOT = $SharedDataRoot
+    LWF_PRODUCT_DATA_ROOT = $ProductDataRoot
+    LWF_RUNTIME_ROOT = (Join-Path $ProductDataRoot 'runtime')
+    LWF_CONFIGS_ROOT = (Join-Path $ProductDataRoot 'configs')
+    LWF_MARKET_DATA_ROOT = $SharedMarketDataRoot
+}
 $importResult = Invoke-PythonCapture -PythonExe $venvPython -ArgumentList @('-c', 'import keyring; from PySide6.QtWidgets import QApplication; import app.cli.app_main') -EnvironmentMap $envMap
 $importSummary = (($importResult.StdOut + ' ' + $importResult.StdErr).Trim() -replace '\s+', ' ')
-Write-LauncherLog -Level 'INFO' -Message ("build_id=$BUILD_ID install_root=$RepoRoot base_python=$basePython venv_root=$VenvRoot data_root=$DataRoot target=$AppModule import_exit_code={0} import_summary={1}" -f $importResult.ExitCode, $importSummary)
+Write-LauncherLog -Level 'INFO' -Message ("build_id=$BUILD_ID install_root=$RepoRoot base_python=$basePython venv_root=$VenvRoot data_root=$DataRoot shared_market_data_root=$SharedMarketDataRoot target=$AppModule import_exit_code={0} import_summary={1}" -f $importResult.ExitCode, $importSummary)
 if ($importResult.ExitCode -ne 0) {
     $message = @"
 Launcher validation failed.

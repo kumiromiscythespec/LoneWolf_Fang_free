@@ -1,4 +1,5 @@
 # BUILD_ID: 2026-03-30_free_package_readme_native_artifacts_v1
+# BUILD_ID: 2026-04-19_free_package_shared_market_data_contract_v1
 
 # LoneWolf Fang Free Package
 
@@ -83,3 +84,12 @@ The build verifies native artifact presence in:
 - `LIVE` is not included in the free package flow.
 - `market_data/` is not bundled.
 - `runtime/` is bundled as skeleton-only directories with `.gitkeep` files.
+
+## Free Runtime Contract
+
+- Runtime and user configs remain product-scoped under `%LOCALAPPDATA%\LoneWolfFang\data\free\...`.
+- Shared chart and precomputed data use `%LOCALAPPDATA%\LoneWolfFang\data\market_data` as the primary root.
+- Repo-root `market_data\` remains a legacy read fallback for older local datasets.
+- Free keeps the non-LIVE contract: no account requirement, no billing flow, no desktop activation, and no seat-key gate for `PAPER`, `REPLAY`, or `BACKTEST`.
+- Missing chart data or precomputed inputs trigger one automatic prepare attempt before the app stops with the missing symbol / timeframe / period details.
+- GUI close during active `BACKTEST`, `REPLAY`, or pipeline work uses confirm-close plus graceful stop; no LIVE-only close chooser is introduced.

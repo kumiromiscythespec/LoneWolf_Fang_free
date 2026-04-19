@@ -92,6 +92,15 @@ The free edition supports the following modes:
 - Repo-top copies and packaged package-root copies of `LoneWolfFangFreeLauncher.exe` and `LoneWolf_Fang_Free_Setup.exe` are the intended signing targets.
 - Deep publish outputs under `launcher_native/` and `setup_bootstrap/` are intermediate build artifacts and are not user-facing release artifacts.
 
+### Data And Runtime Safeguards
+
+- Shared market data uses `%LOCALAPPDATA%\LoneWolfFang\data\market_data` as the primary root.
+- Repo-root `market_data\` remains a legacy read fallback for older free datasets.
+- `BACKTEST`, `REPLAY`, and runtime pipeline preparation attempt one automatic chart download / precompute generation pass before failing.
+- If preparation still fails, the stop message includes symbol, timeframe, prepare window, and searched paths.
+- Closing the GUI while `BACKTEST`, `REPLAY`, or pipeline work is active asks for confirmation and requests a graceful stop instead of hard-closing.
+- Free still requires no account login, billing flow, desktop activation, or seat key for `PAPER`, `REPLAY`, and `BACKTEST`.
+
 ### Directory Notes
 
 This package may include:

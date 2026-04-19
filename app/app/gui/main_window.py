@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-20_free_ui_wording_cleanup_v1
 # BUILD_ID: 2026-04-19_free_gui_title_bar_version_1_1_1_v1
 # BUILD_ID: 2026-04-18_free_settings_scroll_nonlive_parity_v1
 # BUILD_ID: 2026-04-18_free_nonlive_activation_strip_v1
@@ -161,7 +162,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-04-19_free_gui_title_bar_version_1_1_1_v1"
+BUILD_ID = "2026-04-20_free_ui_wording_cleanup_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -241,7 +242,7 @@ _UI_TEXTS = {
         "group.api_credentials": "API認証情報",
         "group.diagnostics_pipeline": "診断 / パイプライン",
         "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST のみ",
-        "note.preview_only": "プレビューのみです。課金には反映されません。",
+        "note.preview_only": "プレビューのみです。売買動作やサイズ設定は変更されません。",
         "placeholder.dataset_root": "<PREFIX>_5m と <PREFIX>_1h を含むデータセットルートを選択",
         "placeholder.api_key": "{exchange} キー",
         "placeholder.api_secret": "{exchange} シークレット",
@@ -351,7 +352,7 @@ _UI_TEXTS = {
         "group.api_credentials": "API Credentials",
         "group.diagnostics_pipeline": "Diagnostics / Pipeline",
         "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
-        "note.preview_only": "Preview only. Billing is not affected.",
+        "note.preview_only": "Preview only. Trading behavior and sizing are unchanged.",
         "placeholder.dataset_root": "Select dataset root containing <PREFIX>_5m and <PREFIX>_1h",
         "placeholder.api_key": "{exchange} key",
         "placeholder.api_secret": "{exchange} secret",
@@ -4610,7 +4611,7 @@ class MainWindow(QWidget):
             self._reset_runtime_preflight_failure_notice_state()
             self._clear_manual_stop_state()
             if str(run_mode).upper() == "LIVE":
-                msg = "FREE build does not support LIVE mode."
+                msg = "LoneWolf Fang Free does not include LIVE mode."
                 self._append(f"[ui] LIVE blocked: {msg}\n")
                 QMessageBox.warning(self, "LIVE blocked", msg)
                 self.btn_start.setChecked(False)

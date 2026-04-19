@@ -9,10 +9,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$BUILD_ID = '2026-04-19_free_shared_market_data_launcher_contract_v1'
+$BUILD_ID = '2026-04-20_free_launcher_native_entrypoint_wording_v1'
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = $ScriptRoot
-$ProductName = 'LoneWolf Fang free'
+$ProductName = 'LoneWolf Fang Free'
 $AppModule = 'app.cli.app_main'
 $AppEntryPath = Join-Path $RepoRoot 'app\app\cli\app_main.py'
 $SharedRoot = Join-Path $env:LOCALAPPDATA 'LoneWolfFang'

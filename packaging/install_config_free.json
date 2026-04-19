@@ -1,16 +1,24 @@
 ﻿{
-  "build_id": "2026-04-02_free_user_scope_installer_wrapper_v1",
+  "build_id": "2026-04-20_free_installer_native_shortcut_contract_v1",
   "product": "LoneWolf_Fang_free",
   "product_code": "free",
-  "product_display_name": "LoneWolf Fang free",
+  "product_display_name": "LoneWolf Fang Free",
   "install_root_mode": "programfiles",
   "install_root_name": "LoneWolf Fang free",
   "overwrite_mode": "prompt",
   "receipt_relative_path": ".install_receipt.json",
-  "shortcut_name": "LoneWolf Fang free",
-  "shortcut_relative_target": "Launch_LoneWolf_Fang_Free_GUI.vbs",
+  "shortcut_name": "LoneWolf Fang Free",
+  "legacy_shortcut_names": [
+    "LoneWolf Fang free",
+    "LoneWolf Fang Free GUI"
+  ],
+  "shortcut_relative_target": "LoneWolfFangFreeLauncher.exe",
+  "shortcut_fallback_targets": [
+    "Launch_LoneWolf_Fang_Free_GUI.vbs",
+    "Launch_LoneWolf_Fang_Free_GUI.cmd"
+  ],
   "shortcut_icon_relative_path": "app\\logos\\lwf_logo.ico",
-  "shortcut_description": "Launch LoneWolf Fang free GUI",
+  "shortcut_description": "Launch LoneWolf Fang Free",
   "python_preferred_minor": "3.11",
   "venv_name": "free",
   "data_name": "free",

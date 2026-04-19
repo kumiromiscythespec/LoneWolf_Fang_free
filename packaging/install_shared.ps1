@@ -950,7 +950,29 @@ function New-DesktopShortcut {
     Ensure-Directory -Path $desktopDir
     $shortcutName = Get-ConfigString -Config $Config -Names @('shortcut_name') -Default $script:ProductDisplayName
     $shortcutPath = Join-Path $desktopDir ($shortcutName + '.lnk')
-    $targetPath = Join-Path $TargetRoot (Get-ConfigString -Config $Config -Names @('shortcut_relative_target') -Default '')
+    $targetCandidates = New-Object 'System.Collections.Generic.List[string]'
+    $primaryTarget = Get-ConfigString -Config $Config -Names @('shortcut_relative_target') -Default ''
+    if (-not [string]::IsNullOrWhiteSpace($primaryTarget)) {
+        $null = $targetCandidates.Add($primaryTarget)
+    }
+    foreach ($candidate in @(Get-ConfigArray -Config $Config -Names @('shortcut_fallback_targets'))) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $null = $targetCandidates.Add([string]$candidate)
+        }
+    }
+    $targetPath = ''
+    $targetRelativePath = ''
+    foreach ($candidate in @($targetCandidates)) {
+        $candidatePath = [System.IO.Path]::GetFullPath((Join-Path $TargetRoot $candidate))
+        if (Test-Path -LiteralPath $candidatePath) {
+            $targetPath = $candidatePath
+            $targetRelativePath = [string]$candidate
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($targetPath)) {
+        throw ('Desktop shortcut target was not found under the install root. Tried: {0}' -f (@($targetCandidates) -join ', '))
+    }
     $iconRelative = Get-ConfigString -Config $Config -Names @('shortcut_icon_relative_path') -Default ''
     $iconPath = ''
     if (-not [string]::IsNullOrWhiteSpace($iconRelative)) { $iconCandidate = Join-Path $TargetRoot $iconRelative; if (Test-Path -LiteralPath $iconCandidate) { $iconPath = [System.IO.Path]::GetFullPath($iconCandidate) } }
@@ -961,6 +983,20 @@ function New-DesktopShortcut {
     $shortcut.Description = Get-ConfigString -Config $Config -Names @('shortcut_description') -Default ('Launch ' + $script:ProductDisplayName)
     if (-not [string]::IsNullOrWhiteSpace($iconPath)) { $shortcut.IconLocation = "$iconPath,0" }
     $shortcut.Save()
+    Write-InstallLog -Level 'INFO' -Message ("desktop_shortcut_target={0} target_relative_path={1}" -f $targetPath, $targetRelativePath)
+    foreach ($legacyShortcutName in @(Get-ConfigArray -Config $Config -Names @('legacy_shortcut_names'))) {
+        if ([string]::IsNullOrWhiteSpace($legacyShortcutName)) {
+            continue
+        }
+        $legacyShortcutPath = Join-Path $desktopDir ($legacyShortcutName + '.lnk')
+        if ([string]::Equals([System.IO.Path]::GetFullPath($legacyShortcutPath), [System.IO.Path]::GetFullPath($shortcutPath), [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        if (Test-Path -LiteralPath $legacyShortcutPath) {
+            Remove-Item -LiteralPath $legacyShortcutPath -Force -ErrorAction SilentlyContinue
+            Write-InstallLog -Level 'INFO' -Message ("removed_legacy_desktop_shortcut={0}" -f $legacyShortcutPath)
+        }
+    }
     return $shortcutPath
 }
 

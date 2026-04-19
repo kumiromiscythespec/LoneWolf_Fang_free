@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-20_free_preview_wording_cleanup_v1
 # BUILD_ID: 2026-04-03_preview_only_valuation_settings_v1
 from __future__ import annotations
 
@@ -12,14 +13,14 @@ from app.core.paths import ensure_runtime_dirs
 from app.core.state_context import build_state_context, list_registered_contexts, normalize_symbol, resolve_state_context_paths
 
 
-BUILD_ID = "2026-04-03_preview_only_valuation_settings_v1"
+BUILD_ID = "2026-04-20_free_preview_wording_cleanup_v1"
 
 # Preview-only helper for the GUI.
 # This module must stay read-only with respect to billing:
 # - no billing summary send
 # - no billing transport or server calls
 # - no billing local state mutation
-PREVIEW_ONLY_NOTE = "Preview only. Billing is not affected."
+PREVIEW_ONLY_NOTE = "Preview only. Trading behavior and sizing are unchanged."
 DEFAULT_PREVIEW_BALANCE_TEXT = "300000"
 SUPPORTED_PREVIEW_MODES = ("Manual JPY", "Manual FX", "Auto")
 SUPPORTED_ACCOUNT_CCYS = ("JPY", "USD", "USDT", "USDC")
@@ -381,7 +382,7 @@ def _calculate_auto_preview(request: ValuationPreviewRequest) -> ValuationPrevie
         if env_rate is None:
             raise ValueError(
                 f"Auto preview requires a runtime FX source for {account_ccy}. "
-                "Enter FX Inputs or set the existing billing FX environment variables."
+                "Enter FX inputs or set the existing compatible FX environment variables."
             )
         fx_rate, fx_source = env_rate
     raw_balance_jpy = float(native_balance) * float(fx_rate)

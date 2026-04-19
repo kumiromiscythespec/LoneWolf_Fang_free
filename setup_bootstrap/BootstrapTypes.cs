@@ -80,7 +80,7 @@ internal sealed record ProductDefinition(
     public static ProductDefinition Free { get; } = new(
         "free",
         "LoneWolf Fang Free",
-        "LoneWolf Fang free",
+        "LoneWolf Fang Free",
         @"packaging\install_free_local.ps1",
         @"packaging\install_config_free.json",
         "LoneWolf_Fang_Free_Package.zip",
@@ -91,12 +91,12 @@ internal sealed record ProductDefinition(
         "programfiles",
         "LoneWolf Fang free",
         false,
-        "LoneWolf Fang free.lnk",
+        "LoneWolf Fang Free.lnk",
         new[]
         {
+            "LoneWolfFangFreeLauncher.exe",
             "Launch_LoneWolf_Fang_Free_GUI.vbs",
             "Launch_LoneWolf_Fang_Free_GUI.cmd",
-            "LoneWolfFangFreeLauncher.exe",
         });
 
     public static IReadOnlyList<ProductDefinition> All { get; } = new[]

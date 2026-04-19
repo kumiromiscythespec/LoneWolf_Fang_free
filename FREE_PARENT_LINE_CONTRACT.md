@@ -20,5 +20,5 @@ Date: 2026-04-19
 
 ## Adoption Note
 
-- Fixed-notional ceiling follow-up is not adopted here.
-- The free tree already has runtime auto-prepare and fallback work, but no clearly isolated report-only ceiling hook was found that avoids changing signal or sizing behavior.
+- Fixed-notional ceiling follow-up remains non-adopted here.
+- A final free-tree pass confirmed the existing auto-prepare, fallback, and close-confirm work, but no clearly isolated report-only ceiling hook was found that avoids changing signal or sizing behavior.

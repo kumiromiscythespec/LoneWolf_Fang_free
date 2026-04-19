@@ -19,7 +19,7 @@
     <value>Welcome</value>
   </data>
   <data name="WelcomeBody" xml:space="preserve">
-    <value>Install {0} with a windowed setup wizard while keeping the existing PowerShell backend.</value>
+    <value>Install, repair, or refresh {0} with a windowed setup wizard while keeping the existing PowerShell backend.</value>
   </data>
   <data name="InstallLocation" xml:space="preserve">
     <value>Install location</value>
@@ -28,7 +28,7 @@
     <value>Browse</value>
   </data>
   <data name="CreateDesktopShortcut" xml:space="preserve">
-    <value>Create desktop shortcut</value>
+    <value>Create desktop shortcut to the launcher</value>
   </data>
   <data name="StartAfterInstallation" xml:space="preserve">
     <value>Start after installation</value>
@@ -55,7 +55,7 @@
     <value>Open log folder</value>
   </data>
   <data name="ContinueAndRefreshFiles" xml:space="preserve">
-    <value>Continue and refresh files?</value>
+    <value>Continue and refresh files in place?</value>
   </data>
   <data name="RunningPythonProcessesDetected" xml:space="preserve">
     <value>Running Python processes were detected under the install target.</value>
@@ -154,7 +154,7 @@
     <value>{0} was installed successfully.</value>
   </data>
   <data name="SetupSuccessLaunchWarning" xml:space="preserve">
-    <value>The app could not be started automatically.</value>
+    <value>The app could not be started automatically. Use the desktop shortcut or the installed launcher.</value>
   </data>
   <data name="SetupSuccessLicenseNote" xml:space="preserve">
     <value>License activation is required after installation.</value>

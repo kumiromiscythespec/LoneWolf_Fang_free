@@ -12,8 +12,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$BUILD_ID = '2026-04-03_free_setup_bootstrap_gui_package_integration_v1'
+$BUILD_ID = '2026-04-20_free_package_build_official_launcher_summary_v1'
 $ReleaseAssetName = 'LoneWolf_Fang_Free_Package.zip'
+$OfficialLauncherFileName = 'LoneWolfFangFreeLauncher.exe'
 $OfficialSetupFileName = 'LoneWolf_Fang_Free_Setup.exe'
 $OfficialSetupPublishRelativePath = 'setup_bootstrap/bin/Release/net8.0-windows/publish/win-x64-single-file/LoneWolf_Fang_Free_Setup.exe'
 $PublishCommandHint = 'dotnet publish .\\setup_bootstrap\\LoneWolfFangFreeSetup.csproj -c Release -p:PublishProfile=Properties\\PublishProfiles\\win-x64-single-file.pubxml'
@@ -107,6 +108,7 @@ Write-Host '== Free Package Build =='
 Write-Host ('BUILD_ID              : {0}' -f $BUILD_ID)
 Write-Host ('Manifest              : {0}' -f $plan.manifest_path)
 Write-Host ('Repo Root             : {0}' -f $plan.repo_root)
+Write-Host ('Official Launcher     : {0}' -f (Join-Path $RepoRoot $OfficialLauncherFileName))
 Write-Host ('Official Setup        : {0}' -f (Join-Path $RepoRoot $OfficialSetupFileName))
 Write-Host ('Staging Path          : {0}' -f $stage.stage_path)
 Write-Host ('Package Root          : {0}' -f $stage.package_root_path)

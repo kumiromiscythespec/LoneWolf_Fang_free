@@ -7,7 +7,7 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if "%ROOT:~-1%"==":" set "ROOT=%ROOT%\"
 cd /d "%ROOT%"
 
-title LoneWolf Fang free Installer
+title LoneWolf Fang Free Installer
 
 set "PS_SCRIPT=%ROOT%\packaging\install_free_local.ps1"
 
@@ -19,7 +19,7 @@ if not exist "%PS_SCRIPT%" (
 )
 
 echo ============================================================
-echo LoneWolf Fang free Installer
+echo LoneWolf Fang Free Installer
 echo ============================================================
 echo Package root: %ROOT%
 echo.
@@ -47,7 +47,7 @@ if not "%EXITCODE%"=="0" (
 echo [OK] Installation finished successfully.
 echo.
 echo Next step:
-echo   Double-click Launch_LoneWolf_Fang_Free_GUI.vbs in the installed folder.
+echo   Use the desktop shortcut or run LoneWolfFangFreeLauncher.exe from the installed folder.
 echo.
 pause
 exit /b 0

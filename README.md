@@ -1,289 +1,136 @@
 # LoneWolf Fang Free
 
-Free edition of LoneWolf Fang with GUI support for **PAPER**, **REPLAY**, and **BACKTEST**.  
-**LIVE is not included** in the free edition.
-
-LoneWolf Fang Free は、**PAPER / REPLAY / BACKTEST** に対応した GUI 付き無料版です。  
-**LIVE は free には含まれません。**
-
----
+Free Windows package for `PAPER`, `REPLAY`, and `BACKTEST`.
+`LIVE`, billing flows, desktop activation, and seat-key startup gates are not part of the free product.
 
 ## English
 
-### Overview
+### Current Contract
 
-LoneWolf Fang Free is the free edition of LoneWolf Fang.
+- Free stays research-only and non-LIVE.
+- Official Windows artifacts at repo top are:
+  - `LoneWolfFangFreeLauncher.exe`
+  - `LoneWolf_Fang_Free_Setup.exe`
+- The native setup bootstrap is the preferred install / repair / update entrypoint.
+- The native launcher is the preferred GUI entrypoint.
+- `Launch_LoneWolf_Fang_Free_GUI.vbs` and `Launch_LoneWolf_Fang_Free_GUI.cmd` remain compatibility shims.
 
-It is designed for users who want to:
+### Install / Repair / Update
 
-- explore the GUI
-- test workflows safely with paper trading
-- verify behavior with replay
-- run backtests locally
+Use these entrypoints in this order:
 
-The free edition is intentionally limited to research and evaluation use.  
-It does **not** include LIVE trading.
+1. `LoneWolf_Fang_Free_Setup.exe`
+2. `Install_LoneWolf_Fang_Free.cmd` when you are already inside an unpacked local package
 
-### Included in Free
+The installer validates the package, resolves a usable Python base, creates or refreshes the shared free venv, runs the GUI import check, creates the desktop shortcut, and writes `.install_receipt.json`.
 
-- GUI launcher
-- Native launcher and native setup bootstrap as official repo-top Windows artifacts after package build
-- PAPER
-- REPLAY
-- BACKTEST
-- Local installer
-- Desktop shortcut creation for the GUI launcher
+The desktop shortcut now prefers `LoneWolfFangFreeLauncher.exe` and falls back safely to the VBS/CMD shims when needed.
 
-### Not Included in Free
+### Launch
 
-- LIVE
-- Standard online installer flow
-- Standard-only distribution flow
-- Bundled datasets
-- Advanced sweep tooling in the package
+After installation, use the desktop shortcut `LoneWolf Fang Free`.
 
-### Installation
-
-Run the following file from the package root:
-
-`Install_LoneWolf_Fang_Free.cmd`
-
-When bundled, prefer the native setup entrypoint first:
-
-`LoneWolf_Fang_Free_Setup.exe`
-
-The local installer performs the following steps:
-
-- validates the local package contents
-- checks for a usable Python environment
-- runs a GUI import check
-- creates a desktop shortcut named `LoneWolf Fang Free GUI`
-- writes `.install_receipt.json`
-
-### Launching the GUI
-
-After installation, launch the app from the desktop shortcut:
-
-`LoneWolf Fang Free GUI`
-
-You can also launch it manually from the package root:
+Manual launch remains available through:
 
 - `LoneWolfFangFreeLauncher.exe`
-- `Launch_LoneWolf_Fang_Free_GUI.cmd`
 - `Launch_LoneWolf_Fang_Free_GUI.vbs`
+- `Launch_LoneWolf_Fang_Free_GUI.cmd`
+- `Launch_LoneWolf_Fang_Free_GUI.ps1`
 
-### Supported Modes
+### Data / Runtime Contract
 
-The free edition supports the following modes:
+- Product runtime and user config stay under `%LOCALAPPDATA%\LoneWolfFang\data\free\...`.
+- Shared chart data and precomputed indicators use `%LOCALAPPDATA%\LoneWolfFang\data\market_data` as the primary root.
+- Repo-root `market_data\` remains a legacy read fallback.
+- `BACKTEST`, `REPLAY`, and pipeline preparation may perform one automatic prepare pass when data is missing.
+- If auto-prepare still fails, the stop message includes symbol, timeframe, prepare window, and searched paths.
+- Closing the GUI during active `BACKTEST`, `REPLAY`, or pipeline work asks for confirmation and requests a graceful stop.
 
-- `PAPER`
-- `REPLAY`
-- `BACKTEST`
-
-`LIVE` is not available in the free edition.
-
-### Notes
-
-- The free build is intended for evaluation and research workflows.
-- Log level is fixed to the minimum level in Free.
-- The GUI title is `LoneWolf Fang Free`.
-- The package does not bundle market datasets.
-- Runtime folders are included as skeleton directories only.
-- Repo-top copies and packaged package-root copies of `LoneWolfFangFreeLauncher.exe` and `LoneWolf_Fang_Free_Setup.exe` are the intended signing targets.
-- Deep publish outputs under `launcher_native/` and `setup_bootstrap/` are intermediate build artifacts and are not user-facing release artifacts.
-
-### Data And Runtime Safeguards
-
-- Shared market data uses `%LOCALAPPDATA%\LoneWolfFang\data\market_data` as the primary root.
-- Repo-root `market_data\` remains a legacy read fallback for older free datasets.
-- `BACKTEST`, `REPLAY`, and runtime pipeline preparation attempt one automatic chart download / precompute generation pass before failing.
-- If preparation still fails, the stop message includes symbol, timeframe, prepare window, and searched paths.
-- Closing the GUI while `BACKTEST`, `REPLAY`, or pipeline work is active asks for confirmation and requests a graceful stop instead of hard-closing.
-- Free still requires no account login, billing flow, desktop activation, or seat key for `PAPER`, `REPLAY`, and `BACKTEST`.
-
-### Directory Notes
-
-This package may include:
-
-- core runtime files
-- GUI application code
-- packaging scripts for the local installer
-- runtime skeleton directories
-- minimal config files for initial use
-
-### Standard vs Free
-
-Free is intended for evaluation and non-LIVE usage.
+### Free Boundary
 
 Free includes:
 
-- GUI access
-- PAPER
-- REPLAY
-- BACKTEST
-
-Standard provides additional capabilities beyond Free.
-
-### Local Packaging
-
-This repository is structured so the Free package can be built locally as a zip package.
-
-The Free package is a **local-installer zip package**, not an online installer package.
-
-### Important
-
-This repository does not use LIVE in the free edition.  
-Do not expect LIVE behavior or standard-only distribution behavior from this package.
-
----
-
-## 日本語
-
-### 概要
-
-LoneWolf Fang Free は、LoneWolf Fang の無料版です。
-
-主に次の用途を想定しています。
-
-- GUI を試す
-- paper trading で安全に操作確認する
-- replay で挙動を検証する
-- backtest をローカルで実行する
-
-free 版は、検証・研究・体験用として意図的に制限されています。  
-**LIVE は含まれません。**
-
-### Free に含まれるもの
-
-- GUI ランチャー
-- PAPER
-- REPLAY
-- BACKTEST
-- ローカルインストーラー
-- GUI 起動用デスクトップショートカット作成
-
-### Free に含まれないもの
-
-- LIVE
-- standard の online installer 導線
-- standard 専用の配布導線
-- データセット同梱
-- パッケージ内の高度な sweep ツール一式
-
-### インストール方法
-
-パッケージのルートで、次のファイルを実行してください。
-
-`Install_LoneWolf_Fang_Free.cmd`
-
-ローカルインストーラーは以下を行います。
-
-- ローカル package 内容の検証
-- 利用可能な Python 環境の確認
-- GUI import check
-- `LoneWolf Fang Free GUI` という名前のデスクトップショートカット作成
-- `.install_receipt.json` の出力
-
-### GUI の起動方法
-
-インストール後は、デスクトップに作成された次のショートカットから起動してください。
-
-`LoneWolf Fang Free GUI`
-
-パッケージルートから手動で起動することもできます。
-
-- `Launch_LoneWolf_Fang_Free_GUI.cmd`
-- `Launch_LoneWolf_Fang_Free_GUI.vbs`
-
-### 対応モード
-
-free 版で利用できるモードは次の3つです。
-
+- GUI
 - `PAPER`
 - `REPLAY`
 - `BACKTEST`
 
-`LIVE` は free 版では利用できません。
+Free does not include:
 
-### 補足
+- `LIVE`
+- billing flows
+- desktop activation
+- seat keys
+- standard-only distribution or account-gated startup
 
-- free build は、検証・研究・体験用途を想定しています。
-- free では log level は最小値に固定されています。
-- GUI タイトルは `LoneWolf Fang Free` です。
-- この package には market dataset は同梱されません。
-- runtime フォルダは skeleton のみを含みます。
+### Packaging Notes
 
-### ディレクトリについて
+- `market_data/` is not bundled.
+- `runtime/` is bundled as skeleton-only directories.
+- Sign only the repo-top or packaged package-root copies of `LoneWolfFangFreeLauncher.exe` and `LoneWolf_Fang_Free_Setup.exe`.
+- Deep outputs under `launcher_native/` and `setup_bootstrap/` are intermediate build artifacts, not release artifacts.
 
-この package には主に以下が含まれます。
+## 日本語
 
-- 実行に必要な core runtime files
-- GUI アプリ本体
-- ローカルインストーラー用 packaging scripts
-- runtime skeleton directories
-- 初期利用のための最小 config files
+### 現在の free 契約
 
-### standard と free の違い
+- free は調査・検証用の non-LIVE パッケージです。
+- repo top の official Windows artifacts は次の 2 つです。
+  - `LoneWolfFangFreeLauncher.exe`
+  - `LoneWolf_Fang_Free_Setup.exe`
+- インストール / 修復 / 更新の起点は `LoneWolf_Fang_Free_Setup.exe` を優先します。
+- GUI 起動の正規エントリは `LoneWolfFangFreeLauncher.exe` です。
+- `Launch_LoneWolf_Fang_Free_GUI.vbs` と `Launch_LoneWolf_Fang_Free_GUI.cmd` は互換 shim として残します。
 
-free は、評価・検証・非LIVE用途向けです。
+### インストール / 修復 / 更新
+
+次の順で使ってください。
+
+1. `LoneWolf_Fang_Free_Setup.exe`
+2. 展開済みローカル package 内では `Install_LoneWolf_Fang_Free.cmd`
+
+desktop shortcut は `LoneWolfFangFreeLauncher.exe` を優先し、native launcher が見つからない場合だけ VBS/CMD shim に安全にフォールバックします。
+
+### 起動
+
+インストール後は desktop shortcut `LoneWolf Fang Free` を使って起動します。
+
+手動起動も可能です。
+
+- `LoneWolfFangFreeLauncher.exe`
+- `Launch_LoneWolf_Fang_Free_GUI.vbs`
+- `Launch_LoneWolf_Fang_Free_GUI.cmd`
+- `Launch_LoneWolf_Fang_Free_GUI.ps1`
+
+### データ / ランタイム契約
+
+- product runtime と user config は `%LOCALAPPDATA%\LoneWolfFang\data\free\...` 配下を使います。
+- chart data と precomputed indicators の primary root は `%LOCALAPPDATA%\LoneWolfFang\data\market_data` です。
+- repo root の `market_data\` は legacy read fallback として残します。
+- `BACKTEST` / `REPLAY` / pipeline prepare では、必要データ欠落時に 1 回だけ auto-prepare を試行します。
+- auto-prepare が失敗した場合は、symbol / timeframe / prepare window / searched paths を含む安全停止メッセージを返します。
+- GUI を active な `BACKTEST` / `REPLAY` / pipeline 実行中に閉じる場合は confirm-close と graceful stop を使います。
+
+### free 境界
 
 free に含まれるもの:
 
 - GUI
-- PAPER
-- REPLAY
-- BACKTEST
+- `PAPER`
+- `REPLAY`
+- `BACKTEST`
 
-standard には、free には含まれない追加機能があります。
+free に含めないもの:
 
-### ローカル package について
+- `LIVE`
+- billing 導線
+- desktop activation
+- seat key
+- standard-only 機能や配布導線
 
-このリポジトリは、Free package をローカルで zip として生成できる構成になっています。
+### packaging 補足
 
-Free package は **local-installer zip package** であり、online installer package ではありません。
-
-### 重要事項
-
-このリポジトリの free 版には LIVE は含まれません。  
-standard 専用の LIVE 動作や配布導線を前提にしないでください。
-
----
-
-## Quick Start
-
-### English
-
-1. Extract the package
-2. Run `Install_LoneWolf_Fang_Free.cmd`
-3. Use the desktop shortcut `LoneWolf Fang Free GUI`
-4. Choose `PAPER`, `REPLAY`, or `BACKTEST`
-
-### 日本語
-
-1. package を展開する
-2. `Install_LoneWolf_Fang_Free.cmd` を実行する
-3. デスクトップの `LoneWolf Fang Free GUI` を使って起動する
-4. `PAPER` / `REPLAY` / `BACKTEST` を選ぶ
-
----
-
-## Repository Notes
-
-### English
-
-This repository is intended to keep the Free edition packaging and local installer flow separate from standard distribution.
-
-### 日本語
-
-このリポジトリは、free 版の packaging と local installer 導線を、standard の配布導線から分離して管理することを目的としています。
-
----
-
-## License
-
-License terms will be provided separately.
-
-ライセンス条件は別途提供予定です。
-### Non-Live Tools
-
-- Chart / result panel / snapshots / Save PNG / Open Folder remain available in PAPER / REPLAY / BACKTEST.
+- `market_data/` は bundle しません。
+- `runtime/` は skeleton directory のみを bundle します。
+- 署名対象は repo top または package root に置かれた `LoneWolfFangFreeLauncher.exe` と `LoneWolf_Fang_Free_Setup.exe` です。
+- `launcher_native/` と `setup_bootstrap/` 配下の publish 生成物は中間 build artifact です。

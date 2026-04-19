@@ -19,7 +19,7 @@
     <value>ようこそ</value>
   </data>
   <data name="WelcomeBody" xml:space="preserve">
-    <value>既存の PowerShell backend を活かしたまま、ウィンドウ付きセットアップウィザードで {0} をインストールします。</value>
+    <value>既存の PowerShell backend を維持したまま、{0} をインストール、修復、または更新します。</value>
   </data>
   <data name="InstallLocation" xml:space="preserve">
     <value>インストール先</value>
@@ -28,10 +28,10 @@
     <value>参照</value>
   </data>
   <data name="CreateDesktopShortcut" xml:space="preserve">
-    <value>デスクトップショートカットを作成する</value>
+    <value>ランチャーへのデスクトップショートカットを作成</value>
   </data>
   <data name="StartAfterInstallation" xml:space="preserve">
-    <value>インストール完了後に起動する</value>
+    <value>インストール後に起動</value>
   </data>
   <data name="Install" xml:space="preserve">
     <value>インストール</value>
@@ -55,25 +55,25 @@
     <value>ログフォルダーを開く</value>
   </data>
   <data name="ContinueAndRefreshFiles" xml:space="preserve">
-    <value>続行してファイルを更新しますか？</value>
+    <value>そのままファイルを更新しますか?</value>
   </data>
   <data name="RunningPythonProcessesDetected" xml:space="preserve">
-    <value>インストール先の配下で実行中の Python プロセスが検出されました。</value>
+    <value>選択したインストール先で実行中の Python プロセスが見つかりました。</value>
   </data>
   <data name="StopThemAndContinue" xml:space="preserve">
-    <value>停止して続行しますか？</value>
+    <value>停止して続行しますか?</value>
   </data>
   <data name="StoppingRunningPythonProcesses" xml:space="preserve">
     <value>実行中の Python プロセスを停止しています...</value>
   </data>
   <data name="PythonProcessesWereStoppedSuccessfully" xml:space="preserve">
-    <value>Python プロセスを正常に停止しました。</value>
+    <value>Python プロセスを停止しました。</value>
   </data>
   <data name="SomePythonProcessesCouldNotBeStopped" xml:space="preserve">
     <value>停止できない Python プロセスが残っています。</value>
   </data>
   <data name="InstallationCannotContinueUntilThoseProcessesAreClosed" xml:space="preserve">
-    <value>それらのプロセスが閉じられるまでインストールを続行できません。</value>
+    <value>それらのプロセスを閉じるまでインストールを続行できません。</value>
   </data>
   <data name="LicenseActivationRequired" xml:space="preserve">
     <value>インストール後にライセンス有効化が必要です。</value>
@@ -118,10 +118,10 @@
     <value>インストールに失敗しました。</value>
   </data>
   <data name="InstallFolderPromptTitle" xml:space="preserve">
-    <value>既存ファイルが見つかりました</value>
+    <value>既存ファイルを検出しました</value>
   </data>
   <data name="InstallFolderPromptBody" xml:space="preserve">
-    <value>選択したインストール先には既にファイルがあります。</value>
+    <value>選択したインストール先には既存ファイルがあります。</value>
   </data>
   <data name="InstallFolderPromptTarget" xml:space="preserve">
     <value>インストール先: {0}</value>
@@ -133,13 +133,13 @@
     <value>インストール先: {0}</value>
   </data>
   <data name="PythonPromptCount" xml:space="preserve">
-    <value>一致したプロセス数: {0}</value>
+    <value>対象プロセス数: {0}</value>
   </data>
   <data name="SetupFailureTitle" xml:space="preserve">
     <value>インストール失敗</value>
   </data>
   <data name="SetupFailureUnexpected" xml:space="preserve">
-    <value>セットアップが予期せず失敗しました。詳細はログフォルダーを確認してください。</value>
+    <value>セットアップが予期せず失敗しました。ログフォルダーを確認してください。</value>
   </data>
   <data name="SetupFailureSummary" xml:space="preserve">
     <value>{0} のインストールは完了しませんでした。</value>
@@ -154,7 +154,7 @@
     <value>{0} のインストールが完了しました。</value>
   </data>
   <data name="SetupSuccessLaunchWarning" xml:space="preserve">
-    <value>アプリを自動起動できませんでした。</value>
+    <value>アプリを自動起動できませんでした。デスクトップショートカットまたはインストール済みランチャーから起動してください。</value>
   </data>
   <data name="SetupSuccessLicenseNote" xml:space="preserve">
     <value>インストール後にライセンス有効化が必要です。</value>

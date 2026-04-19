@@ -7,10 +7,10 @@ namespace LoneWolfFangFreeLauncher;
 
 internal static class Program
 {
-    private const string BuildId = "2026-04-02_free_native_launcher_argument_bridge_v1";
+    private const string BuildId = "2026-04-20_free_native_launcher_titlecase_v1";
     private const string LauncherScriptName = "Launch_LoneWolf_Fang_Free_GUI.ps1";
     private const string AppMarkerRelativePath = @"app\app\cli\app_main.py";
-    private const string MessageBoxTitle = "LoneWolf Fang free";
+    private const string MessageBoxTitle = "LoneWolf Fang Free";
     private const uint MbOk = 0x00000000;
     private const uint MbIconError = 0x00000010;
 

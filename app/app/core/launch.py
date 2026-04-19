@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-20_free_live_boundary_wording_v1
 # BUILD_ID: 2026-04-18_free_no_activation_startup_v1
 # BUILD_ID: 2026-04-08_free_bitbank_okx_spot_only_v1
 # BUILD_ID: 2026-04-03_free_launch_salesafe_defaults_release_prep_v1
@@ -19,11 +20,11 @@ from app.core.paths import ensure_runtime_dirs
 from app.core.tier import get_build_tier
 
 
-BUILD_ID = "2026-04-18_free_no_activation_startup_v1"
+BUILD_ID = "2026-04-20_free_live_boundary_wording_v1"
 
 _RUNTIME_LOG_LEVELS = {"MINIMAL", "OPS", "DEBUG"}
 _FREE_RUN_MODES = {"PAPER", "REPLAY", "BACKTEST"}
-_FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
+_FREE_BUILD_LIVE_MESSAGE = "LoneWolf Fang Free does not include LIVE mode."
 _DEFAULT_PRESET = str(getattr(C, "DEFAULT_PRESET", "SELL_SAFE") or "SELL_SAFE").strip().upper() or "SELL_SAFE"
 
 

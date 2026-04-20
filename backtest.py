@@ -1,4 +1,5 @@
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
+# BUILD_ID: 2026-04-18_free_pullback_ab_parent_canonical_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
 # BUILD_ID: 2026-03-21_backtest_final_residual_comment_cleanup_v1
 # BUILD_ID: 2026-03-20_backtest_ethusdc_size_sizing_diag_v1
@@ -265,31 +266,48 @@ def build_arg_parser():
 # --- Runner-compatible KV for pullback Phase A/B (backtest-only minimal emulation) ---
 def _kv_key_pullback_ab(symbol: str) -> str:
     # Keep identical to runner.py
+    return f"pullback_ab:{symbol}"
+
+
+def _kv_key_pullback_ab_legacy(symbol: str) -> str:
     return f"state.pullback_ab:{symbol}"
 
 
+def _normalize_pullback_ab_state(state: Any) -> dict:
+    if not isinstance(state, dict):
+        return {"phase": "NONE", "since_ms": None, "last_reason": None}
+    return {
+        "phase": str(state.get("phase") or "NONE"),
+        "since_ms": state.get("since_ms", None),
+        "last_reason": state.get("last_reason", None),
+    }
+
+
 def _kv_get_pullback_ab(kv: dict, symbol: str) -> dict:
-    # Keep identical defaults to runner.py
     k = _kv_key_pullback_ab(symbol)
-    v = kv.get(k)
-    if not isinstance(v, dict):
-        v = {"phase": "A", "since_ms": None, "last_reason": None}
-        kv[k] = v
-    # ensure keys exist
-    if "phase" not in v:
-        v["phase"] = "A"
-    if "since_ms" not in v:
-        v["since_ms"] = None
-    if "last_reason" not in v:
-        v["last_reason"] = None
-    return v
+    legacy_k = _kv_key_pullback_ab_legacy(symbol)
+    for candidate_key in (k, legacy_k):
+        state = kv.get(candidate_key)
+        if not isinstance(state, dict):
+            continue
+        normalized = _normalize_pullback_ab_state(state)
+        if candidate_key != k:
+            kv[k] = dict(normalized)
+            kv.pop(legacy_k, None)
+        return normalized
+    normalized = _normalize_pullback_ab_state(None)
+    kv[k] = dict(normalized)
+    kv.pop(legacy_k, None)
+    return normalized
 
 
 def _kv_set_pullback_ab(kv: dict, symbol: str, pb_state: dict) -> None:
     k = _kv_key_pullback_ab(symbol)
+    legacy_k = _kv_key_pullback_ab_legacy(symbol)
     if not isinstance(pb_state, dict):
         return
-    kv[k] = pb_state
+    kv[k] = _normalize_pullback_ab_state(pb_state)
+    kv.pop(legacy_k, None)
 
 logging.basicConfig(
     level=logging.INFO,

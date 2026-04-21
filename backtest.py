@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-04-18_free_pullback_ab_parent_canonical_v1
 # BUILD_ID: 2026-03-29_free_final_polish_v1
@@ -2196,7 +2197,7 @@ def _collect_missing_precomputed_labels(
 
     rsi_period = int(getattr(C, "RSI_PERIOD", 14))
     atr_period = int(getattr(C, "ATR_PERIOD", 14))
-    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", 14))
+    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", getattr(C, "ADX_PERIOD", 14)))
     ema_fast_span = int(getattr(C, "EMA_FAST", 20))
     ema_slow_span = int(getattr(C, "EMA_SLOW", 50))
     entry_indicators = ["EMA9", "EMA21", f"RSI{rsi_period}", f"ATR{atr_period}"]
@@ -3862,7 +3863,7 @@ def run_backtest(
 
         # filter(1h) indicators
         # NOTE: indicators.py exposes `adx`, so use it consistently.
-        adx_period = int(getattr(C, "ADX_PERIOD_FILTER", 14))
+        adx_period = int(getattr(C, "ADX_PERIOD_FILTER", getattr(C, "ADX_PERIOD", 14)))
         f_adx: Optional[np.ndarray] = None
 
         # entry-side indicators

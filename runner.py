@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-04-19_free_paper_preflight_skip_v1
 # BUILD_ID: 2026-04-18_free_chart_state_canonical_writer_v1
@@ -7350,7 +7351,7 @@ def main(
                     f = _filter_ohlcv_confirmed_only(f, tf_filter, filter_now_ms)
                     if not f.get("timestamp") or not f.get("high") or not f.get("low"):
                         raise ValueError("filter_confirmed_empty")
-                    adx_period = int(getattr(C, "ADX_PERIOD", 14))
+                    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", getattr(C, "ADX_PERIOD", 14)))
                     ema_fast = int(getattr(C, "EMA_FAST", 20))
                     ema_slow = int(getattr(C, "EMA_SLOW", 50))
                     adx_arr = ind_adx(f["high"], f["low"], f["close"], period=adx_period)
@@ -8647,7 +8648,7 @@ def main(
                 except Exception:
                     precomputed_regime_used = False
             if not precomputed_regime_used:
-                adx_period = int(getattr(C, "ADX_PERIOD", 14))
+                adx_period = int(getattr(C, "ADX_PERIOD_FILTER", getattr(C, "ADX_PERIOD", 14)))
                 ema_fast = int(getattr(C, "EMA_FAST", 20))
                 ema_slow = int(getattr(C, "EMA_SLOW", 50))
                 adx_arr = ind_adx(f["high"], f["low"], f["close"], period=adx_period)
@@ -11630,7 +11631,7 @@ def _load_replay_filter_precomputed(
     pre_root = str(getattr(C, "PRECOMPUTED_INDICATORS_OUT_ROOT", "exports/precomputed_indicators"))
     preferred_precomputed_root = BT._preferred_precomputed_root(pre_root)
     pre_strict = bool(getattr(C, "PRECOMPUTED_INDICATORS_STRICT", True))
-    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", 14))
+    adx_period = int(getattr(C, "ADX_PERIOD_FILTER", getattr(C, "ADX_PERIOD", 14)))
     ema_fast = int(getattr(C, "EMA_FAST", 20))
     ema_slow = int(getattr(C, "EMA_SLOW", 50))
 

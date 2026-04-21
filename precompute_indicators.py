@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-04-18_free_precompute_shared_root_v1
 # BUILD_ID: 2026-03-14_precompute_multiyear_boundary_safe_v1
 # BUILD_ID=2026-02-26_precompute_support_ETHUSDC_dir_v1
@@ -23,9 +24,14 @@ from app.core.source_provenance import (
 )
 
 # Project indicators (same as backtest.py uses)
+try:
+    import config as C  # type: ignore
+except Exception:
+    C = None
+
 from indicators import ema, rsi, atr, adx  # type: ignore
 
-BUILD_ID="2026-04-18_free_precompute_shared_root_v1"
+BUILD_ID="2026-04-21_free_indicator_audit_rsi_filter_precompute_v1"
 
 # ======================================================================================
 # Logging
@@ -58,6 +64,24 @@ def _canonical_precomputed_out_root() -> str:
         )
     except Exception:
         return os.path.abspath(os.path.join(_canonical_market_data_dir(), "precomputed_indicators"))
+
+
+def _runtime_filter_ema_spans() -> List[int]:
+    spans: list[int] = []
+    for attr, fallback in (("EMA_FAST", 20), ("EMA_SLOW", 50)):
+        try:
+            value = int(getattr(C, attr, fallback) if C is not None else fallback)
+        except Exception:
+            value = int(fallback)
+        if value > 0:
+            spans.append(int(value))
+    return spans
+
+
+def _resolve_ema_spans(requested_spans: Optional[List[int]]) -> List[int]:
+    spans = {int(x) for x in list(requested_spans or []) if int(x) > 0}
+    spans.update(int(x) for x in _runtime_filter_ema_spans() if int(x) > 0)
+    return sorted(spans)
 
 
 def _source_diag_once(level: str, key: str, message: str) -> None:
@@ -682,8 +706,7 @@ def main() -> int:
              _iso_utc(int(until_ms)) if until_ms is not None else "")
     log.info("RUN: src_files=%d first=%s last=%s", len(src_files), os.path.basename(src_files[0]), os.path.basename(src_files[-1]))
 
-    ema_spans = [int(x) for x in (args.ema_spans or [])]
-    ema_spans = [x for x in ema_spans if x > 0]
+    ema_spans = _resolve_ema_spans(getattr(args, "ema_spans", None))
     if not ema_spans:
         raise SystemExit("--ema-spans must include >=1 positive integer")
 

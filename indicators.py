@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-03-07_adx_warning_guard_v1
 # indicators.py
 from __future__ import annotations
@@ -49,8 +50,13 @@ def rsi(close: np.ndarray, period: int) -> np.ndarray:
         avg_gain[i] = (avg_gain[i - 1] * (period - 1) + gains[i - 1]) / period
         avg_loss[i] = (avg_loss[i - 1] * (period - 1) + losses[i - 1]) / period
 
-    rs = avg_gain / np.where(avg_loss == 0, np.nan, avg_loss)
-    out = 100.0 - (100.0 / (1.0 + rs))
+    valid = np.isfinite(avg_gain) & np.isfinite(avg_loss)
+    normal = valid & (avg_gain > 0.0) & (avg_loss > 0.0)
+
+    out[valid & (avg_gain > 0.0) & (avg_loss == 0.0)] = 100.0
+    out[valid & (avg_gain == 0.0) & (avg_loss > 0.0)] = 0.0
+    out[valid & (avg_gain == 0.0) & (avg_loss == 0.0)] = 50.0
+    out[normal] = 100.0 - (100.0 / (1.0 + (avg_gain[normal] / avg_loss[normal])))
     return out
 
 

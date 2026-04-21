@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-04-19_free_paper_preflight_skip_v1
 # BUILD_ID: 2026-04-18_free_chart_state_canonical_writer_v1
 # BUILD_ID: 2026-04-18_free_runner_preflight_stable_prefix_v1
@@ -3076,6 +3077,37 @@ def _confirmed_candle_idx(ts_list: List[int], bar_ms: int, now_ms: int) -> int:
     if int(now_ms) - int(last_ts) < int(bar_ms):
         return -2
     return -1
+
+
+def _filter_ohlcv_confirmed_only(ohlcv: dict[str, list[float]], timeframe: str, now_ms: int) -> dict[str, list[float]]:
+    if not isinstance(ohlcv, dict):
+        return ohlcv
+    ts_list = list(ohlcv.get("timestamp") or [])
+    if not ts_list:
+        return ohlcv
+    try:
+        bar_ms = int(_timeframe_to_ms(str(timeframe)))
+    except Exception:
+        return ohlcv
+    cut = len(ts_list)
+    try:
+        if len(ts_list) == 1:
+            if int(now_ms) < int(ts_list[-1]) + int(bar_ms):
+                cut = 0
+        elif _confirmed_candle_idx(ts_list, bar_ms, int(now_ms)) == -2:
+            cut = max(0, int(cut) - 1)
+    except Exception:
+        try:
+            if int(now_ms) < int(ts_list[-1]) + int(bar_ms):
+                cut = max(0, int(cut) - 1)
+        except Exception:
+            return ohlcv
+    if cut >= len(ts_list):
+        return ohlcv
+    out = dict(ohlcv)
+    for key in ("timestamp", "open", "high", "low", "close", "volume"):
+        out[key] = list(ohlcv.get(key) or [])[:cut]
+    return out
 
 def _ema_last(values, span: int) -> float:
     # lightweight EMA for latest value only (sufficient for cooldown clear condition)
@@ -7314,6 +7346,10 @@ def main(
                 try:
                     f_raw = ex.fetch_ohlcv(symbol, tf_filter, limit=200)
                     f = ohlcv_to_dict(f_raw)
+                    filter_now_ms = int(replay_ts_ms) if is_replay and replay_ts_ms is not None else int(ts_ms_now)
+                    f = _filter_ohlcv_confirmed_only(f, tf_filter, filter_now_ms)
+                    if not f.get("timestamp") or not f.get("high") or not f.get("low"):
+                        raise ValueError("filter_confirmed_empty")
                     adx_period = int(getattr(C, "ADX_PERIOD", 14))
                     ema_fast = int(getattr(C, "EMA_FAST", 20))
                     ema_slow = int(getattr(C, "EMA_SLOW", 50))
@@ -8584,6 +8620,10 @@ def main(
         try:
             f_raw = ex.fetch_ohlcv(symbol, tf_filter, limit=200)
             f = ohlcv_to_dict(f_raw)
+            filter_now_ms = int(replay_ts_ms) if is_replay and replay_ts_ms is not None else int(ts_ms_now)
+            f = _filter_ohlcv_confirmed_only(f, tf_filter, filter_now_ms)
+            if not f.get("timestamp") or not f.get("high") or not f.get("low"):
+                raise ValueError("filter_confirmed_empty")
             regime = "range"
             direction = "none"
             precomputed_regime_used = False

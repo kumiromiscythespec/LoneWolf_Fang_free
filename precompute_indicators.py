@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-04-18_free_precompute_shared_root_v1
 # BUILD_ID: 2026-03-14_precompute_multiyear_boundary_safe_v1
@@ -30,6 +31,10 @@ except Exception:
     C = None
 
 from indicators import ema, rsi, atr, adx  # type: ignore
+
+# Precompute intentionally writes the historical ADX seed contract v1 from
+# indicators.py. Keep first finite ADX at 2p; canonical 2p-1 belongs only in
+# an explicit ADX_IMPL_VERSION=2 migration, never as an incidental fix.
 
 BUILD_ID="2026-04-21_free_indicator_audit_rsi_filter_precompute_v1"
 

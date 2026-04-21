@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-04-19_free_paper_preflight_skip_v1
@@ -134,6 +135,9 @@ from strategy import (
     signal_range_entry_precomputed,
 )
 from risk import calc_qty_from_risk
+# Live and replay both consume the historical ADX seed contract v1 from
+# indicators.py. Keep first finite ADX at 2p until an explicit
+# ADX_IMPL_VERSION=2 migration adopts any canonical 2p-1 variant.
 from indicators import atr as ind_atr, ema as ind_ema, rsi as ind_rsi, adx as ind_adx
 from trace_bar_policy import (
     attach_bar_snapshot as _trace_attach_bar_snapshot,

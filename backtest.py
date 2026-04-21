@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
 # BUILD_ID: 2026-04-18_free_pullback_ab_parent_canonical_v1
@@ -30,6 +31,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from indicators import ema, rsi, atr, adx
+
+# Backtest consumes the historical ADX seed contract v1 from indicators.py.
+# Do not change the 2p seed here as an incidental fix; canonical 2p-1 belongs
+# only in an explicit ADX_IMPL_VERSION=2 migration.
 from exchange import ExchangeClient
 from risk import calc_qty_from_risk
 from strategy import (

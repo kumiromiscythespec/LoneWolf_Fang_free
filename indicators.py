@@ -1,9 +1,20 @@
+# BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
 # BUILD_ID: 2026-03-07_adx_warning_guard_v1
 # indicators.py
 from __future__ import annotations
 
 import numpy as np
+
+
+ADX_IMPL_VERSION = 1
+# Historical ADX seed contract v1 is the current production contract.
+# - +DI/-DI/DX first finite index = period
+# - ADX first finite index = 2 * period
+# - ADX[2p] = mean(DX[p+1:2p+1])
+# The canonical 2p-1 seed is intentionally not adopted in v1.
+# Any canonicalization must happen only via explicit versioned migration
+# (for example ADX_IMPL_VERSION = 2), never as an incidental fix.
 
 
 def ema(close: np.ndarray, period: int) -> np.ndarray:
@@ -114,6 +125,9 @@ def adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np
     """
     ADX (Wilder). Returns np.ndarray same length as input close.
     If input lengths differ, aligns to the shortest length for calculation and pads with NaN.
+    Historical seed contract v1 keeps the first finite ADX at 2 * period with
+    ADX[2p] = mean(DX[p+1:2p+1]); do not switch to the canonical 2p-1 seed
+    here without an explicit ADX_IMPL_VERSION migration.
     """
     high = np.asarray(high, dtype=float)
     low = np.asarray(low, dtype=float)
@@ -194,7 +208,7 @@ def adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np
     np.divide(np.abs(plus_di - minus_di), di_sum, out=dx, where=valid_di)
     dx *= 100.0
 
-    # First ADX = average of DX over next period
+    # Historical v1 seed: first finite ADX stays at 2 * period, not 2 * period - 1.
     first_adx_window = dx[period + 1: 2 * period + 1]
     if np.isfinite(first_adx_window).any():
         adx_out[2 * period] = np.nanmean(first_adx_window)

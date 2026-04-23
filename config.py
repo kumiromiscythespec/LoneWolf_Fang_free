@@ -1,4 +1,5 @@
-﻿# BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
+﻿# BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
+# BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
 # BUILD_ID: 2026-04-08_standard_bitbank_okx_spot_exchange_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
@@ -20,9 +21,10 @@ import re
 from typing import Any
 from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
+from app.core.instrument_registry import list_instruments
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-19_free_config_version_1_1_2_v1"
+BUILD_ID = "2026-04-23_free_live_api_pair_config_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
 APP_VERSION = "1.1.2"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
@@ -126,6 +128,12 @@ _SYMBOL_PRESET_DEFAULT_SYMBOLS = {
     "BTCJPY": "BTC/JPY",
     "BTCUSDT": "BTC/USDT",
     "BTCUSDC": "BTC/USDC",
+    "XRPJPY": "XRP/JPY",
+    "XRPUSDT": "XRP/USDT",
+    "XRPUSDC": "XRP/USDC",
+    "BNBJPY": "BNB/JPY",
+    "BNBUSDT": "BNB/USDT",
+    "BNBUSDC": "BNB/USDC",
     "ETHUSDT": "ETH/USDT",
     "ETHUSDC": "ETH/USDC",
     "ETHJPY": "ETH/JPY",
@@ -134,9 +142,15 @@ _SYMBOL_PRESET_DEFAULT_EXCHANGE_IDS = {
     "BTCJPY": "coincheck",
     "BTCUSDT": "mexc",
     "BTCUSDC": "mexc",
+    "XRPJPY": "bitbank",
+    "XRPUSDT": "mexc",
+    "XRPUSDC": "mexc",
+    "BNBJPY": "bitbank",
+    "BNBUSDT": "mexc",
+    "BNBUSDC": "mexc",
     "ETHUSDT": "binance",
     "ETHUSDC": "mexc",
-    "ETHJPY": "coincheck",
+    "ETHJPY": "bitbank",
 }
 _symbol_preset_env_symbol = _first_symbol_from_raw(_symbol_preset_env_raw)
 _symbol_preset_env_key = _symbol_to_prefix(_symbol_preset_env_symbol)
@@ -252,100 +266,33 @@ def _apply_symbol_preset(preset_path: str) -> None:
             continue
         globals()[name] = value
 
-PAIR_REGISTRY = {
-    "coincheck:BTC/JPY": {
-        "exchange_id": "coincheck",
-        "symbol": "BTC/JPY",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": True,
-    },
-    "coincheck:ETH/JPY": {
-        "exchange_id": "coincheck",
-        "symbol": "ETH/JPY",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": False,
-        "experimental": True,
-    },
-    "bitbank:BTC/JPY": {
-        "exchange_id": "bitbank",
-        "symbol": "BTC/JPY",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": True,
-    },
-    "mexc:BTC/USDT": {
-        "exchange_id": "mexc",
-        "symbol": "BTC/USDT",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "mexc:BTC/USDC": {
-        "exchange_id": "mexc",
-        "symbol": "BTC/USDC",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": False,
-        "experimental": True,
-    },
-    "mexc:ETH/USDT": {
-        "exchange_id": "mexc",
-        "symbol": "ETH/USDT",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "mexc:ETH/USDC": {
-        "exchange_id": "mexc",
-        "symbol": "ETH/USDC",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": True,
-    },
-    "okx:BTC/USDT": {
-        "exchange_id": "okx",
-        "symbol": "BTC/USDT",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "okx:ETH/USDT": {
-        "exchange_id": "okx",
-        "symbol": "ETH/USDT",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-}
+def _build_pair_registry() -> dict[str, dict[str, Any]]:
+    registry: dict[str, dict[str, Any]] = {}
+    for item in list_instruments(include_hidden=True):
+        key = f"{item.exchange_id}:{item.symbol}"
+        entry: dict[str, Any] = {
+            "exchange_id": item.exchange_id,
+            "symbol": item.symbol,
+            "market_type": item.market_type,
+            "base_ccy": item.base_ccy,
+            "quote_ccy": item.quote_ccy,
+            "account_ccy": item.account_ccy,
+            "settlement_ccy": item.settlement_ccy,
+            "dataset_prefix": item.dataset_prefix,
+            "visible": bool(item.visible),
+        }
+        if bool(item.experimental):
+            entry["experimental"] = True
+        registry[key] = entry
+    coincheck_eth = registry.get("coincheck:ETH/JPY")
+    if isinstance(coincheck_eth, dict):
+        coincheck_eth["unsupported_reason"] = (
+            "hidden after 2026-04-23 live ccxt coincheck load_markets() audit did not expose ETH/JPY as an active spot market"
+        )
+    return registry
+
+
+PAIR_REGISTRY = _build_pair_registry()
 
 MEXC_MIN_COST_BY_QUOTE = {
     "USDT": 1.0,

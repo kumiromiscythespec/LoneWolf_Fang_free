@@ -1,4 +1,6 @@
 ﻿# BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
+# BUILD_ID: 2026-04-27_live_dryrun_env_guard_v1
+# BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
 # BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
 # BUILD_ID: 2026-04-08_standard_bitbank_okx_spot_exchange_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
@@ -18,17 +20,41 @@ import importlib.util
 import os
 import logging
 import re
+import sys
 from typing import Any
+
+
+def _ensure_embedded_app_import_path() -> None:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    embedded_root = os.path.join(base_dir, "app")
+    if os.path.isdir(os.path.join(embedded_root, "app", "core")) and embedded_root not in sys.path:
+        sys.path.insert(0, embedded_root)
+
+
+_ensure_embedded_app_import_path()
+
 from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import list_instruments
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-23_free_live_api_pair_config_v1"
+BUILD_ID = "2026-04-27_live_dryrun_env_guard_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
 APP_VERSION = "1.1.2"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
 STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+LIVE_DRYRUN = _env_bool("LIVE_DRYRUN", _env_bool("LWF_LIVE_DRYRUN", False))
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 _CANONICAL_CONFIGS_DIR = str(

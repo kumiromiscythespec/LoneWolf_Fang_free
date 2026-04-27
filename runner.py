@@ -1,3 +1,5 @@
+# BUILD_ID: 2026-04-27_free_confirmed_bar_no_double_shift_v1
+# BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
@@ -67,6 +69,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict
+
+
+def _ensure_embedded_app_import_path() -> None:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    embedded_root = os.path.join(base_dir, "app")
+    if os.path.isdir(os.path.join(embedded_root, "app", "core")) and embedded_root not in sys.path:
+        sys.path.insert(0, embedded_root)
+
+
+_ensure_embedded_app_import_path()
 
 def _bridge_backtest_dataset_from_cli(argv: list[str]) -> None:
     if str(os.getenv("BACKTEST_DATASET") or "").strip():
@@ -193,7 +205,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-19_free_paper_preflight_skip_v1"
+BUILD_ID = "2026-04-27_free_confirmed_bar_no_double_shift_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -7224,11 +7236,18 @@ def main(
             _summ_reason(summ_hold, "fetch_ohlcv_entry_empty")
             continue
         _trace_index_symbol_bars(str(symbol), e)
-        bar_ts_ms = int(trace_bar_snap["bar_ts_ms"])
-        bar_open = float(trace_bar_snap["bar_open"])
-        bar_high = float(trace_bar_snap["bar_high"])
-        bar_low = float(trace_bar_snap["bar_low"])
-        bar_close = float(trace_bar_snap["bar_close"])
+        try:
+            bar_ts_ms = int(e["timestamp"][-1])
+            bar_open = float(e["open"][-1])
+            bar_high = float(e["high"][-1])
+            bar_low = float(e["low"][-1])
+            bar_close = float(e["close"][-1])
+        except Exception:
+            bar_ts_ms = int(trace_bar_snap["bar_ts_ms"])
+            bar_open = float(trace_bar_snap["bar_open"])
+            bar_high = float(trace_bar_snap["bar_high"])
+            bar_low = float(trace_bar_snap["bar_low"])
+            bar_close = float(trace_bar_snap["bar_close"])
         trace_bar_fields = {
             "bar_ts_ms": int(bar_ts_ms),
             "bar_open": float(bar_open),

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
 # BUILD_ID: 2026-04-20_free_ui_wording_cleanup_v1
 # BUILD_ID: 2026-04-19_free_gui_title_bar_version_1_1_1_v1
 # BUILD_ID: 2026-04-18_free_settings_scroll_nonlive_parity_v1
@@ -162,7 +163,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-04-20_free_ui_wording_cleanup_v1"
+BUILD_ID = "2026-04-29_free_gui_pipeline_pythonpath_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -4163,6 +4164,14 @@ class MainWindow(QWidget):
                 str(to_ym),
             ]
             env = dict(os.environ)
+            app_path = os.path.join(str(p.repo_root), "app")
+            if os.path.isdir(app_path):
+                existing_pythonpath = str(env.get("PYTHONPATH", "") or "")
+                pythonpath_parts = [part for part in existing_pythonpath.split(os.pathsep) if part]
+                if os.path.normcase(os.path.abspath(app_path)) not in {
+                    os.path.normcase(os.path.abspath(part)) for part in pythonpath_parts
+                }:
+                    env["PYTHONPATH"] = app_path + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
             env["LWF_EXCHANGE_ID"] = str(exchange_id)
             env["LWF_PIPELINE_FORCE"] = "1" if bool(self.pipeline_force.isChecked()) else "0"
             option = self._selected_exchange_option()

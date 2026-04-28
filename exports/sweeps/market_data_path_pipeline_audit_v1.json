@@ -1,0 +1,117 @@
+{
+  "build_id": "2026-04-29_market_data_path_pipeline_audit_v1",
+  "repo": "C:\\LoneWolf_Fang_free",
+  "canonical_market_data_root": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data",
+  "canonical_precomputed_root": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators",
+  "paths_from_get_paths": {
+    "market_data_dir": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data",
+    "precomputed_indicators_dir": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators",
+    "shared_data_root": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data",
+    "product_data_root": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\free"
+  },
+  "data_pipeline_output_root_before": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data",
+  "data_pipeline_output_root_after": "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data",
+  "gui_button_command_before": "python -m app.core.data_pipeline --symbol <SYMBOL> --from <YYYY-MM> --to <YYYY-MM>; required launcher-provided PYTHONPATH=C:\\LoneWolf_Fang_free\\app",
+  "gui_button_command_after": "python -m app.core.data_pipeline --symbol <SYMBOL> --from <YYYY-MM> --to <YYYY-MM>; GUI child env prepends C:\\LoneWolf_Fang_free\\app to PYTHONPATH when needed",
+  "pairs_checked": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "XRP/USDT",
+    "BNB/USDT"
+  ],
+  "smoke_results_by_pair": {
+    "BTC/USDT": {
+      "command": "$env:PYTHONPATH='C:\\LoneWolf_Fang_free\\app'; python -m app.core.data_pipeline --symbol BTC/USDT --from 2025-01 --to 2025-01",
+      "exit_code": 0,
+      "candle_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\BTCUSDT_5m_2025\\BTCUSDT-5m-2025-01.csv",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\BTCUSDT_1h_2025\\BTCUSDT-1h-2025-01.csv"
+      ],
+      "precomputed_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\BTCUSDT\\5m",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\BTCUSDT\\1h"
+      ],
+      "candle_files_count": 2,
+      "precomputed_files_count": 14,
+      "repo_root_market_data_new_files_detected": false,
+      "code1_seen": false,
+      "status": "ready"
+    },
+    "ETH/USDT": {
+      "command": "$env:PYTHONPATH='C:\\LoneWolf_Fang_free\\app'; python -m app.core.data_pipeline --symbol ETH/USDT --from 2025-01 --to 2025-01",
+      "exit_code": 0,
+      "candle_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\ETHUSDT_5m_2025\\ETHUSDT-5m-2025-01.csv",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\ETHUSDT_1h_2025\\ETHUSDT-1h-2025-01.csv"
+      ],
+      "precomputed_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\ETHUSDT\\5m",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\ETHUSDT\\1h"
+      ],
+      "candle_files_count": 2,
+      "precomputed_files_count": 14,
+      "repo_root_market_data_new_files_detected": false,
+      "code1_seen": false,
+      "status": "ready"
+    },
+    "XRP/USDT": {
+      "command": "$env:PYTHONPATH='C:\\LoneWolf_Fang_free\\app'; python -m app.core.data_pipeline --symbol XRP/USDT --from 2025-01 --to 2025-01",
+      "exit_code": 0,
+      "candle_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\XRPUSDT_5m_2025\\XRPUSDT-5m-2025-01.csv",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\XRPUSDT_1h_2025\\XRPUSDT-1h-2025-01.csv"
+      ],
+      "precomputed_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\XRPUSDT\\5m",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\XRPUSDT\\1h"
+      ],
+      "candle_files_count": 2,
+      "precomputed_files_count": 14,
+      "repo_root_market_data_new_files_detected": false,
+      "code1_seen": false,
+      "status": "ready"
+    },
+    "BNB/USDT": {
+      "command": "$env:PYTHONPATH='C:\\LoneWolf_Fang_free\\app'; python -m app.core.data_pipeline --symbol BNB/USDT --from 2025-01 --to 2025-01",
+      "exit_code": 0,
+      "candle_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\BNBUSDT_5m_2025\\BNBUSDT-5m-2025-01.csv",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\BNBUSDT_1h_2025\\BNBUSDT-1h-2025-01.csv"
+      ],
+      "precomputed_paths": [
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\BNBUSDT\\5m",
+        "C:\\Users\\yu_ki\\AppData\\Local\\LoneWolfFang\\data\\market_data\\precomputed_indicators\\BNBUSDT\\1h"
+      ],
+      "candle_files_count": 2,
+      "precomputed_files_count": 14,
+      "repo_root_market_data_new_files_detected": false,
+      "code1_seen": false,
+      "status": "ready"
+    }
+  },
+  "files_changed": [
+    "app/app/core/dataset.py",
+    "app/app/gui/main_window.py",
+    "exports/sweeps/market_data_path_pipeline_audit_v1.json"
+  ],
+  "validation_results": {
+    "pre_run_git_status_recorded": true,
+    "pre_run_branch": "publish/pairs-live-api-20260423-free",
+    "pre_run_head": "12fa99d chore(release): package Free v1.1.3",
+    "py_compile_config": "pass",
+    "py_compile_touched_paths": "pass",
+    "data_pipeline_help": "pass_with_PYTHONPATH_app",
+    "precompute_help": "pass_with_PYTHONPATH_app",
+    "dataset_resolver_repo_root_input": "canonical_shared_root",
+    "git_diff_check": "pass",
+    "json_tool": "pass"
+  },
+  "existing_repo_root_market_data_detected": {
+    "exists": false,
+    "file_count": 0,
+    "detected_dirs": [],
+    "xrp_bnb_repo_root_files_detected": false
+  },
+  "cleanup_recommendation": "No repo-root market_data directory detected in Free.",
+  "decision": "fixed"
+}

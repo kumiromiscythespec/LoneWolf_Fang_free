@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-29_free_dataset_canonical_shared_root_priority_v1
 # BUILD_ID: 2026-04-18_free_dataset_shared_root_fallback_v1
 # BUILD_ID: 2026-03-20_settings_bridge_effective_defaults_v1
 # BUILD_ID: 2026-03-20_market_data_stage2_strict_cross_root_guard_v1
@@ -20,7 +21,7 @@ from app.core.paths import get_paths
 from app.core.source_provenance import record_path_source_event_once
 
 
-BUILD_ID = "2026-04-18_free_dataset_shared_root_fallback_v1"
+BUILD_ID = "2026-04-29_free_dataset_canonical_shared_root_priority_v1"
 
 _DIR_RE = re.compile(r"^([A-Za-z0-9]+)_(5m|1h)_(\d{4})$", flags=re.IGNORECASE)
 _FILE_RE = re.compile(r"^([A-Za-z0-9]+)-(5m|1h)-(\d{4})-(\d{2})\.csv$", flags=re.IGNORECASE)
@@ -534,6 +535,48 @@ def _resolve_dataset_root(dataset_root: str) -> str:
     return p
 
 
+def _canonical_market_data_root() -> str:
+    try:
+        market_root = str(getattr(get_paths(), "market_data_dir", "") or "").strip()
+        if market_root:
+            return _resolve_dataset_root(market_root)
+    except Exception:
+        pass
+    return ""
+
+
+def _dataset_root_is_generic_for_canonical(root: str) -> bool:
+    root_abs = _resolve_dataset_root(root)
+    if not root_abs:
+        return False
+    try:
+        paths = get_paths()
+    except Exception:
+        paths = None
+
+    candidates: list[str] = []
+    if paths is not None:
+        for attr in ("repo_root", "market_data_dir", "product_data_root", "shared_data_root", "shared_root"):
+            value = str(getattr(paths, attr, "") or "").strip()
+            if value:
+                candidates.append(value)
+                candidates.append(os.path.join(value, "market_data"))
+        for _source, value in tuple(getattr(paths, "market_data_candidates", ()) or ()):
+            if value:
+                candidates.append(str(value))
+    candidates.append(os.getcwd())
+    candidates.append(os.path.join(os.getcwd(), "market_data"))
+
+    root_key = os.path.normcase(root_abs)
+    for candidate in candidates:
+        candidate_text = str(candidate or "").strip()
+        if not candidate_text:
+            continue
+        if os.path.normcase(_resolve_dataset_root(candidate_text)) == root_key:
+            return True
+    return False
+
+
 def _resolve_dir_with_root(root: str, maybe_dir: str) -> str:
     s = str(maybe_dir or "").strip()
     if not s:
@@ -702,13 +745,13 @@ def _market_data_root_candidates(root_default: str) -> list[tuple[str, str]]:
         seen.add(root_key)
         out.append((str(source or "").strip() or "dataset_root", root_abs))
 
-    _add("canonical_market_data", root_default)
     try:
         for source, root in tuple(getattr(get_paths(), "market_data_candidates", ()) or ()):
             source_text = "canonical_market_data" if str(source or "").strip() == "canonical_shared_root" else str(source or "").strip()
             _add(source_text, str(root or ""))
     except Exception:
         pass
+    _add("dataset_root", root_default)
     return out
 
 
@@ -1085,6 +1128,13 @@ def resolve_dataset(
             resolved_years = [int(resolved_year)]
 
     resolved_root = _resolve_dataset_root(resolved_root)
+    canonical_market_root = _canonical_market_data_root()
+    if (
+        canonical_market_root
+        and str(source or "").strip() in ("default", "settings")
+        and _dataset_root_is_generic_for_canonical(resolved_root)
+    ):
+        resolved_root = canonical_market_root
     resolved_prefix = symbol_to_prefix(resolved_prefix or prefix_default)
     resolved_month = _safe_month(resolved_month)
 

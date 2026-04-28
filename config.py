@@ -1,4 +1,5 @@
-﻿# BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
+# BUILD_ID: 2026-04-28_free_xrp_bnb_pair_presets_v1
+# BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
 # BUILD_ID: 2026-04-27_live_dryrun_env_guard_v1
 # BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
 # BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
@@ -247,12 +248,17 @@ _ACTIVE_SYMBOL_PRESET_KEY = _symbol_preset_filename_key(_resolve_symbol_preset_s
 _ACTIVE_SYMBOL_PRESET = _resolve_standard_symbol_preset_path(_ACTIVE_SYMBOL_PRESET_KEY)
 # Only these names may be overridden by symbol presets.
 _SYMBOL_PRESET_ALLOWED_NAMES = {
+    # Pair-confirmed Free preset fields ported from standard.
+    "TRADE_RANGE",
+    "TRADE_TREND",
     "RANGE_ATR_TP_MULT",
     "RANGE_ATR_SL_MULT",
     "RANGE_ENTRY_MIN_ATR_BPS",
     "RANGE_RSI_BUY_MAX",
     "RANGE_ENTRY_MAX_EMA21_DIST_BPS",
     "RANGE_TIMEOUT_BARS",
+    "RANGE_TIMEOUT_MIN_PROFIT_BPS",
+    "RANGE_EARLY_EXIT_LOSS_ATR_MULT",
     "RANGE_TRAIL_START_R",
     "RANGE_TRAIL_BPS_FROM_HIGH",
     "RANGE_UNFAV_EXIT_COOLDOWN_BARS",
@@ -263,6 +269,8 @@ _SYMBOL_PRESET_ALLOWED_NAMES = {
     "SIZE_CAP_RAMP_ENABLED",
     "SIZE_CAP_RAMP_K",
     "SIZE_CAP_RAMP_MAX_PCT",
+    "FIXED_NOTIONAL_CEILING_ENABLED",
+    "FIXED_NOTIONAL_CEILING_BY_SYMBOL",
 }
 
 
@@ -582,6 +590,9 @@ POSITION_SIZING_MODE = "LEGACY_COMPOUND"  # Compatibility default.
 BASE_RISK_PCT = 0.01
 MAX_POSITION_PCT_OF_EQUITY = 0.12
 MAX_POSITION_NOTIONAL_PCT = MAX_POSITION_PCT_OF_EQUITY
+FIXED_NOTIONAL_CEILING_ENABLED = False
+FIXED_NOTIONAL_CEILING = 0.0
+FIXED_NOTIONAL_CEILING_BY_SYMBOL: dict[str, float] = {}
 DD_DELEVER_THRESHOLD = 0.02
 DD_DELEVER_MIN_MULT = 0.25
 DD_DELEVER_SMOOTH_ENABLED = False

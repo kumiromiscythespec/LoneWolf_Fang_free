@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-04-28_usdc_preset_alias_fallback_v1
+# BUILD_ID: 2026-04-29_version_bump_free_v1
 # BUILD_ID: 2026-04-28_free_xrp_bnb_pair_presets_v1
 # BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
 # BUILD_ID: 2026-04-27_live_dryrun_env_guard_v1
@@ -40,9 +40,9 @@ from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import list_instruments
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-28_usdc_preset_alias_fallback_v1"
+BUILD_ID = "2026-04-29_version_bump_free_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
 STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
 

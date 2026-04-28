@@ -1,0 +1,59 @@
+{
+  "build_id": "2026-04-29_version_bump_free_v1",
+  "repo": "C:/LoneWolf_Fang_free",
+  "old_version": "1.1.2",
+  "new_version": "1.1.3",
+  "version_scheme": "stable semantic patch +1",
+  "files_changed": [
+    "config.py",
+    "exports/sweeps/version_bump_gui_config_v1.json"
+  ],
+  "gui_version_sources_checked": [
+    "app/app/gui/main_window.py reads APP_DISPLAY_NAME and APP_VERSION from config.py",
+    "app/app/cli/app_main.py reads APP_DISPLAY_NAME from config.py",
+    "app/app/core/launch.py preserves Free live-disabled policy and does not define a display version"
+  ],
+  "config_version_sources_checked": [
+    "config.py APP_DISPLAY_NAME",
+    "config.py APP_VERSION",
+    "config.py BUILD_ID"
+  ],
+  "package_or_installer_sources_checked": [
+    "packaging/install_config_free.json product display fields checked, no app version field",
+    "packaging/package_manifest_free.json checked, no app_version field",
+    "release_notes_free_v1.1.2_bilingual.md is historical and was left unchanged"
+  ],
+  "package_rebuild_run": false,
+  "validation_results": [
+    {
+      "command": "python -m py_compile config.py",
+      "result": "passed"
+    },
+    {
+      "command": "python -c \"import config; print(getattr(config, 'APP_VERSION', None)); print(getattr(config, 'APP_DISPLAY_NAME', None))\"",
+      "result": "passed",
+      "output": [
+        "1.1.3",
+        "LoneWolf Fang Free"
+      ]
+    },
+    {
+      "command": "python -c \"import config; from app.gui import main_window as m; print(m.APP_WINDOW_TITLE)\"",
+      "result": "passed",
+      "output": [
+        "LoneWolf Fang Free v1.1.3"
+      ]
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "unrelated_dirty_files_left_untouched": {
+    "count": 1,
+    "paths": [
+      "LoneWolf_Fang_Free_Package.zip"
+    ]
+  },
+  "decision": "Updated config display version only; Free live-disabled behavior, package assets, installer, launcher, strategy, billing, and license logic were left unchanged."
+}

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-04-28_usdc_preset_alias_fallback_v1
 # BUILD_ID: 2026-04-28_free_xrp_bnb_pair_presets_v1
 # BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
 # BUILD_ID: 2026-04-27_live_dryrun_env_guard_v1
@@ -39,7 +40,7 @@ from app.core.instrument_registry import default_symbol_for_exchange
 from app.core.instrument_registry import list_instruments
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-27_live_dryrun_env_guard_v1"
+BUILD_ID = "2026-04-28_usdc_preset_alias_fallback_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
 APP_VERSION = "1.1.2"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
@@ -212,22 +213,46 @@ _SYMBOL_PRESET_SEARCH_DIRS = (
     _SYMBOL_PRESET_LOCAL_DIR,
     _SYMBOL_PRESET_CANONICAL_DIR,
 )
+_SYMBOL_PRESET_USDC_TO_USDT_ALIASES = {
+    "BTCUSDC": "BTCUSDT",
+    "ETHUSDC": "ETHUSDT",
+    "XRPUSDC": "XRPUSDT",
+    "BNBUSDC": "BNBUSDT",
+}
 
 
 def _symbol_preset_filename_key(symbol: str) -> str:
     return _symbol_to_prefix(_first_symbol_from_raw(symbol))
 
 
-def _resolve_standard_symbol_preset_path(symbol: str) -> str:
-    key = _symbol_preset_filename_key(symbol)
-    if not key:
-        return ""
+def _find_standard_symbol_preset_path(key: str) -> str:
     preset_filename = f"config_standard_{key}.py"
     for preset_root in _SYMBOL_PRESET_SEARCH_DIRS:
         preset_path = os.path.join(preset_root, preset_filename)
         if os.path.isfile(preset_path):
             return preset_path
     return ""
+
+
+def _resolve_standard_symbol_preset(symbol: str) -> tuple[str, str, str]:
+    key = _symbol_preset_filename_key(symbol)
+    if not key:
+        return "", "", ""
+    preset_path = _find_standard_symbol_preset_path(key)
+    if preset_path:
+        return preset_path, "", ""
+    alias_key = _SYMBOL_PRESET_USDC_TO_USDT_ALIASES.get(key, "")
+    if not alias_key:
+        return "", "", ""
+    alias_path = _find_standard_symbol_preset_path(alias_key)
+    if not alias_path:
+        return "", "", ""
+    return alias_path, key, alias_key
+
+
+def _resolve_standard_symbol_preset_path(symbol: str) -> str:
+    preset_path, _, _ = _resolve_standard_symbol_preset(symbol)
+    return preset_path
 
 
 # Resolve the preset selector before falling back to SYMBOLS[0].
@@ -245,7 +270,14 @@ def _resolve_symbol_preset_selector_symbol() -> str:
 
 
 _ACTIVE_SYMBOL_PRESET_KEY = _symbol_preset_filename_key(_resolve_symbol_preset_selector_symbol())
-_ACTIVE_SYMBOL_PRESET = _resolve_standard_symbol_preset_path(_ACTIVE_SYMBOL_PRESET_KEY)
+(
+    _ACTIVE_SYMBOL_PRESET,
+    _ACTIVE_SYMBOL_PRESET_ALIAS_FROM,
+    _ACTIVE_SYMBOL_PRESET_ALIAS_TO,
+) = _resolve_standard_symbol_preset(_ACTIVE_SYMBOL_PRESET_KEY)
+_ACTIVE_SYMBOL_PRESET_ALIAS_REASON = (
+    "usdc_uses_usdt_preset" if _ACTIVE_SYMBOL_PRESET_ALIAS_TO else ""
+)
 # Only these names may be overridden by symbol presets.
 _SYMBOL_PRESET_ALLOWED_NAMES = {
     # Pair-confirmed Free preset fields ported from standard.
@@ -299,6 +331,23 @@ def _apply_symbol_preset(preset_path: str) -> None:
         if callable(value) or isinstance(value, type(os)):
             continue
         globals()[name] = value
+
+
+def _apply_usdc_preset_aliases() -> None:
+    if not (_ACTIVE_SYMBOL_PRESET_ALIAS_FROM and _ACTIVE_SYMBOL_PRESET_ALIAS_TO):
+        return
+    by_symbol = globals().get("FIXED_NOTIONAL_CEILING_BY_SYMBOL", {})
+    if not isinstance(by_symbol, dict):
+        return
+    from_symbol = _SYMBOL_PRESET_DEFAULT_SYMBOLS.get(_ACTIVE_SYMBOL_PRESET_ALIAS_FROM, "")
+    to_symbol = _SYMBOL_PRESET_DEFAULT_SYMBOLS.get(_ACTIVE_SYMBOL_PRESET_ALIAS_TO, "")
+    if not (from_symbol and to_symbol):
+        return
+    if to_symbol not in by_symbol or from_symbol in by_symbol:
+        return
+    aliased = dict(by_symbol)
+    aliased[from_symbol] = by_symbol[to_symbol]
+    globals()["FIXED_NOTIONAL_CEILING_BY_SYMBOL"] = aliased
 
 def _build_pair_registry() -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
@@ -923,6 +972,7 @@ RANGE_NEAR_LOW_ATR_MULT = 7.5
 RANGE_ENTRY_MIN_EMA9_GAP_BPS = 0.0
 
 _apply_symbol_preset(_ACTIVE_SYMBOL_PRESET)
+_apply_usdc_preset_aliases()
 
 # ----------------------------------------------------------------------
 # BTC/USDT stable preset operational notes

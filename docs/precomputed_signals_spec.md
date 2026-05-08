@@ -5,7 +5,8 @@ Phase 1 added the schema, validation, reader helpers, and fast research
 accounting foundation. Phase 2 connects that accounting path to `backtest.py`
 only behind an explicit opt-in flag. Phase 3 connects the same saved-tape
 accounting helper to `runner.py` for replay-only use, also behind explicit
-flags.
+flags. Phase 4 adds a safe producer that converts existing research export
+files into the Free signal tape format without running strategy logic.
 
 ## Scope
 
@@ -175,6 +176,82 @@ fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
 strategy, indicators, exchange, risk, order runtime logic, entry timing, exit
 timing, fee logic, quantity logic, PnL formulas, signal timing, or DD
 calculation. It does not launch a producer when a tape is stale or missing.
+
+Generated real signal tape bodies and raw market data remain local artifacts.
+They must not be committed to the repo or included in migration zips or release
+packages.
+
+## Phase 4 Safe Producer
+
+Free Phase 4 adds `precompute_signals.py` as a safe producer for product
+`free`.
+
+The producer converts existing `trades.csv` and optional `equity_curve.csv`
+exports into a saved signal tape bundle only. It does not run `backtest.py`,
+does not run `runner.py`, does not import strategy, indicators, exchange,
+`ccxt`, or runner modules, and does not reimplement signal logic. It also does
+not read OHLCV or raw market data.
+
+Supported input/output shape:
+
+- required: `--trades-csv`, `--symbol`, `--entry-tf`, `--filter-tf`
+- optional: `--equity-csv`, `--summary-json`, `--product`, `--since`,
+  `--until`, `--dataset-id`, `--out-root`, `--signal-set-id`,
+  `--initial-equity`, `--write-summary`, `--strict`
+- `--product` defaults to `free`; any other value fails closed
+- default output root:
+  `%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals`
+- environment override: `LWF_PRECOMPUTED_SIGNALS_ROOT`
+- output path:
+  `<root>\free\<symbol_normalized>\<entry_tf>_<filter_tf>\<signal_set_id>`
+
+Bundle files:
+
+- `manifest.json`
+- `trades.csv`
+- `trades.jsonl`
+- `summary.json`
+- `equity_reference.csv`
+
+The manifest safety scope is fixed to:
+
+```json
+{
+  "research_only": true,
+  "paper_live_order_execution": false,
+  "contains_api_key": false,
+  "contains_secret": false,
+  "contains_order_id": false
+}
+```
+
+The producer fails closed when input files are missing, when `trades.csv`
+contains forbidden private/runtime fields, when required accounting columns are
+missing, when a supplied summary is unsafe, or when a legacy summary has a
+positive `max_drawdown`.
+
+When `--equity-csv` is supplied, `equity_reference.csv` is derived from that
+source and DD metrics are calculated from the equity curve. When `--equity-csv`
+is not supplied, `equity_reference.csv` is synthesized by accumulating saved
+trade `net` values from `--initial-equity`. This synthetic equity basis is
+recorded in `summary.json`.
+
+DD schema v2 and display fields remain required. `max_drawdown` is the signed
+negative legacy compatibility field. Human-facing display should prefer
+`max_dd_abs` and `max_dd_pct`.
+
+The Phase 2 backtest fast path and Phase 3 runner replay fast path continue to
+read existing saved tape only. They do not invoke the producer when a tape is
+missing or stale.
+
+GUI DD display remains a later phase. `APP_VERSION` is not changed by this
+migration.
+
+Phase 4 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
+strategy, indicators, exchange, risk, order runtime logic, entry timing, exit
+timing, fee logic, quantity logic, PnL formulas, signal timing, or DD
+calculation.
 
 Generated real signal tape bodies and raw market data remain local artifacts.
 They must not be committed to the repo or included in migration zips or release

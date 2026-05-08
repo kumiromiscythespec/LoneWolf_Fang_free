@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_signals_foundation_v1
+# BUILD_ID: 2026-05-08_free_precomputed_safe_producer_v1
 from __future__ import annotations
 
 import csv
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-BUILD_ID = "2026-05-08_free_precomputed_signals_foundation_v1"
+BUILD_ID = "2026-05-08_free_precomputed_safe_producer_v1"
 SCHEMA_VERSION = "lwf.precomputed.signal_tape.v1"
 DD_SCHEMA_VERSION = "precomputed_signals_dd_v2"
 DD_SCHEMA_VERSION_LEGACY_NORMALIZED = "precomputed_signals_dd_v2_legacy_normalized"
@@ -19,6 +19,8 @@ DD_SIGN_CONVENTION = "legacy_max_drawdown_signed_negative"
 DD_DISPLAY_LABEL = "Max DD (abs, display)"
 MAX_DRAWDOWN_LEGACY_NOTE = "max_drawdown is signed negative legacy compatibility field"
 DEFAULT_PRODUCT = "free"
+DEFAULT_FEE_MODEL = {"source": "trades_csv", "entry_fee_rate": "per_row", "exit_fee_rate": "per_row"}
+DEFAULT_SLIPPAGE_MODEL = {"source": "existing_exports_only", "fast_path_additional_slippage": 0.0}
 
 SAFETY_SCOPE = {
     "research_only": True,
@@ -62,6 +64,15 @@ TRADE_COLUMNS = [
     "source_equity_after",
     "source_peak",
     "source_dd",
+]
+
+EQUITY_REFERENCE_COLUMNS = [
+    "trade_id",
+    "ts_ms",
+    "equity",
+    "peak",
+    "dd",
+    "net",
 ]
 
 MANIFEST_REQUIRED_FIELDS = [
@@ -186,6 +197,45 @@ def sha256_text(text: str) -> str:
 
 def stable_json_hash(payload: Any) -> str:
     return sha256_text(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+
+
+def hash_existing_files(paths: Iterable[str | Path]) -> str:
+    payload: list[dict[str, str]] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path.is_file():
+            payload.append({"name": path.name, "sha256": sha256_file(path)})
+    return stable_json_hash(payload)
+
+
+def make_signal_set_id(
+    *,
+    product: str,
+    symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: int,
+    until_ms: int,
+    dataset_files_hash: str,
+    strategy_file_hash: str,
+    config_file_hash: str,
+    signal_config_hash: str,
+    accounting_config_hash: str,
+) -> str:
+    payload = {
+        "product": product,
+        "symbol_normalized": normalize_symbol(symbol),
+        "entry_tf": entry_tf,
+        "filter_tf": filter_tf,
+        "since_ms": int(since_ms),
+        "until_ms": int(until_ms),
+        "dataset_files_hash": dataset_files_hash,
+        "strategy_file_hash": strategy_file_hash,
+        "config_file_hash": config_file_hash,
+        "signal_config_hash": signal_config_hash,
+        "accounting_config_hash": accounting_config_hash,
+    }
+    return "sig_" + stable_json_hash(payload)[:16]
 
 
 def read_csv_rows(path: str | Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -437,8 +487,8 @@ def canonicalize_trade_rows(
     peak = float(initial_equity)
 
     for index, row in enumerate(source_rows, start=1):
-        entry_ts = _to_int(_first(row, "entry_signal_ts_ms", "entry_ts_ms", "opened_ts", "entry_bar_ts_ms", "ts"))
-        exit_ts = _to_int(_first(row, "exit_signal_ts_ms", "close_ts_ms", "exit_ts_ms", "ts"), entry_ts)
+        entry_ts = _to_int(_first(row, "entry_signal_ts_ms", "entry_exec_ts_ms", "entry_ts_ms", "opened_ts", "entry_bar_ts_ms", "ts"))
+        exit_ts = _to_int(_first(row, "exit_signal_ts_ms", "exit_exec_ts_ms", "exit_ts_ms", "close_ts_ms", "ts"), entry_ts)
         entry_exec = _to_float(_first(row, "entry_exec", "entry_price", "open_price", "start_price"))
         exit_exec = _to_float(_first(row, "exit_exec", "exit_price", "close_price"))
         qty = _to_float(_first(row, "qty", "quantity", "qty_init"))
@@ -447,8 +497,8 @@ def canonicalize_trade_rows(
         exit_notional = abs(exit_exec * qty)
         source_fee = _to_float(_first(row, "fee", "total_fee"))
         inferred_rate = source_fee / (entry_notional + exit_notional) if (entry_notional + exit_notional) > 0 else 0.0
-        entry_fee_rate = _to_float(_first(row, "entry_fee_rate", "maker_fee_rate"), inferred_rate)
-        exit_fee_rate = _to_float(_first(row, "exit_fee_rate", "taker_fee_rate"), inferred_rate)
+        entry_fee_rate = _to_float(_first(row, "entry_fee_rate", "fee_rate", "maker_fee_rate"), inferred_rate)
+        exit_fee_rate = _to_float(_first(row, "exit_fee_rate", "fee_rate", "taker_fee_rate"), inferred_rate)
         gross_pnl = _to_float(
             _first(row, "gross_pnl", "pnl"),
             (exit_exec - entry_exec) * qty if side == "long" else 0.0,
@@ -466,10 +516,10 @@ def canonicalize_trade_rows(
 
         normalized.append({
             "trade_id": _to_text(_first(row, "trade_id", default=index)) or str(index),
-            "symbol": _to_text(_first(row, "symbol", default=symbol)) or symbol,
+            "symbol": _to_text(_first(row, "symbol", "sym", default=symbol)) or symbol,
             "side": side,
             "entry_signal_ts_ms": entry_ts,
-            "entry_bar_ts_ms": _to_int(_first(row, "entry_bar_ts_ms", "entry_ts_ms", "opened_ts"), entry_ts),
+            "entry_bar_ts_ms": _to_int(_first(row, "entry_bar_ts_ms", "entry_ts_ms", "entry_exec_ts_ms", "opened_ts"), entry_ts),
             "entry_exec_ts_ms": _to_int(_first(row, "entry_exec_ts_ms", "entry_ts_ms", "opened_ts"), entry_ts),
             "entry_reason": _to_text(_first(row, "entry_reason", "open_reason")),
             "entry_regime": _to_text(_first(row, "entry_regime", "regime")),
@@ -480,8 +530,8 @@ def canonicalize_trade_rows(
             "initial_stop": _to_float(_first(row, "initial_stop", "init_stop", "stop")),
             "initial_take_profit": _to_float(_first(row, "initial_take_profit", "tp", "take_profit")),
             "exit_signal_ts_ms": exit_ts,
-            "exit_bar_ts_ms": _to_int(_first(row, "exit_bar_ts_ms", "close_ts_ms", "ts"), exit_ts),
-            "exit_exec_ts_ms": _to_int(_first(row, "exit_exec_ts_ms", "close_ts_ms", "ts"), exit_ts),
+            "exit_bar_ts_ms": _to_int(_first(row, "exit_bar_ts_ms", "exit_ts_ms", "close_ts_ms", "exit_exec_ts_ms", "ts"), exit_ts),
+            "exit_exec_ts_ms": _to_int(_first(row, "exit_exec_ts_ms", "exit_ts_ms", "close_ts_ms", "ts"), exit_ts),
             "exit_reason": _to_text(_first(row, "exit_reason", "reason", "close_reason")),
             "exit_raw": _to_float(_first(row, "exit_raw", "exit_exec"), exit_exec),
             "exit_exec": exit_exec,
@@ -604,7 +654,58 @@ def build_manifest_template(
         },
         "counts": {},
         "parity": {},
+        "dd_schema_version": DD_SCHEMA_VERSION,
+        "dd_sign_convention": DD_SIGN_CONVENTION,
     }
+
+
+def build_safe_manifest(
+    *,
+    product: str = DEFAULT_PRODUCT,
+    producer_script: str,
+    producer_build_id: str,
+    symbol: str,
+    entry_tf: str,
+    filter_tf: str,
+    since_ms: int,
+    until_ms: int,
+    dataset_id: str,
+    dataset_files_hash: str,
+    signal_config_hash: str,
+    accounting_config_hash: str,
+    signal_set_id: str,
+    sizing_mode: str = "source_backtest",
+    market_type: str = "spot",
+    strategy_file_hash: str | None = None,
+    strategy_build_id: str = "not_used_by_safe_producer",
+    config_file_hash: str | None = None,
+) -> dict[str, Any]:
+    manifest = build_manifest_template(
+        product=product,
+        producer_script=producer_script,
+        producer_build_id=producer_build_id,
+        symbol=symbol,
+        entry_tf=entry_tf,
+        filter_tf=filter_tf,
+        since_ms=since_ms,
+        until_ms=until_ms,
+        dataset_id=dataset_id,
+        dataset_files_hash=dataset_files_hash,
+        strategy_file_hash=strategy_file_hash or stable_json_hash({"strategy": "not_used_by_safe_producer"}),
+        strategy_build_id=strategy_build_id,
+        config_file_hash=config_file_hash or stable_json_hash({"config": "not_used_by_safe_producer"}),
+        signal_config_hash=signal_config_hash,
+        accounting_config_hash=accounting_config_hash,
+        signal_set_id=signal_set_id,
+        sizing_mode=sizing_mode,
+        market_type=market_type,
+        fee_model=DEFAULT_FEE_MODEL,
+        slippage_model=DEFAULT_SLIPPAGE_MODEL,
+    )
+    manifest["safety_scope"] = dict(SAFETY_SCOPE)
+    manifest["dd_schema_version"] = DD_SCHEMA_VERSION
+    manifest["dd_sign_convention"] = DD_SIGN_CONVENTION
+    return manifest
 
 
 def _is_benign_negative_text(text: str, lowered_term: str) -> bool:
@@ -702,6 +803,127 @@ def validate_summary(summary: Mapping[str, Any], *, require_safety_flags: bool =
         if payload.get("paper_live_order_execution") is not False:
             raise SignalTapeError("summary paper_live_order_execution must be false")
     return payload
+
+
+def write_trades_csv(path: str | Path, trades: Iterable[Mapping[str, Any]]) -> Path:
+    trade_list = [dict(row) for row in trades]
+    validate_no_secret_payload(trade_list)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=TRADE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in trade_list:
+            writer.writerow({key: row.get(key, "") for key in TRADE_COLUMNS})
+    return out_path
+
+
+def write_trades_jsonl(path: str | Path, trades: Iterable[Mapping[str, Any]]) -> Path:
+    trade_list = [dict(row) for row in trades]
+    validate_no_secret_payload(trade_list)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in trade_list:
+            handle.write(json.dumps({key: row.get(key, "") for key in TRADE_COLUMNS}, ensure_ascii=True, sort_keys=True))
+            handle.write("\n")
+    return out_path
+
+
+def write_summary_json(path: str | Path, summary: Mapping[str, Any]) -> Path:
+    summary_payload = validate_summary(summary, require_safety_flags=True)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(summary_payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path
+
+
+def write_equity_reference_csv(path: str | Path, rows: Iterable[Mapping[str, Any]]) -> Path:
+    equity_rows = [dict(row) for row in rows]
+    validate_no_secret_payload(equity_rows)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=EQUITY_REFERENCE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in equity_rows:
+            writer.writerow({key: row.get(key, "") for key in EQUITY_REFERENCE_COLUMNS})
+    return out_path
+
+
+def write_manifest(path: str | Path, manifest: Mapping[str, Any]) -> Path:
+    manifest_payload = validate_manifest(manifest)
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(manifest_payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path
+
+
+def write_signal_tape_bundle(
+    signal_dir: str | Path,
+    *,
+    manifest: Mapping[str, Any],
+    trades: Iterable[Mapping[str, Any]],
+    equity_reference: Iterable[Mapping[str, Any]] | None = None,
+    summary: Mapping[str, Any] | None = None,
+) -> Path:
+    out_dir = Path(signal_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    trade_list = [dict(row) for row in trades]
+    initial_equity = _to_float(manifest.get("initial_equity"), 300000.0)
+    summary_payload = validate_summary(summary or build_summary(trade_list, initial_equity=initial_equity), require_safety_flags=True)
+    equity_rows = list(equity_reference or equity_reference_from_trades(trade_list, _to_float(summary_payload.get("initial_equity"), initial_equity)))
+
+    trades_csv_path = write_trades_csv(out_dir / "trades.csv", trade_list)
+    trades_jsonl_path = write_trades_jsonl(out_dir / "trades.jsonl", trade_list)
+    summary_path = write_summary_json(out_dir / "summary.json", summary_payload)
+    equity_reference_path = write_equity_reference_csv(out_dir / "equity_reference.csv", equity_rows)
+
+    manifest_payload = dict(manifest)
+    manifest_payload["schema_version"] = SCHEMA_VERSION
+    manifest_payload["product"] = str(manifest_payload.get("product") or DEFAULT_PRODUCT)
+    manifest_payload["producer_build_id"] = str(manifest_payload.get("producer_build_id") or BUILD_ID)
+    manifest_payload["created_at_utc"] = str(manifest_payload.get("created_at_utc") or utc_now_iso())
+    manifest_payload["symbol_normalized"] = normalize_symbol(str(manifest_payload["symbol"]))
+    manifest_payload["safety_scope"] = dict(SAFETY_SCOPE)
+    manifest_payload["dd_schema_version"] = str(summary_payload.get("dd_schema_version") or DD_SCHEMA_VERSION)
+    manifest_payload["dd_sign_convention"] = str(summary_payload.get("dd_sign_convention") or DD_SIGN_CONVENTION)
+    manifest_payload["files"] = {
+        "trades_csv": {"name": "trades.csv", "sha256": sha256_file(trades_csv_path)},
+        "trades_jsonl": {"name": "trades.jsonl", "sha256": sha256_file(trades_jsonl_path)},
+        "summary_json": {"name": "summary.json", "sha256": sha256_file(summary_path)},
+        "equity_reference_csv": {"name": "equity_reference.csv", "sha256": sha256_file(equity_reference_path)},
+    }
+    manifest_payload["counts"] = {
+        "trades": len(trade_list),
+        "closed_trades": len(trade_list),
+        "equity_reference_rows": len(equity_rows),
+    }
+    manifest_payload["parity"] = {
+        **dict(manifest_payload.get("parity") or {}),
+        "source_net_total": _to_float(summary_payload.get("net_total")),
+        "source_final_equity": _to_float(summary_payload.get("final_equity")),
+        "fast_recompute_checked": False,
+    }
+    write_manifest(out_dir / "manifest.json", manifest_payload)
+    return out_dir
+
+
+def write_signal_tape(
+    signal_dir: str | Path,
+    *,
+    manifest: Mapping[str, Any],
+    trades: Iterable[Mapping[str, Any]],
+    equity_reference: Iterable[Mapping[str, Any]] | None = None,
+    summary: Mapping[str, Any] | None = None,
+) -> Path:
+    return write_signal_tape_bundle(
+        signal_dir,
+        manifest=manifest,
+        trades=trades,
+        equity_reference=equity_reference,
+        summary=summary,
+    )
 
 
 def load_manifest(signal_dir: str | Path, *, expected_product: str | None = DEFAULT_PRODUCT) -> dict[str, Any]:

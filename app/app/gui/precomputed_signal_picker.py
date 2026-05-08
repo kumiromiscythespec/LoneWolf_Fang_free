@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import precomputed_signals_gui_adapter as gui_adapter
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_selection_diagnostics_v1"
 
 DISPLAY_ONLY_NOTICE = "Replay/backtest only"
 LIVE_PAPER_WARNING = "Not selectable for LIVE/PAPER"
@@ -87,6 +87,50 @@ COPYABLE_COMMAND_FIELDS = {
     "runner_replay": "runner_replay_command_text",
 }
 
+DIAGNOSTICS_TITLE = "Selection diagnostics"
+DIAGNOSTICS_NO_RAW_ROWS_TEXT = "No raw trade rows are displayed"
+DIAGNOSTICS_NO_EXECUTION_TEXT = "This panel does not execute commands"
+DIAGNOSTICS_LIVE_PAPER_TEXT = "LIVE/PAPER: not selectable"
+DIAGNOSTICS_WARNING_TEXT = f"{DIAGNOSTICS_NO_RAW_ROWS_TEXT}; {DIAGNOSTICS_NO_EXECUTION_TEXT}."
+DIAGNOSTICS_INVALID_WARNING_TEXT = "Invalid precomputed signal selection."
+JA_DIAGNOSTICS_TITLE = "選択診断"
+
+DIAGNOSTICS_FIELDS = (
+    "signal_dir",
+    "status",
+    "status_reason",
+    "safe_error_code",
+    "product",
+    "symbol",
+    "symbol_normalized",
+    "entry_tf",
+    "filter_tf",
+    "signal_set_id",
+    "dataset_id",
+    "created_at_utc",
+    "since_ms",
+    "until_ms",
+    "trade_count",
+    "net_total",
+    "final_equity",
+    "max_dd_display_abs",
+    "max_dd_display_pct",
+    "max_dd_display_label",
+    "max_drawdown_legacy_note",
+    "safety_research_only",
+    "safety_paper_live_order_execution",
+    "selectable_for_backtest_fast_path",
+    "selectable_for_runner_replay_fast_path",
+    "not_selectable_for_live",
+    "not_selectable_for_paper",
+    "tape_files_present",
+    "manifest_sha256",
+    "summary_sha256",
+    "trades_csv_sha256_from_manifest",
+    "diagnostics_warning",
+    "picker_warning",
+)
+
 FORBIDDEN_COPY_COMMAND_TEXT = (
     "entry_exec",
     "exit_exec",
@@ -114,6 +158,31 @@ FORBIDDEN_COPY_COMMAND_TEXT = (
     "qty=",
     '"qty"',
     "'qty'",
+)
+
+FORBIDDEN_DIAGNOSTICS_TEXT = (
+    "entry_exec",
+    "exit_exec",
+    "trade_id",
+    "trade id",
+    "order_id",
+    "order id",
+    "raw_order",
+    "raw order",
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "authorization",
+    "raw_billing",
+    "raw billing",
+    "raw market data",
+    "raw ohlcv",
+    "balance",
+    '"qty"',
+    "'qty'",
+    " qty ",
+    "qty=",
 )
 
 
@@ -200,6 +269,100 @@ def _source_tf_pair(item: Mapping[str, Any]) -> str:
     if entry_tf and filter_tf:
         return f"{entry_tf}/{filter_tf}"
     return entry_tf or filter_tf
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_tape_files_present(value: Any) -> dict[str, bool]:
+    payload = value if isinstance(value, Mapping) else {}
+    return {
+        "manifest_json": bool(payload.get("manifest_json")) if isinstance(payload, Mapping) else False,
+        "summary_json": bool(payload.get("summary_json")) if isinstance(payload, Mapping) else False,
+        "trades_csv": bool(payload.get("trades_csv")) if isinstance(payload, Mapping) else False,
+    }
+
+
+def _safe_error_code(value: Any, *, default: str = "invalid_gui_picker_item") -> str:
+    text = _safe_command_field(value)
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+    if text and all(ch in allowed for ch in text):
+        return text
+    return default
+
+
+def _contains_forbidden_diagnostics_text(value: Any) -> bool:
+    text = _safe_command_field(value).lower()
+    if not text:
+        return False
+    padded = f" {text} "
+    for forbidden in FORBIDDEN_DIAGNOSTICS_TEXT:
+        token = str(forbidden or "").lower()
+        if not token:
+            continue
+        if token.startswith(" ") or token.endswith(" "):
+            if token in padded:
+                return True
+        elif token in text:
+            return True
+    return False
+
+
+def _safe_diagnostics_text(value: Any, *, default: str = "") -> str:
+    text = _safe_command_field(value)
+    if _contains_forbidden_diagnostics_text(text):
+        return default
+    return text
+
+
+def _empty_precomputed_signal_diagnostics(
+    *,
+    signal_dir: str = "",
+    status_reason: str = "No signal tape selected.",
+    safe_error_code: str = "missing_signal_dir",
+) -> dict[str, Any]:
+    diagnostics = {
+        "signal_dir": _safe_command_field(signal_dir),
+        "status": "invalid",
+        "status_reason": _safe_diagnostics_text(status_reason, default=DIAGNOSTICS_INVALID_WARNING_TEXT),
+        "safe_error_code": _safe_error_code(safe_error_code),
+        "product": "",
+        "symbol": "",
+        "symbol_normalized": "",
+        "entry_tf": "",
+        "filter_tf": "",
+        "signal_set_id": "",
+        "dataset_id": "",
+        "created_at_utc": "",
+        "since_ms": 0,
+        "until_ms": 0,
+        "trade_count": 0,
+        "net_total": 0.0,
+        "final_equity": 0.0,
+        "max_dd_display_abs": 0.0,
+        "max_dd_display_pct": 0.0,
+        "max_dd_display_label": gui_adapter.GUI_DD_DISPLAY_LABEL,
+        "max_drawdown_legacy_note": gui_adapter.GUI_DD_LEGACY_NOTE,
+        "safety_research_only": False,
+        "safety_paper_live_order_execution": False,
+        "selectable_for_backtest_fast_path": False,
+        "selectable_for_runner_replay_fast_path": False,
+        "not_selectable_for_live": True,
+        "not_selectable_for_paper": True,
+        "tape_files_present": _safe_tape_files_present({}),
+        "manifest_sha256": "",
+        "summary_sha256": "",
+        "trades_csv_sha256_from_manifest": "",
+        "diagnostics_warning": DIAGNOSTICS_WARNING_TEXT,
+        "picker_warning": DIAGNOSTICS_INVALID_WARNING_TEXT,
+    }
+    return validate_precomputed_signal_diagnostics(diagnostics)
 
 
 def _empty_command_preview(
@@ -354,6 +517,245 @@ def validate_precomputed_signal_command_preview(preview: Mapping[str, Any]) -> d
     if normalized["runner_replay_command_text"] and "--precomputed-signals-dir" not in normalized["runner_replay_command_text"]:
         raise ValueError("runner replay command preview must include precomputed signals dir")
     return normalized
+
+
+def build_precomputed_signal_diagnostics(picker_item: Mapping[str, Any]) -> dict[str, Any]:
+    source = picker_item if isinstance(picker_item, Mapping) else {}
+    signal_dir = _safe_command_field(source.get("signal_dir")) if isinstance(source, Mapping) else ""
+    try:
+        item = gui_adapter.validate_gui_picker_item(picker_item)
+    except Exception:
+        reason = _safe_diagnostics_text(source.get("status_reason"), default=DIAGNOSTICS_INVALID_WARNING_TEXT)
+        code = _safe_error_code(source.get("safe_error_code")) if isinstance(source, Mapping) else "invalid_gui_picker_item"
+        return _empty_precomputed_signal_diagnostics(
+            signal_dir=signal_dir,
+            status_reason=reason or DIAGNOSTICS_INVALID_WARNING_TEXT,
+            safe_error_code=code,
+        )
+
+    if item.get("status") != "valid":
+        return _empty_precomputed_signal_diagnostics(
+            signal_dir=_safe_command_field(item.get("signal_dir")),
+            status_reason=_safe_diagnostics_text(item.get("status_reason"), default=DIAGNOSTICS_INVALID_WARNING_TEXT)
+            or DIAGNOSTICS_INVALID_WARNING_TEXT,
+            safe_error_code=_safe_error_code(item.get("safe_error_code")),
+        )
+
+    diagnostics = {
+        "signal_dir": _safe_command_field(item.get("signal_dir")),
+        "status": "valid",
+        "status_reason": _safe_diagnostics_text(item.get("status_reason"), default="ok") or "ok",
+        "safe_error_code": "",
+        "product": _safe_diagnostics_text(item.get("product")),
+        "symbol": _safe_diagnostics_text(item.get("symbol")),
+        "symbol_normalized": _safe_diagnostics_text(item.get("symbol_normalized")),
+        "entry_tf": _safe_diagnostics_text(item.get("entry_tf")),
+        "filter_tf": _safe_diagnostics_text(item.get("filter_tf")),
+        "signal_set_id": _safe_diagnostics_text(item.get("signal_set_id")),
+        "dataset_id": _safe_diagnostics_text(item.get("dataset_id")),
+        "created_at_utc": _safe_diagnostics_text(item.get("created_at_utc")),
+        "since_ms": _safe_int(item.get("since_ms")),
+        "until_ms": _safe_int(item.get("until_ms")),
+        "trade_count": _safe_int(item.get("trade_count")),
+        "net_total": float(_safe_float_or_none(item.get("net_total")) or 0.0),
+        "final_equity": float(_safe_float_or_none(item.get("final_equity")) or 0.0),
+        "max_dd_display_abs": float(_safe_float_or_none(item.get("max_dd_display_abs")) or 0.0),
+        "max_dd_display_pct": float(_safe_float_or_none(item.get("max_dd_display_pct")) or 0.0),
+        "max_dd_display_label": _safe_diagnostics_text(item.get("max_dd_display_label"))
+        or gui_adapter.GUI_DD_DISPLAY_LABEL,
+        "max_drawdown_legacy_note": _safe_diagnostics_text(item.get("max_drawdown_legacy_note"))
+        or gui_adapter.GUI_DD_LEGACY_NOTE,
+        "safety_research_only": item.get("safety_research_only") is True,
+        "safety_paper_live_order_execution": item.get("safety_paper_live_order_execution") is True,
+        "selectable_for_backtest_fast_path": item.get("selectable_for_backtest_fast_path") is True,
+        "selectable_for_runner_replay_fast_path": item.get("selectable_for_runner_replay_fast_path") is True,
+        "not_selectable_for_live": True,
+        "not_selectable_for_paper": True,
+        "tape_files_present": _safe_tape_files_present(item.get("tape_files_present")),
+        "manifest_sha256": _safe_diagnostics_text(item.get("manifest_sha256")),
+        "summary_sha256": _safe_diagnostics_text(item.get("summary_sha256")),
+        "trades_csv_sha256_from_manifest": _safe_diagnostics_text(item.get("trades_csv_sha256_from_manifest")),
+        "diagnostics_warning": DIAGNOSTICS_WARNING_TEXT,
+        "picker_warning": _safe_diagnostics_text(item.get("picker_warning")),
+    }
+    return validate_precomputed_signal_diagnostics(diagnostics)
+
+
+def validate_precomputed_signal_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(diagnostics, Mapping):
+        raise ValueError("precomputed signal diagnostics must be a mapping")
+    payload = dict(diagnostics)
+    unknown = sorted(set(payload) - set(DIAGNOSTICS_FIELDS))
+    if unknown:
+        raise ValueError("diagnostics contains unsupported fields: " + ", ".join(unknown[:10]))
+    missing = [field for field in DIAGNOSTICS_FIELDS if field not in payload]
+    if missing:
+        raise ValueError("diagnostics missing fields: " + ", ".join(missing))
+
+    status = _safe_command_field(payload.get("status"))
+    if status not in {"valid", "invalid"}:
+        status = "invalid"
+    normalized = {
+        "signal_dir": _safe_diagnostics_text(payload.get("signal_dir")),
+        "status": status,
+        "status_reason": _safe_diagnostics_text(payload.get("status_reason"), default=DIAGNOSTICS_INVALID_WARNING_TEXT)
+        or DIAGNOSTICS_INVALID_WARNING_TEXT,
+        "safe_error_code": _safe_error_code(payload.get("safe_error_code"), default="" if status == "valid" else "invalid_gui_picker_item"),
+        "product": _safe_diagnostics_text(payload.get("product")),
+        "symbol": _safe_diagnostics_text(payload.get("symbol")),
+        "symbol_normalized": _safe_diagnostics_text(payload.get("symbol_normalized")),
+        "entry_tf": _safe_diagnostics_text(payload.get("entry_tf")),
+        "filter_tf": _safe_diagnostics_text(payload.get("filter_tf")),
+        "signal_set_id": _safe_diagnostics_text(payload.get("signal_set_id")),
+        "dataset_id": _safe_diagnostics_text(payload.get("dataset_id")),
+        "created_at_utc": _safe_diagnostics_text(payload.get("created_at_utc")),
+        "since_ms": _safe_int(payload.get("since_ms")),
+        "until_ms": _safe_int(payload.get("until_ms")),
+        "trade_count": _safe_int(payload.get("trade_count")),
+        "net_total": float(_safe_float_or_none(payload.get("net_total")) or 0.0),
+        "final_equity": float(_safe_float_or_none(payload.get("final_equity")) or 0.0),
+        "max_dd_display_abs": float(_safe_float_or_none(payload.get("max_dd_display_abs")) or 0.0),
+        "max_dd_display_pct": float(_safe_float_or_none(payload.get("max_dd_display_pct")) or 0.0),
+        "max_dd_display_label": _safe_diagnostics_text(payload.get("max_dd_display_label"))
+        or gui_adapter.GUI_DD_DISPLAY_LABEL,
+        "max_drawdown_legacy_note": _safe_diagnostics_text(payload.get("max_drawdown_legacy_note"))
+        or gui_adapter.GUI_DD_LEGACY_NOTE,
+        "safety_research_only": payload.get("safety_research_only") is True,
+        "safety_paper_live_order_execution": payload.get("safety_paper_live_order_execution") is True,
+        "selectable_for_backtest_fast_path": payload.get("selectable_for_backtest_fast_path") is True,
+        "selectable_for_runner_replay_fast_path": payload.get("selectable_for_runner_replay_fast_path") is True,
+        "not_selectable_for_live": True,
+        "not_selectable_for_paper": True,
+        "tape_files_present": _safe_tape_files_present(payload.get("tape_files_present")),
+        "manifest_sha256": _safe_diagnostics_text(payload.get("manifest_sha256")),
+        "summary_sha256": _safe_diagnostics_text(payload.get("summary_sha256")),
+        "trades_csv_sha256_from_manifest": _safe_diagnostics_text(payload.get("trades_csv_sha256_from_manifest")),
+        "diagnostics_warning": _safe_diagnostics_text(payload.get("diagnostics_warning"), default=DIAGNOSTICS_WARNING_TEXT)
+        or DIAGNOSTICS_WARNING_TEXT,
+        "picker_warning": _safe_diagnostics_text(payload.get("picker_warning")),
+    }
+    if status != "valid":
+        normalized.update(
+            {
+                "product": "",
+                "symbol": "",
+                "symbol_normalized": "",
+                "entry_tf": "",
+                "filter_tf": "",
+                "signal_set_id": "",
+                "dataset_id": "",
+                "created_at_utc": "",
+                "since_ms": 0,
+                "until_ms": 0,
+                "trade_count": 0,
+                "net_total": 0.0,
+                "final_equity": 0.0,
+                "max_dd_display_abs": 0.0,
+                "max_dd_display_pct": 0.0,
+                "safety_research_only": False,
+                "safety_paper_live_order_execution": False,
+                "selectable_for_backtest_fast_path": False,
+                "selectable_for_runner_replay_fast_path": False,
+                "tape_files_present": _safe_tape_files_present({}),
+                "manifest_sha256": "",
+                "summary_sha256": "",
+                "trades_csv_sha256_from_manifest": "",
+                "picker_warning": normalized["picker_warning"] or DIAGNOSTICS_INVALID_WARNING_TEXT,
+            }
+        )
+    else:
+        if normalized["safe_error_code"]:
+            raise ValueError("valid diagnostics must not contain safe_error_code")
+        if normalized["safety_research_only"] is not True:
+            raise ValueError("valid diagnostics must be research-only")
+        if normalized["safety_paper_live_order_execution"] is not False:
+            raise ValueError("valid diagnostics must disable paper/live execution")
+        if normalized["selectable_for_backtest_fast_path"] is not True:
+            raise ValueError("valid diagnostics must be selectable for backtest fast path")
+        if normalized["selectable_for_runner_replay_fast_path"] is not True:
+            raise ValueError("valid diagnostics must be selectable for runner replay fast path")
+
+    tape.validate_no_secret_payload(normalized)
+    for value in normalized.values():
+        if isinstance(value, str) and _contains_forbidden_diagnostics_text(value):
+            raise ValueError("diagnostics contains forbidden raw/private text")
+    return normalized
+
+
+def format_precomputed_signal_diagnostics_text(
+    diagnostics: Mapping[str, Any],
+    *,
+    ui_language: str = "en",
+) -> str:
+    payload = validate_precomputed_signal_diagnostics(diagnostics)
+    title = JA_DIAGNOSTICS_TITLE if _is_ja(ui_language) else DIAGNOSTICS_TITLE
+    status = _safe_text(payload.get("status")) or "invalid"
+
+    lines = [
+        title,
+        f"Status: {status}",
+        f"Signal dir: {_safe_text(payload.get('signal_dir')) or '--'}",
+        DIAGNOSTICS_LIVE_PAPER_TEXT,
+    ]
+    if status != "valid":
+        lines.extend(
+            (
+                f"Safe error code: {_safe_text(payload.get('safe_error_code')) or 'invalid_gui_picker_item'}",
+                f"Reason: {_safe_text(payload.get('status_reason')) or DIAGNOSTICS_INVALID_WARNING_TEXT}",
+                "Backtest fast path: not selectable",
+                "Replay fast path: not selectable",
+                f"Warning: {_safe_text(payload.get('picker_warning')) or DIAGNOSTICS_INVALID_WARNING_TEXT}",
+                DIAGNOSTICS_NO_RAW_ROWS_TEXT,
+                DIAGNOSTICS_NO_EXECUTION_TEXT,
+            )
+        )
+        return "\n".join(lines)
+
+    files = payload.get("tape_files_present")
+    files_present = _safe_tape_files_present(files)
+    lines.extend(
+        (
+            f"Product: {_safe_text(payload.get('product'))}",
+            f"Symbol: {_safe_text(payload.get('symbol'))}",
+            f"Symbol normalized: {_safe_text(payload.get('symbol_normalized'))}",
+            f"Timeframe: {_safe_text(payload.get('entry_tf'))} / {_safe_text(payload.get('filter_tf'))}",
+            f"Signal set: {_safe_text(payload.get('signal_set_id'))}",
+            f"Dataset: {_safe_text(payload.get('dataset_id'))}",
+            f"Created: {_safe_text(payload.get('created_at_utc'))}",
+            f"Since ms: {int(payload.get('since_ms') or 0)}",
+            f"Until ms: {int(payload.get('until_ms') or 0)}",
+            f"Trades: {int(payload.get('trade_count') or 0)}",
+            f"Net total: {_format_amount(payload.get('net_total'))}",
+            f"Final equity: {_format_amount(payload.get('final_equity'))}",
+            f"max_dd_display_abs: {_format_amount(payload.get('max_dd_display_abs'))}",
+            f"max_dd_display_pct: {_format_pct(payload.get('max_dd_display_pct'))}",
+            f"max_dd_display_label: {_safe_text(payload.get('max_dd_display_label'))}",
+            f"max_drawdown legacy note: {_safe_text(payload.get('max_drawdown_legacy_note'))}",
+            f"Research-only tape: {_safe_bool_text(payload.get('safety_research_only'))}",
+            f"paper/live order execution: {_safe_bool_text(payload.get('safety_paper_live_order_execution'))}",
+            "Backtest fast path: selectable"
+            if payload.get("selectable_for_backtest_fast_path") is True
+            else "Backtest fast path: not selectable",
+            "Replay fast path: selectable"
+            if payload.get("selectable_for_runner_replay_fast_path") is True
+            else "Replay fast path: not selectable",
+            f"not_selectable_for_live: {_safe_bool_text(payload.get('not_selectable_for_live'))}",
+            f"not_selectable_for_paper: {_safe_bool_text(payload.get('not_selectable_for_paper'))}",
+            (
+                "Tape files present: "
+                f"manifest_json={_safe_bool_text(files_present.get('manifest_json'))}, "
+                f"summary_json={_safe_bool_text(files_present.get('summary_json'))}, "
+                f"trades_csv={_safe_bool_text(files_present.get('trades_csv'))}"
+            ),
+            f"Manifest hash: {_safe_text(payload.get('manifest_sha256')) or '--'}",
+            f"Summary hash: {_safe_text(payload.get('summary_sha256')) or '--'}",
+            f"Trades CSV hash from manifest: {_safe_text(payload.get('trades_csv_sha256_from_manifest')) or '--'}",
+            f"Warning: {_safe_text(payload.get('picker_warning'))}",
+            DIAGNOSTICS_NO_RAW_ROWS_TEXT,
+            DIAGNOSTICS_NO_EXECUTION_TEXT,
+        )
+    )
+    return "\n".join(lines)
 
 
 def _copy_disabled_state(
@@ -603,6 +1005,10 @@ def format_precomputed_signal_picker_empty_text(*, ui_language: str = "en") -> s
         _empty_command_preview(warning="No signal tape selected."),
         ui_language=ui_language,
     )
+    diagnostics_text = format_precomputed_signal_diagnostics_text(
+        _empty_precomputed_signal_diagnostics(),
+        ui_language=ui_language,
+    )
     if _is_ja(ui_language):
         return "\n".join(
             (
@@ -611,6 +1017,8 @@ def format_precomputed_signal_picker_empty_text(*, ui_language: str = "en") -> s
                 JA_DISPLAY_ONLY_NOTICE,
                 JA_LIVE_PAPER_WARNING,
                 command_preview_text,
+                "",
+                diagnostics_text,
                 "未選択",
             )
         )
@@ -621,6 +1029,8 @@ def format_precomputed_signal_picker_empty_text(*, ui_language: str = "en") -> s
             DISPLAY_ONLY_NOTICE,
             LIVE_PAPER_WARNING,
             command_preview_text,
+            "",
+            diagnostics_text,
             "No signal tape selected.",
         )
     )
@@ -636,6 +1046,10 @@ def format_precomputed_signal_picker_display_text(
         build_precomputed_signal_command_preview(item),
         ui_language=ui_language,
     )
+    diagnostics_text = format_precomputed_signal_diagnostics_text(
+        build_precomputed_signal_diagnostics(item),
+        ui_language=ui_language,
+    )
     if item.get("status") != "valid":
         title = "事前計算シグナル" if _is_ja(ui_language) else "Precomputed Signal Tape"
         warning = JA_LIVE_PAPER_WARNING if _is_ja(ui_language) else LIVE_PAPER_WARNING
@@ -647,6 +1061,8 @@ def format_precomputed_signal_picker_display_text(
                 f"Warning: {_safe_text(item.get('picker_warning')) or 'Invalid precomputed signal selection.'}",
                 warning,
                 command_preview_text,
+                "",
+                diagnostics_text,
             )
         )
 
@@ -687,6 +1103,8 @@ def format_precomputed_signal_picker_display_text(
             f"Warning: {_safe_text(item.get('picker_warning'))}",
             "",
             command_preview_text,
+            "",
+            diagnostics_text,
         )
     )
 
@@ -700,10 +1118,14 @@ def build_precomputed_signal_picker_state(
     display_text = format_precomputed_signal_picker_display_text(item, ui_language=ui_language)
     command_preview = build_precomputed_signal_command_preview(item)
     command_preview_text = format_precomputed_signal_command_preview(command_preview, ui_language=ui_language)
+    diagnostics = build_precomputed_signal_diagnostics(item)
+    diagnostics_text = format_precomputed_signal_diagnostics_text(diagnostics, ui_language=ui_language)
     copy_state = build_precomputed_signal_copy_state(command_preview)
     return {
         "signal_dir": _safe_text(item.get("signal_dir")),
         "picker_item": item,
+        "diagnostics": diagnostics,
+        "diagnostics_text": diagnostics_text,
         "command_preview": command_preview,
         "command_preview_text": command_preview_text,
         "copy_state": copy_state,

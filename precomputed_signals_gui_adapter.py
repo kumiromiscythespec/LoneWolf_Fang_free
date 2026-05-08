@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_picker_adapter_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ from typing import Any, Mapping
 import precomputed_signals_selection as selection_contract
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_picker_adapter_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_selection_diagnostics_v1"
 GUI_ADAPTER_SCHEMA_VERSION = "lwf.precomputed.signal_tape.gui_picker_item.v1"
 PRODUCT = tape.DEFAULT_PRODUCT
 GUI_DD_DISPLAY_LABEL = tape.DD_DISPLAY_LABEL
@@ -35,6 +35,8 @@ GUI_PICKER_ITEM_FIELDS = (
     "trade_count",
     "net_total",
     "final_equity",
+    "safety_research_only",
+    "safety_paper_live_order_execution",
     "dd_schema_version",
     "dd_sign_convention",
     "max_drawdown",
@@ -48,6 +50,11 @@ GUI_PICKER_ITEM_FIELDS = (
     "dd_display_text",
     "net_total_text",
     "final_equity_text",
+    "tape_files_present",
+    "manifest_sha256",
+    "summary_sha256",
+    "trades_csv_sha256_from_manifest",
+    "safe_error_code",
     "selectable_for_backtest_fast_path",
     "selectable_for_runner_replay_fast_path",
     "not_selectable_for_live",
@@ -125,6 +132,15 @@ def _format_pct(value: float | None) -> str:
     return f"{float(value) * 100.0:.4f}%"
 
 
+def _safe_tape_files_present(value: Any) -> dict[str, bool]:
+    payload = value if isinstance(value, Mapping) else {}
+    return {
+        "manifest_json": bool(payload.get("manifest_json")) if isinstance(payload, Mapping) else False,
+        "summary_json": bool(payload.get("summary_json")) if isinstance(payload, Mapping) else False,
+        "trades_csv": bool(payload.get("trades_csv")) if isinstance(payload, Mapping) else False,
+    }
+
+
 def _forbidden_key_paths(payload: Any) -> list[str]:
     violations: list[str] = []
 
@@ -150,6 +166,7 @@ def _invalid_item(source: Mapping[str, Any] | None, reason: str) -> dict[str, An
     signal_dir = _safe_text(payload.get("signal_dir"))
     product = _safe_text(payload.get("product")) or PRODUCT
     status_reason = _safe_text(reason) or "invalid selection"
+    safe_error_code = _safe_text(payload.get("safe_error_code")) or "invalid_unknown"
     item = {
         "schema_version": _safe_text(payload.get("schema_version")) or tape.SCHEMA_VERSION,
         "gui_adapter_schema_version": GUI_ADAPTER_SCHEMA_VERSION,
@@ -169,6 +186,8 @@ def _invalid_item(source: Mapping[str, Any] | None, reason: str) -> dict[str, An
         "trade_count": _safe_int(payload.get("trade_count")),
         "net_total": 0.0,
         "final_equity": 0.0,
+        "safety_research_only": payload.get("safety_research_only") is True,
+        "safety_paper_live_order_execution": payload.get("safety_paper_live_order_execution") is True,
         "dd_schema_version": "",
         "dd_sign_convention": "",
         "max_drawdown": 0.0,
@@ -182,6 +201,11 @@ def _invalid_item(source: Mapping[str, Any] | None, reason: str) -> dict[str, An
         "dd_display_text": "",
         "net_total_text": "--",
         "final_equity_text": "--",
+        "tape_files_present": _safe_tape_files_present(payload.get("tape_files_present")),
+        "manifest_sha256": "",
+        "summary_sha256": "",
+        "trades_csv_sha256_from_manifest": "",
+        "safe_error_code": safe_error_code,
         "selectable_for_backtest_fast_path": False,
         "selectable_for_runner_replay_fast_path": False,
         "not_selectable_for_live": True,
@@ -294,6 +318,8 @@ def build_gui_picker_item(selection: Mapping[str, Any]) -> dict[str, Any]:
         "trade_count": _safe_int(payload.get("trade_count")),
         "net_total": float(_safe_float_or_none(payload.get("net_total")) or 0.0),
         "final_equity": float(_safe_float_or_none(payload.get("final_equity")) or 0.0),
+        "safety_research_only": payload.get("safety_research_only") is True,
+        "safety_paper_live_order_execution": payload.get("safety_paper_live_order_execution") is True,
         "dd_schema_version": _safe_text(payload.get("dd_schema_version")),
         "dd_sign_convention": _safe_text(payload.get("dd_sign_convention")),
         "max_drawdown": float(signed),
@@ -307,6 +333,11 @@ def build_gui_picker_item(selection: Mapping[str, Any]) -> dict[str, Any]:
         "dd_display_text": format_gui_drawdown_text(payload),
         "net_total_text": _format_amount(_safe_float_or_none(payload.get("net_total"))),
         "final_equity_text": _format_amount(_safe_float_or_none(payload.get("final_equity"))),
+        "tape_files_present": _safe_tape_files_present(payload.get("tape_files_present")),
+        "manifest_sha256": _safe_text(payload.get("manifest_sha256")),
+        "summary_sha256": _safe_text(payload.get("summary_sha256")),
+        "trades_csv_sha256_from_manifest": _safe_text(payload.get("trades_csv_sha256_from_manifest")),
+        "safe_error_code": _safe_text(payload.get("safe_error_code")),
         "selectable_for_backtest_fast_path": True,
         "selectable_for_runner_replay_fast_path": True,
         "not_selectable_for_live": True,
@@ -364,10 +395,18 @@ def validate_gui_picker_item(item: Mapping[str, Any]) -> dict[str, Any]:
             raise GuiPickerAdapterError("invalid GUI picker item must not be selectable for backtest")
         if payload.get("selectable_for_runner_replay_fast_path") is not False:
             raise GuiPickerAdapterError("invalid GUI picker item must not be selectable for runner replay")
+        if not isinstance(payload.get("tape_files_present"), Mapping):
+            raise GuiPickerAdapterError("GUI picker item tape_files_present must be a mapping")
         return payload
 
     if payload.get("product") != PRODUCT:
         raise GuiPickerAdapterError("valid GUI picker item product must be free")
+    if payload.get("safety_research_only") is not True:
+        raise GuiPickerAdapterError("valid GUI picker item must be research-only")
+    if payload.get("safety_paper_live_order_execution") is not False:
+        raise GuiPickerAdapterError("valid GUI picker item must disable paper/live execution")
+    if not isinstance(payload.get("tape_files_present"), Mapping):
+        raise GuiPickerAdapterError("valid GUI picker item tape_files_present must be a mapping")
     if payload.get("selectable_for_backtest_fast_path") is not True:
         raise GuiPickerAdapterError("valid GUI picker item must be selectable for backtest fast path")
     if payload.get("selectable_for_runner_replay_fast_path") is not True:

@@ -1,5 +1,5 @@
+# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
-# BUILD_ID: 2026-05-08_free_precomputed_gui_picker_adapter_v1
 from __future__ import annotations
 
 import ast
@@ -157,6 +157,13 @@ def test_gui_adapter_builds_picker_item_from_selection_contract(tmp_path: Path) 
     assert item["selectable_for_runner_replay_fast_path"] is True
     assert item["not_selectable_for_live"] is True
     assert item["not_selectable_for_paper"] is True
+    assert item["safety_research_only"] is True
+    assert item["safety_paper_live_order_execution"] is False
+    assert item["tape_files_present"] == {"manifest_json": True, "summary_json": True, "trades_csv": True}
+    assert item["manifest_sha256"] == contract["manifest_sha256"]
+    assert item["summary_sha256"] == contract["summary_sha256"]
+    assert item["trades_csv_sha256_from_manifest"] == contract["trades_csv_sha256_from_manifest"]
+    assert item["safe_error_code"] == ""
     assert item["status"] == "valid"
     assert item["status_reason"] == "ok"
 

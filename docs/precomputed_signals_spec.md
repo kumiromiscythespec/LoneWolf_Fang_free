@@ -737,6 +737,44 @@ release assets, strategy, indicators, exchange, risk, order runtime logic, entry
 timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
 DD calculation.
 
+## Phase 12 Read-Only Selection Diagnostics Display
+
+Free Phase 12 adds a read-only selection diagnostics display to the GUI for an
+operator-selected precomputed signal tape `signal_dir`. The diagnostics are
+read-only and display manifest / summary / selection safe metadata only.
+
+The diagnostics display may show validation status, `safe_error_code`, safe
+status reason, file presence, `manifest_sha256`, `summary_sha256`, the manifest
+`trades_csv_sha256` metadata, safety flags, backtest/replay fast-path
+availability, `not_selectable_for_live=true`, and `not_selectable_for_paper=true`.
+It may show safe aggregate values such as `trade_count`, `net_total`,
+`final_equity`, `max_dd_display_abs`, and `max_dd_display_pct`.
+
+`trades.csv raw rows are not read or displayed`. Diagnostics must not display
+raw trades rows, row-level `entry_exec`, `exit_exec`, row-level `qty`, exact
+trade id, order id, raw order payload, balance snapshot, API key, secret, token,
+authorization header, raw billing payload, raw market data, raw OHLCV,
+generated diagnostics output, generated GUI adapter output, generated selection
+output, generated command preview output, generated clipboard output, generated
+real signal tape body, or raw market data.
+
+The GUI does not execute commands. It does not run producer / backtest / runner
+/ inventory automatically, and it does not invoke selection or adapter commands
+as a background execution path. It does not connect selected signal tape state
+to LIVE / PAPER / order creation, order fetch, order submit, balance fetch,
+MEXC API, exchange clients, or `ccxt`. Phase 12 does not add `subprocess`,
+`os.system`, `QProcess`, `Popen`, `startDetached`, threading, multiprocessing,
+scheduler, or background worker execution for diagnostics.
+
+DD display continues to prefer `max_dd_abs / max_dd_pct` and the display fields
+`max_dd_display_abs / max_dd_display_pct`. `max_drawdown` remains the signed
+negative legacy field.
+
+Phase 12 does not change `APP_VERSION`, package, exe, setup, installer, signing,
+release assets, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
 ## Safety Scope
 
 Every accepted manifest must include this exact safety scope:

@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_command_preview_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
 from __future__ import annotations
 
 import ast
@@ -45,6 +45,8 @@ def _valid_picker_item(signal_dir: Path | str) -> dict[str, Any]:
         "trade_count": 2,
         "net_total": 12.5,
         "final_equity": 1012.5,
+        "safety_research_only": True,
+        "safety_paper_live_order_execution": False,
         "dd_schema_version": tape.DD_SCHEMA_VERSION,
         "dd_sign_convention": tape.DD_SIGN_CONVENTION,
         "max_drawdown": -10.0,
@@ -62,6 +64,11 @@ def _valid_picker_item(signal_dir: Path | str) -> dict[str, Any]:
         ),
         "net_total_text": "12.5000",
         "final_equity_text": "1,012.5000",
+        "tape_files_present": {"manifest_json": True, "summary_json": True, "trades_csv": True},
+        "manifest_sha256": "a" * 64,
+        "summary_sha256": "b" * 64,
+        "trades_csv_sha256_from_manifest": "c" * 64,
+        "safe_error_code": "",
         "selectable_for_backtest_fast_path": True,
         "selectable_for_runner_replay_fast_path": True,
         "not_selectable_for_live": True,

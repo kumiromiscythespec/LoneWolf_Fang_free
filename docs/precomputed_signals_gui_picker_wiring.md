@@ -212,6 +212,62 @@ release assets, strategy, indicators, exchange, risk, order runtime logic, entry
 timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
 DD calculation.
 
+## Phase 12 Read-Only Selection Diagnostics Display
+
+Free Phase 12 adds a read-only selection diagnostics display to the existing
+GUI picker area. The diagnostics are read-only and are derived from manifest /
+summary / selection safe metadata for the operator-selected `signal_dir`.
+
+The diagnostics text can show:
+
+- `Selection diagnostics`
+- `Status: valid` or `Status: invalid`
+- `Safe error code`
+- `Backtest fast path: selectable`
+- `Replay fast path: selectable`
+- `LIVE/PAPER: not selectable`
+- `Research-only tape`
+- `Manifest hash`
+- `Summary hash`
+- `Trades CSV hash from manifest`
+- `No raw trade rows are displayed`
+- `This panel does not execute commands`
+
+`trades.csv raw rows are not read or displayed`. The panel displays file
+presence and hash metadata only: `manifest_sha256`, `summary_sha256`, and the
+manifest `trades_csv_sha256`. It does not display raw trades rows, row-level
+`entry_exec`, `exit_exec`, row-level `qty`, exact trade id, order id, raw order
+payload, balance snapshot, API key, secret, token, authorization header, raw
+billing payload, raw market data, raw OHLCV, generated diagnostics output,
+generated GUI adapter output, generated selection output, generated command
+preview output, generated clipboard output, or generated real signal tape body.
+
+The GUI does not execute commands. It does not run producer / backtest / runner
+/ inventory automatically. It does not add an execution button, launch path,
+`subprocess`, `os.system`, `QProcess`, `Popen`, `startDetached`, threading,
+multiprocessing, scheduler, or background worker for diagnostics. It does not
+connect selected signal tape state to LIVE / PAPER / order creation, order
+fetch, order submit, balance fetch, MEXC API, exchange clients, or `ccxt`.
+
+Valid diagnostics preserve these safety flags:
+
+- `selectable_for_backtest_fast_path=true`
+- `selectable_for_runner_replay_fast_path=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+
+Invalid diagnostics show a safe error code, status reason, and warning only; raw
+payloads are not surfaced.
+
+DD display continues to prefer `max_dd_abs / max_dd_pct` and
+`max_dd_display_abs / max_dd_display_pct`. `max_drawdown` remains the signed
+negative legacy field.
+
+Phase 12 does not change `APP_VERSION`, package, exe, setup, installer, signing,
+release assets, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
 ## Drawdown Display
 
 DD display uses the non-negative display fields first:

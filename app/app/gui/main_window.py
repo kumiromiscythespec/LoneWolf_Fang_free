@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
@@ -176,7 +177,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_selection_diagnostics_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -658,6 +659,8 @@ class MainWindow(QWidget):
         self._selected_replay_csv_source: str = ""
         self._selected_precomputed_signal_dir: str = ""
         self._selected_precomputed_signal_picker_item: dict[str, Any] = {}
+        self._selected_precomputed_signal_diagnostics: dict[str, Any] = {}
+        self._selected_precomputed_signal_diagnostics_text: str = ""
         self._selected_precomputed_signal_command_preview: dict[str, Any] = {}
         self._selected_precomputed_signal_copy_state: dict[str, Any] = build_precomputed_signal_copy_state({})
         self._selected_precomputed_signal_status: str = "empty"
@@ -858,8 +861,12 @@ class MainWindow(QWidget):
         self.precomputed_signal_summary = QTextEdit()
         self.precomputed_signal_summary.setReadOnly(True)
         self.precomputed_signal_summary.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.precomputed_signal_summary.setMinimumHeight(86)
-        self.precomputed_signal_summary.setMaximumHeight(132)
+        self.precomputed_signal_summary.setMinimumHeight(132)
+        self.precomputed_signal_summary.setMaximumHeight(260)
+        self.precomputed_signal_summary.setAccessibleName("Precomputed signal selection diagnostics")
+        self.precomputed_signal_summary.setAccessibleDescription(
+            "Selection diagnostics. Read-only. No raw trade rows are displayed. This panel does not execute commands."
+        )
         self.precomputed_signal_summary.setPlainText(format_precomputed_signal_picker_empty_text(ui_language=self._ui_language))
         replay_layout.addWidget(self.precomputed_signal_summary)
 
@@ -1915,6 +1922,10 @@ class MainWindow(QWidget):
         self.btn_copy_precomputed_runner_replay_command.setText(self.tr("action.copy_precomputed_replay_command"))
         self.btn_copy_precomputed_backtest_command.setToolTip(self.tr("tooltip.copy_precomputed_backtest_command"))
         self.btn_copy_precomputed_runner_replay_command.setToolTip(self.tr("tooltip.copy_precomputed_replay_command"))
+        self.precomputed_signal_summary.setAccessibleName("Precomputed signal selection diagnostics")
+        self.precomputed_signal_summary.setAccessibleDescription(
+            "Selection diagnostics. Read-only. No raw trade rows are displayed. This panel does not execute commands."
+        )
         self._refresh_precomputed_signal_picker_display()
         self.replay_symbol_field_label.setText(self.tr("label.symbol"))
         self.replay_tf_label.setText(self.tr("label.tf"))
@@ -2690,6 +2701,9 @@ class MainWindow(QWidget):
         item = state.get("picker_item") if isinstance(state, dict) else {}
         self._selected_precomputed_signal_dir = str(state.get("signal_dir") or signal_dir or "").strip()
         self._selected_precomputed_signal_picker_item = dict(item or {}) if isinstance(item, dict) else {}
+        diagnostics = state.get("diagnostics") if isinstance(state, dict) else {}
+        self._selected_precomputed_signal_diagnostics = dict(diagnostics or {}) if isinstance(diagnostics, dict) else {}
+        self._selected_precomputed_signal_diagnostics_text = str(state.get("diagnostics_text") or "").strip()
         command_preview = state.get("command_preview") if isinstance(state, dict) else {}
         copy_state = state.get("copy_state") if isinstance(state, dict) else {}
         self._selected_precomputed_signal_command_preview = (

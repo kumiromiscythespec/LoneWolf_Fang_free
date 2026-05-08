@@ -316,6 +316,89 @@ signal tape bodies, raw market data, generated inventory outputs, package zips,
 executables, installers, and release assets must not be committed to the repo or
 included in migration zips.
 
+## Phase 6 Read-Only Selection Contract / Picker Preflight
+
+Free Phase 6 adds `precomputed_signals_selection.py`, a read-only selection
+contract for a single operator-chosen `signal_dir`. This is a picker preflight
+layer only. It does not connect GUI code yet, and it does not auto-discover,
+create, repair, refresh, or execute a signal tape.
+
+Example:
+
+```powershell
+python precomputed_signals_selection.py `
+  --signal-dir "<signal_set_dir>" `
+  --product free `
+  --format json `
+  --out C:\path\to\safe_selection.json
+```
+
+The product is `free`. Any other `--product` fails closed. The selected
+`signal_dir` is the safe path an operator or future GUI picker can pass to:
+
+```powershell
+python backtest.py --use-precomputed-signals --precomputed-signals-dir <signal_dir>
+python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir <signal_dir>
+```
+
+The selection contract reads only `manifest.json` and `summary.json` safe
+metadata. It checks that `trades.csv` exists and exposes only the checksum
+metadata already recorded in the manifest. It does not read raw `trades.csv`
+rows and does not emit row-level `entry_exec`, `exit_exec`, quantity values,
+trade ids, order ids, raw order payloads, balances, credentials, tokens,
+authorization headers, raw billing payloads, raw OHLCV, raw market data, or
+generated signal tape body.
+
+Valid selection contracts expose safe aggregate metadata only, including product,
+symbol, normalized symbol, entry/filter timeframes, `signal_set_id`,
+`signal_dir`, creation time, dataset id, time range, trade count, `net_total`,
+`final_equity`, DD schema v2 display fields, safety booleans, file presence,
+manifest hash, summary hash, and the manifest-provided `trades.csv` checksum.
+For valid Free selections:
+
+- `selectable_for_backtest_fast_path=true`
+- `selectable_for_runner_replay_fast_path=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+
+Selection contracts are not valid for LIVE or PAPER runtime use. They are only a
+read-only preflight contract for saved research tape selection before explicit
+backtest fast path or runner replay fast path execution.
+
+Invalid selections expose only safe metadata: `signal_dir`, `status=invalid`,
+`status_reason`, and a safe error code. Safe error codes include
+`missing_signal_dir`, `missing_manifest`, `missing_summary`,
+`missing_trades_csv`, `unsafe_manifest`, `unsafe_summary`, `product_mismatch`,
+`symbol_mismatch`, `timeframe_mismatch`, `signal_set_id_mismatch`,
+`forbidden_field`, `positive_legacy_drawdown`, and `invalid_unknown`. With
+`--strict`, invalid selections fail closed with a non-zero exit code; invalid
+selections are never marked selectable.
+
+The selection CLI accepts optional expectation checks:
+
+- `--expect-symbol`
+- `--expect-entry-tf`
+- `--expect-filter-tf`
+- `--expect-signal-set-id`
+
+Any mismatch fails closed with a safe error code and does not expose raw payloads.
+`--out` writes only a safe JSON selection contract. Standard output contains only
+a safe JSON contract or safe operator summary.
+
+Phase 6 does not run `precompute_signals.py`, does not run `backtest.py`, does
+not run `runner.py`, and does not run the inventory command. It does not connect
+to GUI files. GUI DD display and picker wiring remain later phases.
+
+Phase 6 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
+`APP_VERSION`, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
+Generated real signal tape bodies, raw market data, generated inventory outputs,
+generated selection outputs, package zips, executables, installers, and release
+assets must not be committed to the repo or included in migration zips.
+
 ## Safety Scope
 
 Every accepted manifest must include this exact safety scope:

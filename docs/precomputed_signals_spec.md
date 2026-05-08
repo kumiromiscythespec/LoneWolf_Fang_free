@@ -678,6 +678,65 @@ release assets, strategy, indicators, exchange, risk, order runtime logic, entry
 timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
 DD calculation.
 
+## Phase 11 GUI Command Preview Copy Accessibility / Operator Docs
+
+Free Phase 11 is copy UX accessibility / layout smoke / operator docs. The GUI
+command preview is preview-only and remains a read-only operator aid. The GUI
+does not execute commands.
+
+The copy buttons place safe command text on the clipboard only:
+
+- `Copy backtest command`
+- `Copy replay command`
+
+They do not run producer, backtest, runner, inventory, selection, adapter, or
+command-preview commands automatically. They do not add `subprocess`,
+`os.system`, `QProcess`, `Popen`, `startDetached`, multiprocessing, threading,
+scheduler, or background worker execution. The copied status is UI state only.
+
+Phase 11 keeps these invariants visible in the copy state and GUI text:
+
+- `preview_only=true`
+- `execution_enabled=false`
+- `live_command_available=false`
+- `paper_command_available=false`
+- `Preview only`
+- `Execution disabled`
+- `This panel does not execute commands`
+- `Not selectable for LIVE/PAPER`
+- `Backtest/replay only`
+- `Run this command manually in a terminal if needed`
+
+Invalid preview state, empty command text, unsafe command text,
+`execution_enabled=true`, `preview_only!=true`, `live_command_available=true`,
+or `paper_command_available=true` disables copy and shows a safe disabled
+reason. Live / paper command kinds fail closed and are not copyable.
+
+Operator workflow: if a copied preview command is needed, the operator manually
+reviews it and runs it in an external terminal. The GUI is not the execution
+surface.
+
+Phase 11 does not generate live / paper command text. It does not connect
+precomputed signal tape selection, command preview, copy state, or copy buttons
+to LIVE, PAPER, order creation, order fetch, order submit, balance fetch, MEXC
+API, exchange clients, or `ccxt`. Existing GUI LIVE, PAPER, and order paths
+remain untouched and do not consume the selected signal tape or command
+preview.
+
+Phase 11 docs, accessibility text, layout smoke tests, and copy UX state must
+not expose raw `trades.csv` rows, row-level `entry_exec`, `exit_exec`,
+row-level `qty`, exact trade ids, order ids, raw order payloads, balance
+snapshots, API keys, secrets, tokens, authorization headers, raw billing
+payloads, raw market data, raw OHLCV, generated command preview output,
+generated clipboard output, or generated real signal tape bodies. Generated real
+signal tape bodies and raw market data remain repo-external and must not be
+committed to the repo or included in migration zips.
+
+Phase 11 does not change `APP_VERSION`, package, exe, setup, installer, signing,
+release assets, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
 ## Safety Scope
 
 Every accepted manifest must include this exact safety scope:

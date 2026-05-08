@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_command_copy_ux_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
 # BUILD_ID: 2026-04-20_free_ui_wording_cleanup_v1
@@ -176,7 +176,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_command_copy_ux_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -412,8 +412,8 @@ _UI_TEXTS = {
         "status.precomputed_copy_ready": "Preview only / Execution disabled / Not selectable for LIVE/PAPER",
         "status.precomputed_copied": "Copied / Preview only / Execution disabled / Not selectable for LIVE/PAPER",
         "status.precomputed_copy_disabled": "Preview only / Execution disabled / Not selectable for LIVE/PAPER",
-        "tooltip.copy_precomputed_backtest_command": "Copy the backtest preview command text. This panel does not execute commands.",
-        "tooltip.copy_precomputed_replay_command": "Copy the replay preview command text. This panel does not execute commands.",
+        "tooltip.copy_precomputed_backtest_command": "Copy the backtest preview command text. This panel does not execute commands. Run this command manually in a terminal if needed. Not selectable for LIVE/PAPER.",
+        "tooltip.copy_precomputed_replay_command": "Copy the replay preview command text. This panel does not execute commands. Run this command manually in a terminal if needed. Not selectable for LIVE/PAPER.",
         "chart.mode.equity": "Equity",
         "chart.mode.net": "Net",
         "chart.mode.max_dd": "Max DD",
@@ -867,14 +867,30 @@ class MainWindow(QWidget):
         row_precomputed_signal_copy.setSpacing(8)
         self.precomputed_signal_copy_status = QLabel("Preview only / Execution disabled / Not selectable for LIVE/PAPER")
         self.precomputed_signal_copy_status.setWordWrap(True)
+        self.precomputed_signal_copy_status.setAccessibleName("Precomputed signal command copy status")
+        self.precomputed_signal_copy_status.setAccessibleDescription(
+            "Preview only. Execution disabled. This panel does not execute commands. Not selectable for LIVE/PAPER."
+        )
         self.btn_copy_precomputed_backtest_command = QPushButton("Copy backtest command")
         self.btn_copy_precomputed_runner_replay_command = QPushButton("Copy replay command")
         self.btn_copy_precomputed_backtest_command.setEnabled(False)
         self.btn_copy_precomputed_runner_replay_command.setEnabled(False)
+        self.btn_copy_precomputed_backtest_command.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.btn_copy_precomputed_runner_replay_command.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.btn_copy_precomputed_backtest_command.setAccessibleName("Copy backtest command")
+        self.btn_copy_precomputed_runner_replay_command.setAccessibleName("Copy replay command")
+        self.btn_copy_precomputed_backtest_command.setAccessibleDescription(
+            "Copy-only preview command. This panel does not execute commands."
+        )
+        self.btn_copy_precomputed_runner_replay_command.setAccessibleDescription(
+            "Copy-only preview command. This panel does not execute commands."
+        )
         row_precomputed_signal_copy.addWidget(self.precomputed_signal_copy_status, stretch=1)
         row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_backtest_command)
         row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_runner_replay_command)
         replay_layout.addLayout(row_precomputed_signal_copy)
+        self.setTabOrder(self.btn_select_precomputed_signal, self.btn_copy_precomputed_backtest_command)
+        self.setTabOrder(self.btn_copy_precomputed_backtest_command, self.btn_copy_precomputed_runner_replay_command)
         self.btn_run_replay.setVisible(False)
         root.addWidget(self.replay_group)
 
@@ -2591,6 +2607,28 @@ class MainWindow(QWidget):
         base = self.tr("status.precomputed_copy_disabled")
         return f"{base} / {warning}" if warning else base
 
+    def _precomputed_signal_copy_accessibility_text(
+        self,
+        copy_state: Mapping[str, Any] | dict[str, Any],
+        status_text: str,
+    ) -> str:
+        state = validate_precomputed_signal_copy_state(copy_state)
+        parts = [
+            str(state.get("preview_accessibility_label") or "").strip(),
+            str(status_text or "").strip(),
+            str(state.get("execution_disabled_text") or "").strip(),
+            str(state.get("live_paper_warning_text") or "").strip(),
+            str(state.get("operator_hint_text") or "").strip(),
+        ]
+        reason = str(state.get("copy_disabled_reason") or "").strip()
+        if reason:
+            parts.append(f"Disabled reason: {reason}")
+        deduped: list[str] = []
+        for part in parts:
+            if part and part not in deduped:
+                deduped.append(part)
+        return " / ".join(deduped)
+
     def _update_precomputed_signal_copy_ui(self, copy_state: Mapping[str, Any] | dict[str, Any] | None = None) -> None:
         if not hasattr(self, "btn_copy_precomputed_backtest_command"):
             return
@@ -2601,8 +2639,17 @@ class MainWindow(QWidget):
         status_text = self._precomputed_signal_copy_status_text(state)
         self.precomputed_signal_copy_status.setText(status_text)
         self.precomputed_signal_copy_status.setToolTip(status_text)
-        self.btn_copy_precomputed_backtest_command.setToolTip(self.tr("tooltip.copy_precomputed_backtest_command"))
-        self.btn_copy_precomputed_runner_replay_command.setToolTip(self.tr("tooltip.copy_precomputed_replay_command"))
+        accessibility_text = self._precomputed_signal_copy_accessibility_text(state, status_text)
+        self.precomputed_signal_copy_status.setAccessibleName("Precomputed signal command copy status")
+        self.precomputed_signal_copy_status.setAccessibleDescription(accessibility_text)
+        backtest_tooltip = str(state.get("copy_backtest_tooltip") or self.tr("tooltip.copy_precomputed_backtest_command"))
+        replay_tooltip = str(state.get("copy_replay_tooltip") or self.tr("tooltip.copy_precomputed_replay_command"))
+        self.btn_copy_precomputed_backtest_command.setToolTip(backtest_tooltip)
+        self.btn_copy_precomputed_runner_replay_command.setToolTip(replay_tooltip)
+        self.btn_copy_precomputed_backtest_command.setAccessibleName(self.tr("action.copy_precomputed_backtest_command"))
+        self.btn_copy_precomputed_runner_replay_command.setAccessibleName(self.tr("action.copy_precomputed_replay_command"))
+        self.btn_copy_precomputed_backtest_command.setAccessibleDescription(accessibility_text)
+        self.btn_copy_precomputed_runner_replay_command.setAccessibleDescription(accessibility_text)
 
     def _copy_precomputed_signal_command(self, kind: str) -> None:
         command_text = get_copyable_precomputed_command(self._selected_precomputed_signal_command_preview, kind)

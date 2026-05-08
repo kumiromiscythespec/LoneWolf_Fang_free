@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_command_copy_ux_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import precomputed_signals_gui_adapter as gui_adapter
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_command_copy_ux_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1"
 
 DISPLAY_ONLY_NOTICE = "Replay/backtest only"
 LIVE_PAPER_WARNING = "Not selectable for LIVE/PAPER"
@@ -22,6 +22,21 @@ COMMAND_PREVIEW_ENABLED_WARNING = "Command preview only; execution is disabled i
 COPY_HELPER_WARNING = "Copy helper only handles preview command text; this panel does not execute commands."
 COPY_READY_STATUS = "Preview only / Execution disabled / Not selectable for LIVE/PAPER"
 COPIED_STATUS = "Copied"
+COPY_DISABLED_STATUS = "Copy disabled"
+COPY_BACKTEST_TOOLTIP = (
+    "Copy backtest command. Preview only. This panel does not execute commands. "
+    "Run this command manually in a terminal if needed. Not selectable for LIVE/PAPER."
+)
+COPY_REPLAY_TOOLTIP = (
+    "Copy replay command. Preview only. This panel does not execute commands. "
+    "Run this command manually in a terminal if needed. Not selectable for LIVE/PAPER."
+)
+PREVIEW_ACCESSIBILITY_LABEL = (
+    "Precomputed signal command preview. Preview only. Execution disabled. "
+    "This panel does not execute commands. Not selectable for LIVE/PAPER."
+)
+EXECUTION_DISABLED_TEXT = "Execution disabled"
+OPERATOR_HINT_TEXT = "Run this command manually in a terminal if needed."
 COPY_DISABLED_INVALID_PREVIEW = "invalid_command_preview"
 COPY_DISABLED_EMPTY_COMMAND = "empty_command_text"
 COPY_DISABLED_UNSAFE_COMMAND = "unsafe_command_text"
@@ -55,6 +70,12 @@ COPY_STATE_FIELDS = (
     "copy_status_text",
     "copy_warning",
     "copy_disabled_reason",
+    "copy_backtest_tooltip",
+    "copy_replay_tooltip",
+    "preview_accessibility_label",
+    "execution_disabled_text",
+    "live_paper_warning_text",
+    "operator_hint_text",
     "preview_only",
     "execution_enabled",
     "live_command_available",
@@ -339,6 +360,7 @@ def _copy_disabled_state(
     reason: str = COPY_DISABLED_INVALID_PREVIEW,
     warning: str = "",
 ) -> dict[str, Any]:
+    safe_warning = _safe_command_field(warning) or "Copy disabled for this command preview."
     return {
         "backtest_command_text": "",
         "runner_replay_command_text": "",
@@ -346,9 +368,15 @@ def _copy_disabled_state(
         "can_copy_runner_replay_command": False,
         "copied_backtest_command": False,
         "copied_runner_replay_command": False,
-        "copy_status_text": "",
-        "copy_warning": _safe_command_field(warning) or "Copy disabled for this command preview.",
+        "copy_status_text": f"{COPY_DISABLED_STATUS} / {COPY_READY_STATUS} / {safe_warning}",
+        "copy_warning": safe_warning,
         "copy_disabled_reason": _safe_command_field(reason) or COPY_DISABLED_INVALID_PREVIEW,
+        "copy_backtest_tooltip": COPY_BACKTEST_TOOLTIP,
+        "copy_replay_tooltip": COPY_REPLAY_TOOLTIP,
+        "preview_accessibility_label": PREVIEW_ACCESSIBILITY_LABEL,
+        "execution_disabled_text": EXECUTION_DISABLED_TEXT,
+        "live_paper_warning_text": LIVE_PAPER_WARNING,
+        "operator_hint_text": OPERATOR_HINT_TEXT,
         "preview_only": True,
         "execution_enabled": False,
         "live_command_available": False,
@@ -424,6 +452,12 @@ def build_precomputed_signal_copy_state(command_preview: Mapping[str, Any]) -> d
         "copy_status_text": COPY_READY_STATUS,
         "copy_warning": COPY_HELPER_WARNING,
         "copy_disabled_reason": "",
+        "copy_backtest_tooltip": COPY_BACKTEST_TOOLTIP,
+        "copy_replay_tooltip": COPY_REPLAY_TOOLTIP,
+        "preview_accessibility_label": PREVIEW_ACCESSIBILITY_LABEL,
+        "execution_disabled_text": EXECUTION_DISABLED_TEXT,
+        "live_paper_warning_text": LIVE_PAPER_WARNING,
+        "operator_hint_text": OPERATOR_HINT_TEXT,
         "preview_only": True,
         "execution_enabled": False,
         "live_command_available": False,
@@ -466,6 +500,7 @@ def mark_precomputed_command_copied(copy_state: Mapping[str, Any], kind: str) ->
     state["copy_status_text"] = COPIED_STATUS
     state["copy_warning"] = COPY_HELPER_WARNING
     state["copy_disabled_reason"] = ""
+    state["operator_hint_text"] = OPERATOR_HINT_TEXT
     return validate_precomputed_signal_copy_state(state)
 
 
@@ -508,6 +543,15 @@ def validate_precomputed_signal_copy_state(copy_state: Mapping[str, Any]) -> dic
             "copy_status_text": _safe_command_field(payload.get("copy_status_text")) or status_text,
             "copy_warning": _safe_command_field(payload.get("copy_warning")) or COPY_HELPER_WARNING,
             "copy_disabled_reason": "",
+            "copy_backtest_tooltip": _safe_command_field(payload.get("copy_backtest_tooltip")) or COPY_BACKTEST_TOOLTIP,
+            "copy_replay_tooltip": _safe_command_field(payload.get("copy_replay_tooltip")) or COPY_REPLAY_TOOLTIP,
+            "preview_accessibility_label": _safe_command_field(payload.get("preview_accessibility_label"))
+            or PREVIEW_ACCESSIBILITY_LABEL,
+            "execution_disabled_text": _safe_command_field(payload.get("execution_disabled_text"))
+            or EXECUTION_DISABLED_TEXT,
+            "live_paper_warning_text": _safe_command_field(payload.get("live_paper_warning_text"))
+            or LIVE_PAPER_WARNING,
+            "operator_hint_text": _safe_command_field(payload.get("operator_hint_text")) or OPERATOR_HINT_TEXT,
             "preview_only": True,
             "execution_enabled": False,
             "live_command_available": False,

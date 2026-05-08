@@ -155,6 +155,63 @@ not change `APP_VERSION`, strategy, indicators, exchange, risk, order runtime
 logic, entry timing, exit timing, fee logic, quantity logic, PnL formulas,
 signal timing, or DD calculation.
 
+## Phase 11 Copy Accessibility / Layout Smoke / Operator Docs
+
+Free Phase 11 is copy UX accessibility / layout smoke / operator docs. The GUI
+command preview is preview-only and read-only. The GUI does not execute
+commands.
+
+The copy controls remain operator-triggered clipboard helpers only:
+
+- `Copy backtest command`
+- `Copy replay command`
+
+The buttons copy safe command text to the clipboard. They do not run producer,
+backtest, runner, inventory, selection, adapter, or command-preview commands
+automatically. The copied status is UI state only. The GUI does not add
+`subprocess`, `os.system`, `QProcess`, `Popen`, `startDetached`,
+multiprocessing, threading, scheduler, or background worker execution for the
+preview or copy UX.
+
+The copy state and GUI accessibility text preserve these operator-visible
+invariants:
+
+- `preview_only=true`
+- `execution_enabled=false`
+- `live_command_available=false`
+- `paper_command_available=false`
+- `Preview only`
+- `Execution disabled`
+- `This panel does not execute commands`
+- `Not selectable for LIVE/PAPER`
+- `Run this command manually in a terminal if needed`
+
+Invalid preview state, disabled preview state, empty command text, unsafe
+command text, live command availability, or paper command availability disables
+copy and exposes a safe disabled reason. Live / paper command kinds are not
+copyable and no live / paper command text is generated.
+
+Operator workflow: copy the preview command only if needed, review it, and run
+it manually in an external terminal. The GUI remains a preview surface and never
+the execution surface.
+
+Phase 11 does not connect to LIVE, PAPER, order creation, order fetch, order
+submit, balance fetch, MEXC API, exchange clients, or `ccxt`. Existing GUI
+LIVE, PAPER, and order paths remain untouched and do not consume selected
+precomputed signal tape state, command preview state, or copy UX state.
+
+Phase 11 accessibility text, docs, and tests must not include raw trades rows,
+row-level `entry_exec`, `exit_exec`, `qty`, trade ids, order ids, raw order
+payloads, balance snapshots, API keys, secrets, tokens, authorization headers,
+raw billing payloads, raw market data, generated real signal tape bodies,
+generated inventory output, generated selection output, generated GUI adapter
+output, generated command preview output, or generated clipboard output.
+
+Phase 11 does not change `APP_VERSION`, package, exe, setup, installer, signing,
+release assets, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
 ## Drawdown Display
 
 DD display uses the non-negative display fields first:

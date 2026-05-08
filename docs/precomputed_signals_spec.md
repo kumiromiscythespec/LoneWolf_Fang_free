@@ -46,6 +46,13 @@ generation, no GUI source change, no runtime source change, no command
 execution, no subprocess / QProcess / background worker, no LIVE/PAPER/order,
 and no MEXC private API. Future execution requires separate explicit approval
 phase, and approval is not live/paper/order approval.
+Phase 23 fixes the approval preflight checklist / approval record static sample
+as docs/tests-only. It adds no approval UI implementation, no approval record
+generation at runtime, no execution audit record generation, no dry-run
+execution, no GUI source change, no runtime source change, no command
+execution, no subprocess / QProcess / background worker, no LIVE/PAPER/order,
+and no MEXC private API. The static sample is not actual approval, not runtime
+output, and not an execution audit record.
 
 ## Scope
 
@@ -1491,6 +1498,81 @@ proof. Phase 19 request builder creates preview only. Phase 20 GUI preview
 adapter creates display item only. Phase 21 GUI wiring displays preview only.
 Phase 22 defines approval boundary only. Future execution requires separate
 explicit approval phase.
+
+## Phase 23 Local-Only Dry-Run Approval Checklist And Static Sample
+
+Free Phase 23 is approval preflight checklist / approval record static sample
+docs-tests and is docs/tests-only. The canonical checklist document is
+`docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md`.
+The sanitized static sample is
+`docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json`.
+
+Phase 23 has no approval UI implementation, no approval record generation at
+runtime, no execution audit record generation, no dry-run execution, no GUI
+source change, no runtime source change, no command execution, no subprocess /
+QProcess / background worker, no producer/backtest/runner/inventory auto-run,
+no LIVE/PAPER/order, no MEXC private API, APP_VERSION unchanged, and
+package/release not touched.
+
+The required preflight checklist fixes request type
+`precomputed_signal_local_dry_run_request`, request schema valid,
+request_hash present, selection_hash present, selection contract valid,
+`product == free`, signal_dir present, symbol present, entry_tf / filter_tf
+present, dry_run_mode allowed as `backtest_fast_path_local_only` or
+`runner_replay_fast_path_local_only`, `not_selectable_for_live == true`,
+`not_selectable_for_paper == true`, `safety_research_only == true`,
+`paper_live_order_execution == false`, `operator_confirmation_required == true`,
+manifest present, summary present, `trades.csv` present, manifest hash present,
+summary hash present, `trades.csv` hash from manifest present, forbidden fields
+rejected, positive legacy max_drawdown rejected, output_dir safe,
+allowed_artifacts reviewed, forbidden_artifacts reviewed, worktree status
+recorded, package/release artifacts excluded, no background execution, no
+private API, no order/balance path, and no raw trade rows displayed or recorded.
+
+The approval record schema uses
+`record_type=precomputed_signal_local_dry_run_approval_record`,
+`approval_schema_version=free_precomputed_local_dry_run_approval_record_v1`,
+`approval_scope=local_saved_tape_backtest_replay_only`, approved_actions of
+`approve_backtest_fast_path_local_only` and
+`approve_runner_replay_fast_path_local_only`, and required forbidden_actions of
+`live`, `paper`, `order_submit`, `order_fetch`, `balance_fetch`,
+`private_api`, `producer_auto_run`, `inventory_auto_scan`,
+`background_worker`, and `package_release`. Status values are `draft`,
+`approved`, `rejected`, `blocked`, `invalid`, and `not_run`.
+
+The Phase 23 static sample status is `not_run`, operator_confirmed is `false`,
+and preflight_passed is `false`. request_hash / selection_hash are synthetic
+placeholders. The static sample is sanitized, not generated runtime output, not
+actual approval, not dry-run execution, and not an execution audit record.
+
+Future confirmation text requirements include local-only, not LIVE/PAPER/order,
+no MEXC private API, no balance fetch, no order fetch, no order submit,
+selected precomputed signal tape only, product free, signal_dir, symbol,
+entry_tf / filter_tf, dry_run_mode, output_dir, generated artifacts policy, and
+operator understanding that this is not release/package approval.
+
+Fail-closed reasons include `missing_request_hash`, `missing_selection_hash`,
+`invalid_request`, `invalid_selection`, `invalid_approval_scope`,
+`missing_confirmation_text`, `missing_operator_confirmation`,
+`forbidden_action_requested`, `missing_forbidden_action`,
+`live_or_paper_requested`, `order_or_balance_requested`,
+`private_api_requested`, `background_execution_requested`,
+`package_release_action_requested`, `unsafe_output_dir`, `forbidden_field`,
+`positive_legacy_max_drawdown`, `worktree_status_unrecorded`, and
+`unknown_safety_violation`.
+
+Execution audit boundary: approval record is not execution audit record.
+Approval record does not prove execution. Execution audit record must be
+generated only in a future execution phase. Phase 23 must not create execution
+audit record. Future execution audit must reference approval_record_hash and
+request_hash and must assert no LIVE/PAPER/order/private API/background
+execution.
+
+Phase 18 request schema is planning artifact. Phase 19 request builder creates
+preview only. Phase 20 GUI preview adapter creates display item only. Phase 21
+GUI wiring displays preview only. Phase 22 approval boundary defines future
+approval rules. Phase 23 provides static approval sample/checklist only. Future
+execution requires separate explicit approval and implementation phase.
 
 ## DD Schema V2
 

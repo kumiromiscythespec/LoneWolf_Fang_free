@@ -26,6 +26,16 @@ runtime source change, no command execution, no subprocess / QProcess /
 background worker, no LIVE/PAPER/order, and no MEXC private API. The boundary
 is detailed in
 `docs/precomputed_signals_gui_local_dry_run_approval_boundary.md`.
+Free Phase 23: approval preflight checklist / approval record static sample
+docs-tests fixes the required preflight checklist and static sanitized approval
+record sample in
+`docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md`
+and
+`docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json`. It
+adds no approval UI implementation, no approval record generation at runtime,
+no execution audit record generation, no dry-run execution, no GUI source
+change, no runtime source change, no command execution, no subprocess /
+QProcess / background worker, no LIVE/PAPER/order, and no MEXC private API.
 
 ## Scope
 
@@ -34,17 +44,23 @@ is detailed in
 - Free Phase 20: request builder read-only GUI preview adapter.
 - Free Phase 21: read-only GUI source wiring of dry-run request preview adapter.
 - Free Phase 22: local-only dry-run execution approval boundary.
+- Free Phase 23: approval preflight checklist / approval record static sample
+  docs-tests.
 - docs/tests-only.
 - Phase 22 is docs/tests-only.
+- Phase 23 is docs/tests-only.
 - no approval UI implementation.
 - no dry-run execution implementation.
 - no approval record generation.
+- no approval record generation at runtime.
 - no execution audit record generation.
 - Phase 17-20 no GUI source change; Phase 21 adds read-only/display-only GUI
   source wiring only.
 - Phase 22 no GUI source change.
+- Phase 23 no GUI source change.
 - no runtime source change.
 - Phase 22 no runtime source change.
+- Phase 23 no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
 - GUI displays dry-run request preview only.
@@ -88,6 +104,7 @@ is detailed in
 - future local-only dry-run requires explicit operator confirmation.
 - explicit operator approval required.
 - approval is not live/paper/order approval.
+- approval record is not execution audit record.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
@@ -358,6 +375,45 @@ not manual smoke record approval, and not release/package approval. Phase 22
 must not create approval record files. Phase 22 must not create execution audit
 records. Future execution requires separate explicit approval phase.
 
+## Current Phase 23 Approval Preflight Checklist And Static Sample
+
+Free Phase 23 is approval preflight checklist / approval record static sample
+docs-tests. Phase 23 is docs/tests-only and is defined by:
+
+- `docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md`
+- `docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json`
+
+Phase 23 has no approval UI implementation, no approval record generation at
+runtime, no execution audit record generation, no dry-run execution, no GUI
+source change, no runtime source change, no command execution, no subprocess /
+QProcess / background worker, no producer/backtest/runner/inventory auto-run,
+no LIVE/PAPER/order, no MEXC private API, APP_VERSION unchanged, and
+package/release not touched.
+
+The Phase 23 approval preflight checklist requires request_hash present,
+selection_hash present, valid request schema, valid selection contract,
+`product == free`, allowed local-only dry_run_mode, manifest / summary /
+trades.csv presence, manifest / summary / trades.csv hash coverage, forbidden
+fields rejected, positive legacy max_drawdown rejected, safe output_dir,
+allowed_artifacts reviewed, forbidden_artifacts reviewed, worktree status
+recorded, package/release artifacts excluded, no background execution, no
+private API, no order/balance path, and no raw trade rows displayed or
+recorded.
+
+The Phase 23 static approval record sample uses
+`record_type=precomputed_signal_local_dry_run_approval_record`,
+`approval_schema_version=free_precomputed_local_dry_run_approval_record_v1`,
+`approval_scope=local_saved_tape_backtest_replay_only`, `status=not_run`,
+`operator_confirmed=false`, and `preflight_passed=false`. request_hash and
+selection_hash are synthetic placeholders. The sample is sanitized and static;
+it is not generated runtime output, not actual approval, not dry-run execution,
+and not an execution audit record.
+
+Approval record is not execution audit record. Approval record does not prove
+execution. Future execution must be a separate phase and must reference an
+approval_record_hash and request_hash only after a separately approved
+implementation exists.
+
 ## Required Future Operator Confirmation
 
 Future dry-run must require explicit operator confirmation. The confirmation
@@ -626,6 +682,13 @@ or repo-external zip.
 - Phase 22 no dry-run execution implementation.
 - Phase 22 no approval record generation.
 - Phase 22 no execution audit record generation.
+- Phase 23 provides static approval sample/checklist only.
+- Phase 23 is docs/tests-only.
+- Phase 23 no approval UI implementation.
+- Phase 23 no approval record generation at runtime.
+- Phase 23 no execution audit record generation.
+- Phase 23 no dry-run execution.
+- approval record is not execution audit record.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.

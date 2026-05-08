@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_approval_boundary_docs_v1
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_approval_record_docs_v1
 from __future__ import annotations
 
 import re
@@ -7,10 +7,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BOUNDARY_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_approval_boundary.md"
+PREFLIGHT_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md"
 DESIGN_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_design.md"
 REQUEST_SCHEMA_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_request_schema.md"
 SPEC_DOC = REPO_ROOT / "docs" / "precomputed_signals_spec.md"
-DOC_PATHS = (BOUNDARY_DOC, DESIGN_DOC, REQUEST_SCHEMA_DOC, SPEC_DOC)
+DOC_PATHS = (BOUNDARY_DOC, PREFLIGHT_DOC, DESIGN_DOC, REQUEST_SCHEMA_DOC, SPEC_DOC)
 GUI_SOURCE_PATHS = (
     REPO_ROOT / "app" / "app" / "gui" / "main_window.py",
     REPO_ROOT / "app" / "app" / "gui" / "precomputed_signal_picker.py",
@@ -123,10 +124,13 @@ def test_approval_boundary_doc_exists_and_records_phase22_docs_only_scope() -> N
 
     for expected in (
         "Phase 22 is local-only dry-run execution approval boundary",
+        "Phase 23 is approval preflight checklist / approval record static sample docs-tests",
         "Phase 22 is docs/tests-only",
+        "Phase 23 is docs/tests-only",
         "no approval UI implementation",
         "no dry-run execution implementation",
         "no approval record generation",
+        "no approval record generation at runtime",
         "no execution audit record generation",
         "no GUI source change",
         "no runtime source change",
@@ -137,6 +141,27 @@ def test_approval_boundary_doc_exists_and_records_phase22_docs_only_scope() -> N
         "APP_VERSION unchanged",
         "package/release not touched",
         "future execution requires separate explicit approval phase",
+    ):
+        assert expected in text
+
+
+def test_phase23_checklist_and_static_sample_boundary_are_linked() -> None:
+    text = _doc_text()
+
+    for expected in (
+        "Free Phase 23: approval preflight checklist / approval record static sample",
+        "docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md",
+        "docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json",
+        "Phase 23 provides static approval sample/checklist only",
+        "Phase 23 is docs/tests-only",
+        "no approval UI implementation",
+        "no approval record generation at runtime",
+        "no execution audit record generation",
+        "no dry-run execution",
+        "no GUI source change",
+        "no runtime source change",
+        "approval record is not execution audit record",
+        "future execution requires separate explicit approval and implementation phase",
     ):
         assert expected in text
 

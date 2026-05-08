@@ -5,6 +5,12 @@ precomputed signal tape GUI. Phase 22 is docs/tests-only and defines the
 future explicit operator approval required before any later local saved-tape
 dry-run execution phase can exist.
 
+Free Phase 23 extends this boundary as approval preflight checklist / approval
+record static sample docs-tests. Phase 23 is docs/tests-only and adds only
+`docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md`,
+`docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json`, and
+tests that validate the static sample and docs boundary.
+
 Phase 22 does not make local-only dry-run executable. It does not add approval
 UI, confirm controls, execute controls, request generation, approval record
 generation, execution audit record generation, subprocess launch paths, private
@@ -14,7 +20,9 @@ changes.
 ## Scope
 
 - Phase 22 is local-only dry-run execution approval boundary.
+- Phase 23 is approval preflight checklist / approval record static sample docs-tests.
 - Phase 22 is docs/tests-only.
+- Phase 23 is docs/tests-only.
 - no GUI source change.
 - no runtime source change.
 - no approval UI implementation.
@@ -22,6 +30,7 @@ changes.
 - no execution button.
 - no command execution.
 - no approval record generation.
+- no approval record generation at runtime.
 - no execution audit record generation.
 - no subprocess / QProcess / background worker.
 - no producer/backtest/runner/inventory auto-run.
@@ -38,6 +47,7 @@ changes.
 - generated approval record / generated execution audit record excluded.
 - future local-only dry-run requires explicit operator approval.
 - approval is not live/paper/order approval.
+- approval record is not execution audit record.
 - future execution must be a separate phase.
 - future execution requires separate explicit approval phase.
 
@@ -93,6 +103,92 @@ files, generated dry-run outputs, screenshots, command preview outputs,
 diagnostics outputs, inventory outputs, selection outputs, adapter outputs,
 package zips, exe, installer, setup binaries, release assets, runtime exports,
 or zip-in-zip artifacts.
+
+Phase 23 must not create generated approval records. The Phase 23 JSON fixture
+is a static sanitized sample, not generated runtime output, not actual
+operator approval, not dry-run execution proof, and not an execution audit
+record.
+
+## Phase 23 Approval Preflight Checklist
+
+The canonical Phase 23 checklist is
+`docs/precomputed_signals_gui_local_dry_run_approval_preflight_checklist.md`.
+The checklist fixes the preflight gate names, approval record schema, static
+sample rules, confirmation text requirements, fail-closed reasons, execution
+audit boundary, and relationship to previous phases.
+
+Phase 23 is docs/tests-only. It has no approval UI implementation, no approval
+record generation at runtime, no execution audit record generation, no dry-run
+execution, no GUI source change, no runtime source change, no command
+execution, no subprocess / QProcess / background worker, no producer/backtest/
+runner/inventory auto-run, no LIVE/PAPER/order, no MEXC private API,
+APP_VERSION unchanged, and package/release not touched.
+
+Required preflight checklist items include:
+
+- `request_type == precomputed_signal_local_dry_run_request`.
+- request schema valid.
+- request_hash present.
+- selection_hash present.
+- selection contract valid.
+- `product == free`.
+- signal_dir present.
+- symbol present.
+- entry_tf / filter_tf present.
+- dry_run_mode is allowed.
+- `dry_run_mode` is `backtest_fast_path_local_only` or
+  `runner_replay_fast_path_local_only`.
+- `not_selectable_for_live == true`.
+- `not_selectable_for_paper == true`.
+- `safety_research_only == true`.
+- `paper_live_order_execution == false`.
+- `operator_confirmation_required == true`.
+- `operator_confirmed == true` only in a future actual approval record, not in
+  the Phase 23 sample because the sample is `not_run`.
+- manifest present.
+- summary present.
+- trades.csv present.
+- manifest hash present.
+- summary hash present.
+- trades.csv hash from manifest present.
+- forbidden fields rejected.
+- positive legacy max_drawdown rejected.
+- output_dir safe.
+- allowed_artifacts reviewed.
+- forbidden_artifacts reviewed.
+- worktree status recorded.
+- package/release artifacts excluded.
+- no background execution.
+- no private API.
+- no order/balance path.
+- no raw trade rows displayed or recorded.
+
+## Phase 23 Static Approval Record Sample
+
+The static sample approval record is
+`docs/precomputed_signals_gui_local_dry_run_approval_record_sample.json`.
+
+It is a sanitized static fixture only:
+
+- `record_type = precomputed_signal_local_dry_run_approval_record`.
+- `approval_schema_version = free_precomputed_local_dry_run_approval_record_v1`.
+- `approval_scope = local_saved_tape_backtest_replay_only`.
+- `status = not_run`.
+- `operator_confirmed = false`.
+- `preflight_passed = false`.
+- request_hash / selection_hash are synthetic placeholders.
+- approved_actions contain only future local saved-tape approval actions.
+- forbidden_actions include LIVE/PAPER/order/private API/background/package
+  release actions.
+- no approval or execution occurred.
+- no runtime source generated the record.
+
+The sample must not include generated approval record output, generated
+execution audit record output, generated dry-run output, raw market data, raw
+OHLCV, raw trade row payloads, row-level execution prices, exact row
+identifiers, raw order payloads, account payloads, private credentials, raw
+billing data, screenshot paths, package zips, exe, installer, release assets,
+runtime dirs, exports dirs, or zip-in-zip artifacts.
 
 ## Required Operator Confirmation Text
 
@@ -228,6 +324,8 @@ Approval record schema fields:
 - `preflight_passed`.
 - `preflight_summary`.
 - `fail_closed_reasons`.
+- `allowed_artifacts`.
+- `forbidden_artifacts`.
 - `status`.
 - `status_reason`.
 - `notes_sanitized`.

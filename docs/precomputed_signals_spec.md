@@ -39,6 +39,13 @@ execute dry-run, does not create request files, does not add confirm/dry-run/
 execute buttons, does not use subprocess / QProcess / Popen / background
 worker, does not run backtest/runner/producer/inventory, does not connect to
 LIVE/PAPER/order, and keeps APP_VERSION unchanged.
+Phase 22 fixes the local-only dry-run execution approval boundary as
+docs/tests-only. It adds no approval UI implementation, no dry-run execution
+implementation, no approval record generation, no execution audit record
+generation, no GUI source change, no runtime source change, no command
+execution, no subprocess / QProcess / background worker, no LIVE/PAPER/order,
+and no MEXC private API. Future execution requires separate explicit approval
+phase, and approval is not live/paper/order approval.
 
 ## Scope
 
@@ -1403,6 +1410,87 @@ order payload, balance snapshot, API key, secret, token, authorization, raw
 billing, raw market data, raw OHLCV, generated real tape body, screenshots,
 package zips, exe, installers, setup binaries, runtime dirs, exports dirs, and
 zip-in-zip artifacts are excluded from repo and zip.
+
+## Phase 22 Local-Only Dry-Run Approval Boundary
+
+Free Phase 22 is local-only dry-run execution approval boundary and is
+docs/tests-only. The canonical boundary document is
+`docs/precomputed_signals_gui_local_dry_run_approval_boundary.md`.
+
+Phase 22 has no approval UI implementation, no dry-run execution
+implementation, no approval record generation, no execution audit record
+generation, no GUI source change, no runtime source change, no command
+execution, no subprocess / QProcess / background worker, no producer/backtest/
+runner/inventory auto-run, no LIVE/PAPER/order, no MEXC private API,
+APP_VERSION unchanged, and package/release not touched.
+
+Explicit operator approval required means a future operator confirmation for
+local-only saved-tape backtest/replay fast path only. Approval is not
+live/paper/order approval, not private API approval, not command copy approval,
+not manual smoke record approval, and not release/package approval.
+
+Future required pre-approval gates include valid selection contract, valid
+request schema, `product == free`, dry_run_mode in allowed enum,
+`operator_confirmed=false before confirmation`, `execution_enabled=false before
+confirmation`, `not_selectable_for_live=true`, `not_selectable_for_paper=true`,
+`safety_research_only=true`, `paper_live_order_execution=false`, manifest
+present, summary present, `trades.csv` present, manifest hash present, summary
+hash present, `trades.csv` hash from manifest present, forbidden fields
+rejected, positive legacy max_drawdown rejected, output_dir safe, worktree
+status recorded, package/release artifacts excluded, no background execution,
+no private API, and no order/balance path.
+
+Allowed execution modes remain `backtest_fast_path_local_only` and
+`runner_replay_fast_path_local_only`. Not allowed modes remain `live`, `paper`,
+`order_submit`, `order_fetch`, `balance_fetch`, `private_api`,
+`producer_auto_run`, `inventory_auto_scan`, `background_worker`,
+`release_packaging`, and `external_network`.
+
+Future approval record schema uses
+`precomputed_signal_local_dry_run_approval_record`,
+`approval_scope=local_saved_tape_backtest_replay_only`, allowed
+`approved_actions` of `approve_backtest_fast_path_local_only` and
+`approve_runner_replay_fast_path_local_only`, required `forbidden_actions` for
+LIVE/PAPER/order/private API/background/package release behavior, and status
+values `draft`, `approved`, `rejected`, `blocked`, `invalid`, and `not_run`.
+Phase 22 must not create approval record files.
+
+Future execution audit record boundary uses
+`precomputed_signal_local_dry_run_execution_record` and is separate from the
+approval record. It must include `approval_record_hash`, `request_hash`,
+started/finished timestamps, `dry_run_mode`, `result_status`,
+`output_artifact_manifest`, `safe_summary`, `fail_closed_reason`,
+`no_live_paper_order_assertion`, `no_private_api_assertion`, and
+`no_background_execution_assertion`. It must not include raw trades rows,
+`entry_exec`, `exit_exec`, `qty`, trade id, order id, raw order, balance, API
+key, secret, token, authorization, raw billing, raw market data, or raw OHLCV.
+Phase 22 must not create execution audit records.
+
+Allowed artifacts after future approval are safe summary JSON,
+`fast_summary.json`, `equity_curve.csv`, `trades.csv` only if safe-condition /
+saved-tape-compatible and explicitly documented, local-only output manifest,
+approval record, execution audit record, and sanitized manual smoke record.
+Forbidden artifacts include raw market data, raw OHLCV, raw trades rows,
+`entry_exec`, `exit_exec`, `qty`, `trade_id`, `order_id`, raw_order,
+balance_snapshot, api_key, secret, token, authorization, raw_billing,
+screenshots with secrets/balances/orders/account details, package_zip, exe,
+installer, release_asset, runtime dirs copied into repo, and zip inside zip.
+
+Future fail-closed conditions include operator confirmation missing,
+confirmation text mismatch, invalid approval_scope, invalid request, invalid
+selection, `product != free`, live/paper/order/private API requested,
+background execution requested, unsafe output path, forbidden fields detected,
+positive legacy max_drawdown detected, approval record missing in a future
+execution phase, approval record must match request hash, unexpected worktree
+status, and package/release artifact path involved.
+
+Phase 9 command preview remains preview-only. Phase 10 copy UX remains
+clipboard-only. Phase 15/16 manual smoke record remains display-only proof, not
+execution proof. Phase 18 request schema is planning artifact, not execution
+proof. Phase 19 request builder creates preview only. Phase 20 GUI preview
+adapter creates display item only. Phase 21 GUI wiring displays preview only.
+Phase 22 defines approval boundary only. Future execution requires separate
+explicit approval phase.
 
 ## DD Schema V2
 

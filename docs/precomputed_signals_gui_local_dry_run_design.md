@@ -18,6 +18,14 @@ Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
 connects that preview item to the Free GUI as display-only text. It does not add
 dry-run execution, request file generation, confirmation controls, or runtime
 execution paths.
+Free Phase 22: local-only dry-run execution approval boundary fixes the future
+operator approval boundary as docs/tests-only. It adds no approval UI
+implementation, no dry-run execution implementation, no approval record
+generation, no execution audit record generation, no GUI source change, no
+runtime source change, no command execution, no subprocess / QProcess /
+background worker, no LIVE/PAPER/order, and no MEXC private API. The boundary
+is detailed in
+`docs/precomputed_signals_gui_local_dry_run_approval_boundary.md`.
 
 ## Scope
 
@@ -25,10 +33,18 @@ execution paths.
 - Free Phase 19: local-only dry-run request builder docs/helper.
 - Free Phase 20: request builder read-only GUI preview adapter.
 - Free Phase 21: read-only GUI source wiring of dry-run request preview adapter.
+- Free Phase 22: local-only dry-run execution approval boundary.
 - docs/tests-only.
+- Phase 22 is docs/tests-only.
+- no approval UI implementation.
+- no dry-run execution implementation.
+- no approval record generation.
+- no execution audit record generation.
 - Phase 17-20 no GUI source change; Phase 21 adds read-only/display-only GUI
   source wiring only.
+- Phase 22 no GUI source change.
 - no runtime source change.
+- Phase 22 no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
 - GUI displays dry-run request preview only.
@@ -70,9 +86,12 @@ execution paths.
 - generated GUI preview output is not committed.
 - generated dry-run GUI preview output is not committed.
 - future local-only dry-run requires explicit operator confirmation.
+- explicit operator approval required.
+- approval is not live/paper/order approval.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
+- future execution requires separate explicit approval phase.
 
 Phase 17 must not create generated dry-run output, generated dry-run request
 files, screenshots, command preview output, diagnostics output, inventory
@@ -318,6 +337,27 @@ authorization, raw billing, raw market data, raw OHLCV, generated real tape
 body, screenshots, package zips, exe, installer, setup binary, runtime dirs,
 exports dirs, and zip-in-zip artifacts.
 
+## Current Phase 22 Approval Boundary
+
+Free Phase 22 is local-only dry-run execution approval boundary. Phase 22 is
+docs/tests-only and is defined in
+`docs/precomputed_signals_gui_local_dry_run_approval_boundary.md`.
+
+Phase 22 keeps the GUI local dry-run preview read-only and does not implement
+approval UI. It does not implement dry-run execution, does not generate approval
+records, does not generate execution audit records, does not change GUI source,
+does not change runtime source, does not execute commands, does not use
+subprocess / QProcess / background worker, does not auto-run producer/backtest/
+runner/inventory, does not connect to LIVE/PAPER/order, and does not call MEXC
+private API.
+
+The approval boundary states that explicit operator approval required applies
+only to future local saved-tape backtest/replay fast paths. Approval is not
+live/paper/order approval, not private API approval, not command copy approval,
+not manual smoke record approval, and not release/package approval. Phase 22
+must not create approval record files. Phase 22 must not create execution audit
+records. Future execution requires separate explicit approval phase.
+
 ## Required Future Operator Confirmation
 
 Future dry-run must require explicit operator confirmation. The confirmation
@@ -329,6 +369,11 @@ The future confirmation text must say:
 
 - this is local-only.
 - this is not LIVE/PAPER/order.
+- No MEXC private API.
+- No balance fetch.
+- No order fetch.
+- No order submit.
+- Uses selected precomputed signal tape only.
 - must fail closed if the selection is invalid.
 - future local-only dry-run is not live/paper/order.
 - `signal_dir`.
@@ -336,12 +381,17 @@ The future confirmation text must say:
 - `symbol`.
 - `entry_tf`.
 - `filter_tf`.
+- `dry_run_mode`.
 - `not_selectable_for_live=true`.
 - `not_selectable_for_paper=true`.
 - output directory.
+- operator understands generated artifacts policy.
+- operator understands execution is local saved-tape fast path only.
 
 Future confirmation must not be implied by selecting a tape, copying a command,
-opening diagnostics, or viewing a preview. The default state is unconfirmed.
+opening diagnostics, or viewing a preview. The default state is unconfirmed:
+`operator_confirmed=false`, `execution_enabled=false`, and
+`execution_enabled_after_confirmation=false`.
 
 ## Required Future Preflight Checks
 
@@ -349,7 +399,12 @@ Future dry-run must fail closed unless every preflight is true:
 
 - `signal_dir` exists.
 - selection contract valid.
+- valid request schema.
 - `product == free`.
+- dry_run_mode in allowed enum.
+- `operator_confirmed=false before confirmation`.
+- `execution_enabled=false before confirmation`.
+- `execution_enabled_after_confirmation=false before confirmation`.
 - `safety_scope research_only=true`.
 - `paper_live_order_execution=false`.
 - `not_selectable_for_live=true`.
@@ -369,6 +424,7 @@ Future dry-run must fail closed unless every preflight is true:
 - generated artifacts excluded from commit/zip unless explicitly summarized.
 - operator confirmation present.
 - no background execution requested.
+- approval record must match request hash in a future execution phase.
 
 Fail closed examples include missing manifest / unsafe manifest / forbidden
 field / positive legacy max_drawdown.
@@ -564,10 +620,17 @@ or repo-external zip.
 - Phase 21 GUI does not add confirm / dry-run / execute buttons.
 - Phase 21 runtime execution source is unchanged.
 - Phase 21 APP_VERSION unchanged.
+- Phase 22 defines approval boundary only.
+- Phase 22 is docs/tests-only.
+- Phase 22 no approval UI implementation.
+- Phase 22 no dry-run execution implementation.
+- Phase 22 no approval record generation.
+- Phase 22 no execution audit record generation.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
+- future execution requires separate explicit approval phase.
 
 Any future executor must have a new explicit approval boundary. It must not be
 introduced through command preview, copy UX, selection diagnostics, manual smoke

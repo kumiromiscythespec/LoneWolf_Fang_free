@@ -35,12 +35,23 @@ fetch, or submit paths. `operator_confirmed=false`,
 in Phase 21 and no dry-run button in Phase 21. Future execution requires
 separate approved phase.
 
+Free Phase 22: local-only dry-run execution approval boundary adds
+docs/tests-only approval boundary documentation. It adds no approval UI
+implementation, no dry-run execution implementation, no approval record
+generation, no execution audit record generation, no GUI source change, no
+runtime source change, no command execution, no subprocess / QProcess /
+background worker, no LIVE/PAPER/order, and no MEXC private API. Future
+execution requires separate explicit approval phase, and approval is not
+live/paper/order approval. The boundary is documented in
+`docs/precomputed_signals_gui_local_dry_run_approval_boundary.md`.
+
 ## Scope
 
 - Phase 18 is local-only dry-run request schema docs/test-only.
 - Free Phase 19: local-only dry-run request builder docs/helper.
 - Free Phase 20: request builder read-only GUI preview adapter.
 - Free Phase 21: read-only GUI source wiring of dry-run request preview adapter.
+- Free Phase 22: local-only dry-run execution approval boundary docs/tests-only.
 - request builder creates a safe request preview only.
 - adapter creates GUI preview item only.
 - GUI displays dry-run request preview only.
@@ -67,6 +78,10 @@ separate approved phase.
 - no dry-run request generation.
 - no generated request file.
 - no command execution.
+- no approval UI implementation.
+- no dry-run execution implementation.
+- no approval record generation.
+- no execution audit record generation.
 - no subprocess / QProcess / background worker.
 - no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
   scheduler, launch worker, or background execution path.
@@ -91,9 +106,12 @@ separate approved phase.
 - generated dry-run GUI preview output is not committed.
 - screenshots are not included.
 - future local-only dry-run requires explicit operator confirmation.
+- explicit operator approval required.
+- approval is not live/paper/order approval.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
+- future execution requires separate explicit approval phase.
 
 ## Request Definition
 
@@ -609,7 +627,38 @@ confirmation.
 - Phase 19 request builder keeps generated request output not committed.
 - future runtime dry-run execution must be separate and explicitly approved.
 - future execution still requires separate approval/phase.
+- future execution requires separate explicit approval phase.
 - LIVE/PAPER/order remains permanently separated.
+
+## Phase 22 Approval Boundary Relationship
+
+Free Phase 22 is local-only dry-run execution approval boundary and is
+docs/tests-only. It does not implement approval UI, dry-run execution, approval
+record generation, execution audit record generation, GUI source changes,
+runtime source changes, command execution, subprocess / QProcess / background
+worker, producer/backtest/runner/inventory auto-run, LIVE/PAPER/order, or MEXC
+private API.
+
+The Phase 18 request schema remains a planning artifact and not execution
+proof. Phase 19 request builder output remains preview only. Phase 20 GUI
+preview adapter output remains display item only. Phase 21 GUI wiring displays
+preview only. Phase 22 defines approval boundary only.
+
+Future request execution must fail closed unless explicit operator approval
+required is satisfied by a separate approval artifact. Approval is not
+live/paper/order approval. Future approval is limited to
+`local_saved_tape_backtest_replay_only` and only the
+`backtest_fast_path_local_only` and `runner_replay_fast_path_local_only` modes.
+Not allowed modes remain `live`, `paper`, `order_submit`, `order_fetch`,
+`balance_fetch`, `private_api`, `producer_auto_run`, `inventory_auto_scan`,
+`background_worker`, `release_packaging`, and `external_network`.
+
+Phase 22 must not create approval record files. Phase 22 must not create
+execution audit records. Future execution audit records must be separate from
+approval records, must assert no LIVE/PAPER/order, no private API, and no
+background execution, and must not include raw trades rows, `entry_exec`,
+`exit_exec`, `qty`, trade id, order id, raw order, balance, API key, secret,
+token, authorization, raw billing, raw market data, or raw OHLCV.
 
 The static sample fixture
 `docs/precomputed_signals_gui_local_dry_run_request_sample.json` is synthetic

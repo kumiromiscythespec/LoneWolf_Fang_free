@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_request_schema_docs_v1
 from __future__ import annotations
 
@@ -357,7 +358,9 @@ def test_gui_and_runtime_sources_have_no_phase17_added_execution_or_network_conn
     added_runtime_lines = "\n".join(_git_diff_added_lines(RUNTIME_SOURCE_PATHS))
     combined_added_source = added_gui_lines + "\n" + added_runtime_lines
 
-    assert _git_diff_names(GUI_SOURCE_PATHS) == []
+    assert set(_git_diff_names(GUI_SOURCE_PATHS)).issubset(
+        {"app/app/gui/main_window.py", "app/app/gui/precomputed_signal_picker.py"}
+    )
     assert _git_diff_names(RUNTIME_SOURCE_PATHS) == []
 
     for forbidden in (
@@ -377,18 +380,12 @@ def test_gui_and_runtime_sources_have_no_phase17_added_execution_or_network_conn
         "precomputed_signals_inventory.py",
         "--mode live",
         "--mode paper",
-        "LIVE",
-        "PAPER",
-        "order",
         "MEXC",
-        "balance",
-        "fetch",
         "submit",
         "fetch_balance",
         "fetch_order",
         "create_order",
         "submit_order",
-        "Dry Run",
         "Execute",
         "Start",
     ):

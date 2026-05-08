@@ -376,5 +376,42 @@ committed to the repo or included in migration zips. Generated command preview
 outputs and generated clipboard/copy outputs must also stay out of the repo and
 migration zips.
 
+## Phase 21 Local Dry-Run Preview Wiring
+
+Free Phase 21 adds read-only GUI source wiring of the local dry-run request
+preview adapter. The selected precomputed signal picker item is passed through
+display-only helpers in `app/app/gui/precomputed_signal_picker.py`, and
+`app/app/gui/main_window.py` shows a read-only `Local dry-run request preview`
+section below the existing selection/command preview controls.
+
+The section displays dry-run request preview only. For a valid selection it
+shows two in-memory preview items: `Backtest fast path local-only` and
+`Runner replay fast path local-only`. The visible fields are safe labels only:
+`signal_dir`, `symbol`, `entry_tf`, `filter_tf`, `signal_set_id`,
+`output_dir`, `command_text_preview`, `allowed_artifacts_label`,
+`forbidden_artifacts_label`, `fail_closed_reasons_label`, `status`, and
+`status_reason`.
+
+The GUI explicitly states `Preview only`, `Execution disabled`,
+`Operator confirmation required`, `Operator confirmed: false`,
+`operator_confirmed=false`, `execution_enabled_after_confirmation=false`,
+`preview_only_before_confirmation=true`, `Not LIVE/PAPER/order`,
+`No private API / no balance fetch / no order fetch`, and
+`Future execution requires separate approved phase`.
+
+Phase 21 does not create request files, does not execute dry-run, does not
+run backtest / runner / producer / inventory, does not use subprocess /
+QProcess / Popen / startDetached / threading / multiprocessing / scheduler /
+background worker, and does not add confirm, approve, execute, start, run, or
+dry-run buttons. Runtime execution source is unchanged. APP_VERSION unchanged.
+Package zip / exe / setup / installer / release assets are not touched.
+
+Raw trade rows, `entry_exec`, `exit_exec`, `qty`, exact trade id, order id, raw
+order payload, balance snapshot, API key, secret, token, authorization, raw
+billing, raw market data, generated real tape body, generated dry-run GUI
+preview output, screenshots, package zips, exe, installers, runtime dirs,
+exports dirs, and zip-in-zip artifacts are excluded from repo and migration
+zip.
+
 Future phases may refine explicit backtest/replay workflows, but any execution
 wiring must remain explicit and must stay separated from LIVE/PAPER/order paths.

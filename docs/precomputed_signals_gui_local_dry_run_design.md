@@ -14,17 +14,28 @@ creates a safe request preview only. It does not add dry-run execution.
 Free Phase 20: request builder read-only GUI preview adapter adds a helper that
 converts the Phase 19 request builder output into a GUI preview item only. It
 does not connect GUI source and does not add dry-run execution.
+Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
+connects that preview item to the Free GUI as display-only text. It does not add
+dry-run execution, request file generation, confirmation controls, or runtime
+execution paths.
 
 ## Scope
 
 - Phase 17 is future local-only dry-run design boundary.
 - Free Phase 19: local-only dry-run request builder docs/helper.
 - Free Phase 20: request builder read-only GUI preview adapter.
+- Free Phase 21: read-only GUI source wiring of dry-run request preview adapter.
 - docs/tests-only.
-- no GUI source change.
+- Phase 17-20 no GUI source change; Phase 21 adds read-only/display-only GUI
+  source wiring only.
 - no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
+- GUI displays dry-run request preview only.
+- GUI does not create request files.
+- GUI does not execute dry-run.
+- GUI does not run backtest/runner/producer/inventory.
+- GUI does not use subprocess / QProcess / Popen / background worker.
 - request builder creates a safe request preview only.
 - adapter creates GUI preview item only.
 - adapter does not execute dry-run.
@@ -43,6 +54,10 @@ does not connect GUI source and does not add dry-run execution.
 - no producer/backtest/runner/inventory auto-run.
 - no selection or adapter auto-run.
 - GUI source is not connected in Phase 20.
+- GUI source is display-only connected in Phase 21.
+- no confirm button in Phase 21.
+- no dry-run button in Phase 21.
+- no live/paper/order connection.
 - no LIVE/PAPER/order.
 - no LIVE/PAPER/order connection.
 - no MEXC private API.
@@ -259,6 +274,49 @@ The Phase 20 adapter display is preview-only and adapter display is not
 LIVE/PAPER/order. Generated GUI preview output is not committed. Generated
 dry-run GUI preview output is not committed. Future execution still requires
 separate approval/phase.
+
+## Current Phase 21 GUI Source Wiring Boundary
+
+Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
+connects the Phase 20 adapter to Free GUI source as a display-only panel under
+the selected precomputed signal tape section. The GUI displays dry-run request
+preview only and keeps the preview state in memory.
+
+The Phase 21 panel shows two preview sections/cards when the picker item is
+valid: `Backtest fast path local-only` and `Runner replay fast path local-only`.
+Each section shows safe labels for `signal_dir`, `symbol`, `entry_tf`,
+`filter_tf`, `signal_set_id`, `output_dir`, `command_text_preview`,
+`allowed_artifacts_label`, `forbidden_artifacts_label`,
+`fail_closed_reasons_label`, `status`, and `status_reason`.
+
+Phase 21 keeps these defaults fixed in the GUI:
+
+- `operator_confirmed=false`
+- `execution_enabled_after_confirmation=false`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `operator confirmation required`
+- future execution requires separate approved phase
+
+Phase 21 does not create request files, does not create generated dry-run GUI
+preview output, does not execute dry-run, does not run backtest / runner /
+producer / inventory, and does not use subprocess / QProcess / Popen /
+startDetached / threading / multiprocessing / scheduler / background worker.
+It adds no confirm button, no approve button, no execute button, no start
+button, and no dry-run button.
+
+Phase 21 does not connect selected precomputed signal tape state to LIVE/PAPER/
+order, MEXC private API, balance fetch, order fetch, submit paths, strategy,
+indicators, exchange, risk, or order runtime logic. Runtime execution source is
+unchanged. APP_VERSION unchanged. Package, exe, setup, installer, signing,
+upload, and release assets are not touched.
+
+The GUI display excludes raw trade rows, `entry_exec`, `exit_exec`, `qty`, exact
+trade id, order id, raw order payload, balance snapshot, API key, secret, token,
+authorization, raw billing, raw market data, raw OHLCV, generated real tape
+body, screenshots, package zips, exe, installer, setup binary, runtime dirs,
+exports dirs, and zip-in-zip artifacts.
 
 ## Required Future Operator Confirmation
 
@@ -499,6 +557,13 @@ or repo-external zip.
 - Phase 20 adapter creates GUI preview item only.
 - Phase 20 adapter does not execute dry-run.
 - Phase 20 GUI source is not connected.
+- Phase 21 adds read-only GUI source wiring of dry-run request preview adapter.
+- Phase 21 GUI displays dry-run request preview only.
+- Phase 21 GUI does not create request files.
+- Phase 21 GUI does not execute dry-run.
+- Phase 21 GUI does not add confirm / dry-run / execute buttons.
+- Phase 21 runtime execution source is unchanged.
+- Phase 21 APP_VERSION unchanged.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.

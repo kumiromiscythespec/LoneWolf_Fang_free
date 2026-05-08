@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-09_free_precomputed_gui_smoke_checklist_docs_v1
 from __future__ import annotations
 
@@ -262,12 +263,7 @@ def test_gui_source_has_no_phase14_added_execution_network_or_order_connections(
         "precomputed_signals_inventory.py",
         "--mode live",
         "--mode paper",
-        "LIVE",
-        "PAPER",
-        "order",
         "MEXC",
-        "balance",
-        "fetch",
         "submit",
         "fetch_balance",
         "fetch_order",

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_diagnostics_polish_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
@@ -157,8 +158,10 @@ from app.gui.precomputed_signal_picker import (
     build_precomputed_signal_diagnostics,
     build_precomputed_signal_diagnostics_display,
     build_precomputed_signal_copy_state,
+    build_precomputed_signal_local_dry_run_preview_items,
     build_precomputed_signal_picker_state,
     default_precomputed_signal_picker_root,
+    format_precomputed_signal_local_dry_run_preview_text,
     format_precomputed_signal_picker_empty_text,
     format_precomputed_signal_picker_display_text,
     get_copyable_precomputed_command,
@@ -666,6 +669,10 @@ class MainWindow(QWidget):
         self._selected_precomputed_signal_diagnostics_text: str = ""
         self._selected_precomputed_signal_command_preview: dict[str, Any] = {}
         self._selected_precomputed_signal_copy_state: dict[str, Any] = build_precomputed_signal_copy_state({})
+        self._selected_precomputed_signal_local_dry_run_preview_items: list[dict[str, Any]] = []
+        self._selected_precomputed_signal_local_dry_run_preview_text: str = (
+            format_precomputed_signal_local_dry_run_preview_text([])
+        )
         self._selected_precomputed_signal_status: str = "empty"
         self._selected_precomputed_signal_warning: str = ""
         self._last_auto_range_source: str = ""
@@ -907,6 +914,32 @@ class MainWindow(QWidget):
         row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_backtest_command)
         row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_runner_replay_command)
         replay_layout.addLayout(row_precomputed_signal_copy)
+
+        self.precomputed_signal_local_dry_run_preview_label = QLabel("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview_label.setWordWrap(True)
+        self.precomputed_signal_local_dry_run_preview_label.setAccessibleName(
+            "Local dry-run request preview"
+        )
+        self.precomputed_signal_local_dry_run_preview_label.setAccessibleDescription(
+            "Read-only local dry-run request preview. Preview only. Execution disabled."
+        )
+        replay_layout.addWidget(self.precomputed_signal_local_dry_run_preview_label)
+
+        self.precomputed_signal_local_dry_run_preview = QTextEdit()
+        self.precomputed_signal_local_dry_run_preview.setReadOnly(True)
+        self.precomputed_signal_local_dry_run_preview.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.precomputed_signal_local_dry_run_preview.setMinimumHeight(150)
+        self.precomputed_signal_local_dry_run_preview.setMaximumHeight(280)
+        self.precomputed_signal_local_dry_run_preview.setAccessibleName("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview.setAccessibleDescription(
+            "Preview only. Execution disabled. Operator confirmed false. No request file is created. "
+            "Not LIVE/PAPER/order. No private API, balance fetch, or order fetch."
+        )
+        self.precomputed_signal_local_dry_run_preview.setPlainText(
+            self._selected_precomputed_signal_local_dry_run_preview_text
+        )
+        replay_layout.addWidget(self.precomputed_signal_local_dry_run_preview)
+
         self.setTabOrder(self.btn_select_precomputed_signal, self.btn_copy_precomputed_backtest_command)
         self.setTabOrder(self.btn_copy_precomputed_backtest_command, self.btn_copy_precomputed_runner_replay_command)
         self.btn_run_replay.setVisible(False)
@@ -1937,6 +1970,16 @@ class MainWindow(QWidget):
         self.precomputed_signal_summary.setAccessibleDescription(
             "Selection diagnostics. Read-only. No raw trade rows are displayed. This panel does not execute commands."
         )
+        self.precomputed_signal_local_dry_run_preview_label.setText("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview_label.setAccessibleName("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview_label.setAccessibleDescription(
+            "Read-only local dry-run request preview. Preview only. Execution disabled."
+        )
+        self.precomputed_signal_local_dry_run_preview.setAccessibleName("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview.setAccessibleDescription(
+            "Preview only. Execution disabled. Operator confirmed false. No request file is created. "
+            "Not LIVE/PAPER/order. No private API, balance fetch, or order fetch."
+        )
         self._refresh_precomputed_signal_picker_display()
         self.replay_symbol_field_label.setText(self.tr("label.symbol"))
         self.replay_tf_label.setText(self.tr("label.tf"))
@@ -2723,6 +2766,27 @@ class MainWindow(QWidget):
             f"{status_text}. Read-only. No raw trade rows are displayed. This panel does not execute commands."
         )
 
+    def _update_precomputed_signal_local_dry_run_preview_ui(
+        self,
+        preview_items: list[dict[str, Any]] | None = None,
+    ) -> None:
+        if not hasattr(self, "precomputed_signal_local_dry_run_preview"):
+            return
+        items = preview_items if preview_items is not None else self._selected_precomputed_signal_local_dry_run_preview_items
+        text = format_precomputed_signal_local_dry_run_preview_text(items)
+        self._selected_precomputed_signal_local_dry_run_preview_items = [
+            dict(item) for item in items if isinstance(item, Mapping)
+        ]
+        self._selected_precomputed_signal_local_dry_run_preview_text = text
+        self.precomputed_signal_local_dry_run_preview.setPlainText(text)
+        self.precomputed_signal_local_dry_run_preview.setToolTip(text)
+        self.precomputed_signal_local_dry_run_preview_label.setToolTip(text)
+        self.precomputed_signal_local_dry_run_preview.setAccessibleName("Local dry-run request preview")
+        self.precomputed_signal_local_dry_run_preview.setAccessibleDescription(
+            "Read-only display-only preview. Operator confirmed false. Execution disabled. "
+            "This panel does not create request files and does not execute commands."
+        )
+
     def _refresh_precomputed_signal_picker_display(self) -> None:
         if not hasattr(self, "precomputed_signal_summary"):
             return
@@ -2733,8 +2797,12 @@ class MainWindow(QWidget):
                 ui_language=self._ui_language,
             )
             diagnostics_display = self._build_current_precomputed_signal_diagnostics_display()
+            local_dry_run_preview_items = build_precomputed_signal_local_dry_run_preview_items(
+                self._selected_precomputed_signal_picker_item
+            )
         else:
             display_text = format_precomputed_signal_picker_empty_text(ui_language=self._ui_language)
+            local_dry_run_preview_items = []
         self._selected_precomputed_signal_diagnostics_display = dict(diagnostics_display)
         self.precomputed_signal_summary.setPlainText(display_text)
         self.precomputed_signal_summary.setToolTip(
@@ -2742,6 +2810,7 @@ class MainWindow(QWidget):
         )
         self._update_precomputed_signal_diagnostics_status_ui(diagnostics_display)
         self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
+        self._update_precomputed_signal_local_dry_run_preview_ui(local_dry_run_preview_items)
         if hasattr(self, "precomputed_signal_dir"):
             self.precomputed_signal_dir.setText(str(self._selected_precomputed_signal_dir or ""))
             self.precomputed_signal_dir.setToolTip(str(self._selected_precomputed_signal_dir or ""))
@@ -2768,6 +2837,15 @@ class MainWindow(QWidget):
         self._selected_precomputed_signal_copy_state = validate_precomputed_signal_copy_state(
             copy_state if isinstance(copy_state, dict) else build_precomputed_signal_copy_state(command_preview or {})
         )
+        local_dry_run_preview_items = state.get("local_dry_run_preview_items") if isinstance(state, dict) else []
+        self._selected_precomputed_signal_local_dry_run_preview_items = [
+            dict(item) for item in local_dry_run_preview_items if isinstance(item, Mapping)
+        ] if isinstance(local_dry_run_preview_items, list) else []
+        self._selected_precomputed_signal_local_dry_run_preview_text = str(
+            state.get("local_dry_run_preview_text") if isinstance(state, dict) else ""
+        ).strip() or format_precomputed_signal_local_dry_run_preview_text(
+            self._selected_precomputed_signal_local_dry_run_preview_items
+        )
         self._selected_precomputed_signal_status = str(state.get("status") or "").strip()
         self._selected_precomputed_signal_warning = str(state.get("warning") or "").strip()
         display_text = str(state.get("display_text") or "")
@@ -2780,6 +2858,9 @@ class MainWindow(QWidget):
         )
         self._update_precomputed_signal_diagnostics_status_ui(self._selected_precomputed_signal_diagnostics_display)
         self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
+        self._update_precomputed_signal_local_dry_run_preview_ui(
+            self._selected_precomputed_signal_local_dry_run_preview_items
+        )
         self._append(
             "[precomputed] signal tape selected "
             f"status={self._selected_precomputed_signal_status or 'unknown'} "

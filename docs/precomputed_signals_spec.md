@@ -31,6 +31,14 @@ docs/tests-only with a synthetic static sample and validator; it still adds no
 request builder, generated request file, local dry-run implementation, GUI
 source change, runtime source change, command execution, subprocess / QProcess /
 background worker, LIVE/PAPER/order connection, or MEXC private API.
+Phase 19 adds the local-only dry-run request builder docs/helper as preview
+only. Phase 20 adds the read-only GUI preview adapter and still does not connect
+GUI source. Phase 21 adds read-only GUI source wiring of dry-run request preview
+adapter so the Free GUI displays dry-run request preview only; it does not
+execute dry-run, does not create request files, does not add confirm/dry-run/
+execute buttons, does not use subprocess / QProcess / Popen / background
+worker, does not run backtest/runner/producer/inventory, does not connect to
+LIVE/PAPER/order, and keeps APP_VERSION unchanged.
 
 ## Scope
 
@@ -1343,6 +1351,58 @@ display is not LIVE/PAPER/order.
 Generated GUI preview output is not committed. Generated dry-run GUI preview
 output is not committed. Future execution still requires separate
 approval/phase.
+
+## Phase 21 Local-Only Dry-Run GUI Preview Wiring
+
+Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
+connects the Phase 20 local-only dry-run GUI preview adapter to Free GUI source
+as display-only UI. The GUI displays dry-run request preview only for the
+selected precomputed signal tape.
+
+The GUI helper builds two in-memory preview items from a valid picker item:
+
+- `backtest_fast_path_local_only` shown as `Backtest fast path local-only`.
+- `runner_replay_fast_path_local_only` shown as
+  `Runner replay fast path local-only`.
+
+The read-only panel shows `Local dry-run request preview`, `Preview only`,
+`Execution disabled`, `Operator confirmation required`,
+`Operator confirmed: false`, `Future execution requires separate approved
+phase`, `Not LIVE/PAPER/order`, `No private API / no balance fetch / no order
+fetch`, and `request is not executable in this panel`. It also shows safe
+display fields: `signal_dir`, `symbol`, `entry_tf`, `filter_tf`,
+`signal_set_id`, `output_dir`, `command_text_preview`,
+`allowed_artifacts_label`, `forbidden_artifacts_label`,
+`fail_closed_reasons_label`, `status`, and `status_reason`.
+
+Phase 21 keeps these defaults fixed:
+
+- `operator_confirmed=false`
+- `execution_enabled_after_confirmation=false`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+
+Phase 21 does not implement dry-run execution, does not generate request files,
+does not generate dry-run GUI preview output, does not run
+backtest/runner/producer/inventory, does not use subprocess / QProcess / Popen /
+startDetached / threading / multiprocessing / scheduler / background worker,
+and does not add confirm, approve, run, execute, start, or dry-run buttons.
+
+Phase 21 does not connect selected precomputed signal tape state to LIVE/PAPER/
+order, MEXC private API, balance fetch, order fetch, submit paths, strategy,
+indicators, exchange, risk, order runtime logic, DD calculation, entry/exit
+timing, fee logic, PnL formulas, quantity logic, or signal timing. Runtime
+execution source is unchanged. APP_VERSION unchanged. Package, exe, setup,
+installer, signing, upload, and release assets are not touched.
+
+Allowed / forbidden artifacts are shown as safe labels only. Generated dry-run
+GUI preview output is not committed and is not included in migration zips. Raw
+trade rows, `entry_exec`, `exit_exec`, `qty`, exact trade id, order id, raw
+order payload, balance snapshot, API key, secret, token, authorization, raw
+billing, raw market data, raw OHLCV, generated real tape body, screenshots,
+package zips, exe, installers, setup binaries, runtime dirs, exports dirs, and
+zip-in-zip artifacts are excluded from repo and zip.
 
 ## DD Schema V2
 

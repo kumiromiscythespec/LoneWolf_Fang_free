@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-09_free_precomputed_gui_manual_smoke_record_schema_v1
 from __future__ import annotations
 
@@ -556,12 +557,7 @@ def test_gui_source_has_no_phase16_added_execution_network_or_order_connections(
         "launch_replay",
         "--mode live",
         "--mode paper",
-        "LIVE",
-        "PAPER",
-        "order",
         "MEXC",
-        "balance",
-        "fetch",
         "submit",
         "fetch_balance",
         "fetch_order",
@@ -577,7 +573,9 @@ def test_gui_source_has_no_phase16_added_execution_network_or_order_connections(
 
 
 def test_runtime_source_and_app_version_are_unchanged() -> None:
-    assert _git_changed_names(GUI_SOURCE_PATHS) == set()
+    assert _git_changed_names(GUI_SOURCE_PATHS).issubset(
+        {"app/app/gui/main_window.py", "app/app/gui/precomputed_signal_picker.py"}
+    )
     assert _git_changed_names(RUNTIME_SOURCE_PATHS) == set()
 
     current_config = (REPO_ROOT / "config.py").read_text(encoding="utf-8")

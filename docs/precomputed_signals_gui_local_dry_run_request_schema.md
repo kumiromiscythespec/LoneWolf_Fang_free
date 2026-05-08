@@ -23,13 +23,31 @@ does not run backtest/runner/producer/inventory, does not use subprocess /
 QProcess / background worker, and does not connect to LIVE/PAPER/order or
 private API. GUI source is not connected in Phase 20.
 
+Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
+connects the Phase 20 preview adapter to the Free GUI display only. GUI displays
+dry-run request preview only for the selected signal tape. GUI does not create
+request files, does not execute dry-run, does not run backtest/runner/producer/
+inventory, does not use subprocess / QProcess / Popen / background worker, and
+does not connect to LIVE/PAPER/order, MEXC private API, balance fetch, order
+fetch, or submit paths. `operator_confirmed=false`,
+`execution_enabled_after_confirmation=false`, and
+`preview_only_before_confirmation=true` remain fixed. There is no confirm button
+in Phase 21 and no dry-run button in Phase 21. Future execution requires
+separate approved phase.
+
 ## Scope
 
 - Phase 18 is local-only dry-run request schema docs/test-only.
 - Free Phase 19: local-only dry-run request builder docs/helper.
 - Free Phase 20: request builder read-only GUI preview adapter.
+- Free Phase 21: read-only GUI source wiring of dry-run request preview adapter.
 - request builder creates a safe request preview only.
 - adapter creates GUI preview item only.
+- GUI displays dry-run request preview only.
+- GUI does not create request files.
+- GUI does not execute dry-run.
+- GUI does not run backtest/runner/producer/inventory.
+- GUI does not use subprocess / QProcess / Popen / background worker.
 - adapter does not execute dry-run.
 - adapter does not run backtest/runner/producer/inventory.
 - adapter does not use subprocess / QProcess / background worker.
@@ -40,7 +58,8 @@ private API. GUI source is not connected in Phase 20.
 - request builder does not use subprocess / QProcess / background worker.
 - request builder does not create generated dry-run output.
 - generated request output not committed.
-- no GUI source change.
+- Phase 17-20 no GUI source change; Phase 21 adds display-only GUI source
+  wiring only.
 - no runtime source change.
 - no dry-run implementation.
 - no local dry-run implementation.
@@ -58,10 +77,15 @@ private API. GUI source is not connected in Phase 20.
 - no MEXC private API.
 - no MEXC API private balance/order fetch.
 - GUI source is not connected in Phase 20.
+- GUI source is read-only/display-only connected in Phase 21.
+- no confirm button in Phase 21.
+- no dry-run button in Phase 21.
+- no live/paper/order connection.
 - APP_VERSION unchanged.
 - package/release not touched.
 - generated real tape body / raw market data excluded.
 - raw trade rows are never included.
+- raw trade rows / entry_exec / exit_exec / qty / trade id are not shown.
 - generated dry-run request is not created.
 - generated GUI preview output is not committed.
 - generated dry-run GUI preview output is not committed.
@@ -226,6 +250,45 @@ Japanese operator-facing wording may render the same boundary as
 `LIVE/PAPER/order ではありません`,
 `private API / balance / order fetch なし`, and
 `将来の実行は別フェーズで明示承認が必要`.
+
+## Phase 21 GUI Source Wiring
+
+Free Phase 21: read-only GUI source wiring of dry-run request preview adapter
+adds display-only helper wiring in `app/app/gui/precomputed_signal_picker.py`
+and a read-only preview section in `app/app/gui/main_window.py`.
+
+The GUI displays dry-run request preview only. It shows two in-memory preview
+items when the selected picker item is valid:
+
+- `backtest_fast_path_local_only` as `Backtest fast path local-only`.
+- `runner_replay_fast_path_local_only` as `Runner replay fast path local-only`.
+
+The GUI display includes `signal_dir`, `symbol`, `entry_tf`, `filter_tf`,
+`signal_set_id`, preview `output_dir`, `command_text_preview`,
+`allowed_artifacts_label`, `forbidden_artifacts_label`,
+`fail_closed_reasons_label`, `status`, and `status_reason`. The preview text
+also states `Operator confirmed: false`, `operator_confirmed=false`,
+`execution_enabled_after_confirmation=false`, and
+`preview_only_before_confirmation=true`.
+
+Phase 21 does not create request files and does not create generated dry-run GUI
+preview output. The preview state is in-memory only. Invalid or missing
+`signal_dir` produces a disabled safe warning and no executable preview item.
+
+Phase 21 does not execute dry-run, does not run backtest/runner/producer/
+inventory, does not use subprocess / QProcess / Popen / startDetached /
+threading / multiprocessing / scheduler / background worker, and does not add
+confirm, approve, execute, start, run, or dry-run buttons. The GUI does not
+connect selected precomputed signal tape to LIVE/PAPER/order, MEXC private API,
+balance fetch, order fetch, or submit paths. Future execution requires separate
+approved phase.
+
+The GUI display excludes raw trade rows, row-level `entry_exec`, `exit_exec`,
+`qty`, exact trade id, order id, raw order payload, balance snapshot, API key,
+secret, token, authorization, raw billing, raw market data, raw OHLCV,
+generated real tape body, screenshots, package zips, exe, installers, setup
+binaries, release assets, runtime dirs, exports dirs, and zip-in-zip artifacts.
+APP_VERSION unchanged.
 
 ## Required Field Groups
 

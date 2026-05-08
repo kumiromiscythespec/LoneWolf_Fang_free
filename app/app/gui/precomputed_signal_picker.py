@@ -1,13 +1,17 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_diagnostics_polish_v1
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import precomputed_signals_gui_adapter as gui_adapter
+import precomputed_signals_local_dry_run_gui_adapter as local_dry_run_gui_adapter
+import precomputed_signals_local_dry_run_request as local_dry_run_request
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_diagnostics_polish_v1"
+BUILD_ID = "2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1"
 
 DISPLAY_ONLY_NOTICE = "Replay/backtest only"
 LIVE_PAPER_WARNING = "Not selectable for LIVE/PAPER"
@@ -93,6 +97,14 @@ DIAGNOSTICS_NO_EXECUTION_TEXT = "This panel does not execute commands"
 DIAGNOSTICS_LIVE_PAPER_TEXT = "LIVE/PAPER: not selectable"
 DIAGNOSTICS_WARNING_TEXT = f"{DIAGNOSTICS_NO_RAW_ROWS_TEXT}; {DIAGNOSTICS_NO_EXECUTION_TEXT}."
 DIAGNOSTICS_INVALID_WARNING_TEXT = "Invalid precomputed signal selection."
+LOCAL_DRY_RUN_PREVIEW_TITLE = "Local dry-run request preview"
+LOCAL_DRY_RUN_PREVIEW_DISABLED_REASON = "No valid signal tape selected."
+LOCAL_DRY_RUN_PREVIEW_REQUEST_NOT_EXECUTABLE = "request is not executable in this panel"
+LOCAL_DRY_RUN_OUTPUT_ROOT_PLACEHOLDER = r"%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals_dry_runs\free"
+LOCAL_DRY_RUN_PREVIEW_MODES = (
+    "backtest_fast_path_local_only",
+    "runner_replay_fast_path_local_only",
+)
 JA_DIAGNOSTICS_TITLE = "選択診断"
 
 DIAGNOSTICS_FIELDS = (
@@ -1257,6 +1269,160 @@ def format_precomputed_signal_command_preview(
     return "\n".join(lines)
 
 
+def _default_local_dry_run_output_root() -> str:
+    base = _safe_command_field(os.environ.get("LOCALAPPDATA"))
+    if not base:
+        return LOCAL_DRY_RUN_OUTPUT_ROOT_PLACEHOLDER
+    return str(Path(base) / "LoneWolfFang" / "data" / "precomputed_signals_dry_runs" / "free")
+
+
+def _safe_preview_path_segment(value: Any, *, default: str = "unknown") -> str:
+    text = _safe_command_field(value)
+    if not text:
+        return default
+    chars: list[str] = []
+    for char in text:
+        if char.isalnum() or char in ("_", "-", "."):
+            chars.append(char)
+        elif char in ("/", "\\", " ", ":"):
+            chars.append("_")
+    segment = "".join(chars).strip("._-")
+    return segment or default
+
+
+def _local_dry_run_preview_output_dir(
+    item: Mapping[str, Any],
+    *,
+    output_root: str | None = None,
+    dry_run_mode: str,
+) -> str:
+    root = _safe_command_field(output_root) or _default_local_dry_run_output_root()
+    symbol = _safe_preview_path_segment(item.get("symbol_normalized") or item.get("symbol"))
+    tf_pair = "_".join(
+        (
+            _safe_preview_path_segment(item.get("entry_tf"), default="entry_tf"),
+            _safe_preview_path_segment(item.get("filter_tf"), default="filter_tf"),
+        )
+    )
+    signal_set_id = _safe_preview_path_segment(item.get("signal_set_id"), default="signal_set")
+    mode = _safe_preview_path_segment(dry_run_mode, default="mode")
+    return str(Path(root) / symbol / tf_pair / signal_set_id / mode)
+
+
+def build_precomputed_signal_local_dry_run_preview_items(
+    picker_item: Mapping[str, Any],
+    *,
+    output_root: str | None = None,
+) -> list[dict[str, Any]]:
+    source = picker_item if isinstance(picker_item, Mapping) else {}
+    try:
+        item = gui_adapter.validate_gui_picker_item(source)
+    except Exception:
+        return []
+    if item.get("status") != "valid":
+        return []
+    if not _safe_command_field(item.get("signal_dir")):
+        return []
+    if item.get("not_selectable_for_live") is not True or item.get("not_selectable_for_paper") is not True:
+        return []
+
+    preview_items: list[dict[str, Any]] = []
+    for mode in LOCAL_DRY_RUN_PREVIEW_MODES:
+        if mode == "backtest_fast_path_local_only" and item.get("selectable_for_backtest_fast_path") is not True:
+            continue
+        if mode == "runner_replay_fast_path_local_only" and item.get("selectable_for_runner_replay_fast_path") is not True:
+            continue
+        output_dir = _local_dry_run_preview_output_dir(item, output_root=output_root, dry_run_mode=mode)
+        try:
+            request = local_dry_run_request.build_local_dry_run_request(
+                item,
+                dry_run_mode=mode,
+                output_dir=output_dir,
+                operator_confirmed=False,
+            )
+            preview_items.append(local_dry_run_gui_adapter.build_local_dry_run_gui_preview(request))
+        except Exception:
+            return []
+    return validate_precomputed_signal_local_dry_run_preview_items(preview_items)
+
+
+def validate_precomputed_signal_local_dry_run_preview_items(
+    items: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes, bytearray)):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            return []
+        try:
+            preview = local_dry_run_gui_adapter.validate_local_dry_run_gui_preview(item)
+        except Exception:
+            return []
+        if preview.get("operator_confirmed") is not False:
+            return []
+        if preview.get("execution_enabled_after_confirmation") is not False:
+            return []
+        if preview.get("preview_only_before_confirmation") is not True:
+            return []
+        if preview.get("not_selectable_for_live") is not True or preview.get("not_selectable_for_paper") is not True:
+            return []
+        normalized.append(dict(preview))
+    return normalized
+
+
+def format_precomputed_signal_local_dry_run_preview_text(
+    items: Sequence[Mapping[str, Any]],
+) -> str:
+    previews = validate_precomputed_signal_local_dry_run_preview_items(items)
+    lines = [
+        LOCAL_DRY_RUN_PREVIEW_TITLE,
+        "Preview only",
+        "Execution disabled",
+        "Operator confirmation required",
+        "Operator confirmed: false",
+        "operator_confirmed=false",
+        "execution_enabled_after_confirmation=false",
+        "preview_only_before_confirmation=true",
+        "Future execution requires separate approved phase",
+        "Not LIVE/PAPER/order",
+        "No private API / no balance fetch / no order fetch",
+        LOCAL_DRY_RUN_PREVIEW_REQUEST_NOT_EXECUTABLE,
+    ]
+    if not previews:
+        lines.extend(
+            (
+                f"Status: disabled - {LOCAL_DRY_RUN_PREVIEW_DISABLED_REASON}",
+                "Backtest fast path local-only: disabled",
+                "Runner replay fast path local-only: disabled",
+            )
+        )
+        return "\n".join(lines)
+
+    for index, preview in enumerate(previews):
+        if index:
+            lines.append("")
+        lines.extend(
+            (
+                f"Mode: {preview['dry_run_mode_label']}",
+                f"signal_dir: {preview['signal_dir']}",
+                f"symbol: {preview['symbol']}",
+                f"entry_tf: {preview['entry_tf']}",
+                f"filter_tf: {preview['filter_tf']}",
+                f"signal_set_id: {preview['signal_set_id']}",
+                f"output_dir: {preview['output_dir']}",
+                f"command_text_preview: {preview['command_text_preview']}",
+                str(preview["allowed_artifacts_label"]),
+                str(preview["forbidden_artifacts_label"]),
+                str(preview["fail_closed_reasons_label"]),
+                f"status: {preview['status']}",
+                f"status_reason: {preview['status_reason']}",
+                LOCAL_DRY_RUN_PREVIEW_REQUEST_NOT_EXECUTABLE,
+            )
+        )
+    return "\n".join(line for line in lines if line)
+
+
 def default_precomputed_signal_picker_root(*, env: Mapping[str, str] | None = None) -> str:
     return str(tape.resolve_precomputed_signals_root(env=env))
 
@@ -1383,6 +1549,10 @@ def build_precomputed_signal_picker_state(
     diagnostics_display = build_precomputed_signal_diagnostics_display(diagnostics)
     diagnostics_text = format_precomputed_signal_diagnostics_compact_text(diagnostics_display)
     copy_state = build_precomputed_signal_copy_state(command_preview)
+    local_dry_run_preview_items = build_precomputed_signal_local_dry_run_preview_items(item)
+    local_dry_run_preview_text = format_precomputed_signal_local_dry_run_preview_text(
+        local_dry_run_preview_items
+    )
     return {
         "signal_dir": _safe_text(item.get("signal_dir")),
         "picker_item": item,
@@ -1392,6 +1562,8 @@ def build_precomputed_signal_picker_state(
         "command_preview": command_preview,
         "command_preview_text": command_preview_text,
         "copy_state": copy_state,
+        "local_dry_run_preview_items": local_dry_run_preview_items,
+        "local_dry_run_preview_text": local_dry_run_preview_text,
         "display_text": display_text,
         "status": _safe_text(item.get("status")),
         "warning": _safe_text(item.get("picker_warning")),

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_adapter_v1
 from __future__ import annotations
 
@@ -377,7 +378,9 @@ def test_docs_mention_phase20_preview_adapter_and_non_execution_boundary() -> No
 
 
 def test_gui_and_runtime_source_have_no_new_execution_connections() -> None:
-    assert _git_diff_names(GUI_SOURCE_PATHS) == []
+    assert set(_git_diff_names(GUI_SOURCE_PATHS)).issubset(
+        {"app/app/gui/main_window.py", "app/app/gui/precomputed_signal_picker.py"}
+    )
     assert _git_diff_names(RUNTIME_SOURCE_PATHS) == []
 
 

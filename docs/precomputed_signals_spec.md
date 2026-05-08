@@ -1276,6 +1276,74 @@ market data, generated dry-run outputs, screenshots, package zips, exe,
 installers, or release assets. Generated request output not committed remains a
 hard repo and migration zip rule.
 
+## Phase 20 Local-Only Dry-Run GUI Preview Adapter
+
+Free Phase 20: request builder read-only GUI preview adapter adds
+`precomputed_signals_local_dry_run_gui_adapter.py` and
+`tests/test_precomputed_signals_local_dry_run_gui_adapter.py`. The adapter
+creates GUI preview item only from Phase 19 request builder output. It is a
+read-only view-model helper for future GUI display and is not connected to the
+GUI in Phase 20.
+
+The adapter does not execute dry-run. It does not run
+backtest/runner/producer/inventory, does not use subprocess / QProcess /
+background worker, does not add a GUI execution button, does not change GUI
+source, and does not change runtime execution source. GUI source is not
+connected in Phase 20. It does not connect to LIVE/PAPER/order, MEXC private
+API, balance fetch, order fetch, or submit paths. APP_VERSION remains
+unchanged.
+
+Phase 20 preview identity is:
+
+- `gui_preview_schema_version=free_precomputed_local_dry_run_gui_preview_v1`
+- `source_request_schema_version=free_precomputed_local_dry_run_request_v1`
+- `request_type=precomputed_signal_local_dry_run_request`
+- `phase=free_precomputed_signals_phase20_gui_preview_adapter`
+- `product=free`
+
+Required Phase 20 defaults remain:
+
+- `operator_confirmed=false`
+- `execution_enabled_after_confirmation=false`
+- `operator_confirmation_required=true`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+
+Required preview labels and warnings are:
+
+- `Local dry-run request preview`
+- `Preview only`
+- `Execution disabled`
+- `Operator confirmation required`
+- `Not LIVE/PAPER/order`
+- `No private API / no balance fetch / no order fetch`
+- `This preview does not execute commands`
+- `Future execution requires separate approved phase`
+
+Allowed / forbidden artifacts are shown as safe labels only. The allowed label
+summarizes safe summary, equity curve, and fast summary. The forbidden label
+summarizes raw market data, raw trades rows, orders, balances, and secrets as
+policy warnings only. Raw trade rows / entry_exec / exit_exec / qty / trade id
+are not shown. API key, secret, token, authorization, raw order, balance
+snapshot, raw billing, generated real tape body, raw market data, generated
+dry-run GUI preview output, screenshots, package zips, exe, installers, and
+release assets are not included.
+
+The adapter fails closed for non-free product, invalid request type, invalid
+dry-run mode, unsafe command preview text, `operator_confirmed=true`,
+`execution_enabled_after_confirmation=true`, LIVE/PAPER/order text, order /
+balance / private API text, unsafe output directory text, unexpected preview
+fields, unknown fail-closed reasons, package/release paths, and generated
+artifact policy violations. The adapter display is preview-only and adapter
+display is not LIVE/PAPER/order.
+
+Generated GUI preview output is not committed. Generated dry-run GUI preview
+output is not committed. Future execution still requires separate
+approval/phase.
+
 ## DD Schema V2
 
 DD schema v2 keeps `max_drawdown` as a signed negative legacy compatibility

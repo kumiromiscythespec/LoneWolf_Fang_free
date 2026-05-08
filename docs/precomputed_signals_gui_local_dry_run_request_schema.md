@@ -14,11 +14,27 @@ does not use subprocess / QProcess / background worker, and does not connect to
 LIVE/PAPER/order or private API. Future execution still requires separate
 approval/phase.
 
+Free Phase 20: request builder read-only GUI preview adapter adds
+`precomputed_signals_local_dry_run_gui_adapter.py`. The adapter creates GUI
+preview item only from Phase 19 request builder output. It keeps
+`operator_confirmed=false`, keeps `execution_enabled_after_confirmation=false`,
+and presents the display as preview-only. The adapter does not execute dry-run,
+does not run backtest/runner/producer/inventory, does not use subprocess /
+QProcess / background worker, and does not connect to LIVE/PAPER/order or
+private API. GUI source is not connected in Phase 20.
+
 ## Scope
 
 - Phase 18 is local-only dry-run request schema docs/test-only.
 - Free Phase 19: local-only dry-run request builder docs/helper.
+- Free Phase 20: request builder read-only GUI preview adapter.
 - request builder creates a safe request preview only.
+- adapter creates GUI preview item only.
+- adapter does not execute dry-run.
+- adapter does not run backtest/runner/producer/inventory.
+- adapter does not use subprocess / QProcess / background worker.
+- adapter display is preview-only.
+- adapter display is not LIVE/PAPER/order.
 - request builder does not execute dry-run.
 - request builder does not run backtest/runner/producer/inventory.
 - request builder does not use subprocess / QProcess / background worker.
@@ -41,11 +57,14 @@ approval/phase.
 - no LIVE/PAPER/order connection.
 - no MEXC private API.
 - no MEXC API private balance/order fetch.
+- GUI source is not connected in Phase 20.
 - APP_VERSION unchanged.
 - package/release not touched.
 - generated real tape body / raw market data excluded.
 - raw trade rows are never included.
 - generated dry-run request is not created.
+- generated GUI preview output is not committed.
+- generated dry-run GUI preview output is not committed.
 - screenshots are not included.
 - future local-only dry-run requires explicit operator confirmation.
 - future local-only dry-run is not live/paper/order.
@@ -97,6 +116,116 @@ The request schema fields are:
 - `status`: request status enum.
 - `status_reason`: sanitized status reason.
 - `notes_sanitized`: sanitized free-form note.
+
+## Phase 20 GUI Preview Item
+
+Free Phase 20: request builder read-only GUI preview adapter converts a valid
+Phase 19 local-only dry-run request dict into a read-only GUI preview item. The
+preview item is for future GUI display only; it is not a command executor, not a
+dry-run executor, not a producer/backtest/runner/inventory launcher, and not a
+LIVE/PAPER/order path.
+
+Required Phase 20 preview identity fields:
+
+- `schema_version`
+- `gui_preview_schema_version`
+- `source_request_schema_version`
+- `request_type`
+- `product`
+- `phase`
+
+Required Phase 20 preview selection fields:
+
+- `signal_dir`
+- `symbol`
+- `symbol_normalized`
+- `entry_tf`
+- `filter_tf`
+- `signal_set_id`
+
+Required Phase 20 preview dry-run fields:
+
+- `dry_run_mode`
+- `dry_run_mode_label`
+- `output_dir`
+- `command_text_preview`
+- `command_preview_lines`
+
+Required Phase 20 preview confirmation fields:
+
+- `operator_confirmation_required`
+- `operator_confirmed`
+- `operator_confirmation_label`
+- `preview_only_before_confirmation`
+- `execution_enabled_after_confirmation`
+- `execution_status_label`
+- `confirmation_warning`
+
+Required Phase 20 preview availability fields:
+
+- `not_selectable_for_live`
+- `not_selectable_for_paper`
+- `live_paper_warning_label`
+- `safety_research_only`
+- `paper_live_order_execution`
+
+Required Phase 20 preview artifact and preflight fields:
+
+- `allowed_artifacts`
+- `forbidden_artifacts`
+- `allowed_artifacts_label`
+- `forbidden_artifacts_label`
+- `preflight_summary_label`
+- `fail_closed_reasons`
+- `fail_closed_reasons_label`
+- `status`
+- `status_reason`
+
+Required Phase 20 preview UI labels:
+
+- `title`
+- `subtitle`
+- `status_label`
+- `warning_label`
+- `preview_only_label`
+- `manual_confirmation_required_label`
+- `no_execution_label`
+- `no_live_paper_order_label`
+- `operator_hint_text`
+
+Required Phase 20 invariants:
+
+- `operator_confirmed=false`
+- `execution_enabled_after_confirmation=false`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `paper_live_order_execution=false`
+- `command_text_preview` is display-only.
+- raw trade rows / entry_exec / exit_exec / qty / trade id are not shown.
+- allowed / forbidden artifacts are shown as safe labels only.
+- generated GUI preview output is not committed.
+- generated dry-run GUI preview output is not committed.
+
+Required Phase 20 labels include:
+
+- `Local dry-run request preview`
+- `Preview only`
+- `Execution disabled`
+- `Operator confirmation required`
+- `Not LIVE/PAPER/order`
+- `No private API / no balance fetch / no order fetch`
+- `This preview does not execute commands`
+- `Future execution requires separate approved phase`
+- `Allowed artifacts: safe summary, equity curve, fast summary`
+- `Forbidden artifacts: raw market data, raw trades rows, orders, balances, secrets`
+
+Japanese operator-facing wording may render the same boundary as
+`ローカル dry-run request preview`, `プレビュー専用`,
+`この段階では実行不可`, `operator confirmation required`,
+`LIVE/PAPER/order ではありません`,
+`private API / balance / order fetch なし`, and
+`将来の実行は別フェーズで明示承認が必要`.
 
 ## Required Field Groups
 

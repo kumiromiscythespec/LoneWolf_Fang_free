@@ -11,17 +11,27 @@ synthetic static sample fixture. The request schema is documented in
 `docs/precomputed_signals_gui_local_dry_run_request_sample.json`.
 Free Phase 19: local-only dry-run request builder docs/helper adds a helper that
 creates a safe request preview only. It does not add dry-run execution.
+Free Phase 20: request builder read-only GUI preview adapter adds a helper that
+converts the Phase 19 request builder output into a GUI preview item only. It
+does not connect GUI source and does not add dry-run execution.
 
 ## Scope
 
 - Phase 17 is future local-only dry-run design boundary.
 - Free Phase 19: local-only dry-run request builder docs/helper.
+- Free Phase 20: request builder read-only GUI preview adapter.
 - docs/tests-only.
 - no GUI source change.
 - no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
 - request builder creates a safe request preview only.
+- adapter creates GUI preview item only.
+- adapter does not execute dry-run.
+- adapter does not run backtest/runner/producer/inventory.
+- adapter does not use subprocess / QProcess / background worker.
+- adapter display is preview-only.
+- adapter display is not LIVE/PAPER/order.
 - request builder does not execute dry-run.
 - request builder does not run backtest/runner/producer/inventory.
 - request builder does not use subprocess / QProcess / background worker.
@@ -32,6 +42,7 @@ creates a safe request preview only. It does not add dry-run execution.
   scheduler, launch worker, or background execution path.
 - no producer/backtest/runner/inventory auto-run.
 - no selection or adapter auto-run.
+- GUI source is not connected in Phase 20.
 - no LIVE/PAPER/order.
 - no LIVE/PAPER/order connection.
 - no MEXC private API.
@@ -39,6 +50,10 @@ creates a safe request preview only. It does not add dry-run execution.
 - package/release not touched.
 - generated real tape body / raw market data excluded.
 - raw trade rows are never displayed or recorded.
+- raw trade rows / entry_exec / exit_exec / qty / trade id are not shown.
+- allowed / forbidden artifacts are shown as safe labels only.
+- generated GUI preview output is not committed.
+- generated dry-run GUI preview output is not committed.
 - future local-only dry-run requires explicit operator confirmation.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
@@ -187,6 +202,63 @@ hard rule for repo diffs and migration zips.
 
 Future execution still requires separate approval/phase. Phase 19 does not make
 local-only dry-run executable.
+
+## Current Phase 20 GUI Preview Adapter Boundary
+
+Free Phase 20: request builder read-only GUI preview adapter adds
+`precomputed_signals_local_dry_run_gui_adapter.py` and focused tests. The
+adapter creates GUI preview item only from a valid Phase 19 local-only dry-run
+request dict or from an existing selected `signal_dir` through the Phase 19
+request builder. The adapter is read-only and display-only.
+
+The adapter does not execute dry-run, does not run
+backtest/runner/producer/inventory, does not use subprocess / QProcess /
+background worker, does not add a GUI execution button, does not connect GUI
+source, and does not touch runtime execution source. GUI source is not connected
+in Phase 20. It does not connect to LIVE/PAPER/order, MEXC private API, balance
+fetch, order fetch, or submit paths.
+
+Phase 20 keeps these defaults fixed:
+
+- `operator_confirmed=false`
+- `execution_enabled_after_confirmation=false`
+- `operator_confirmation_required=true`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+
+The preview labels must make the boundary visible:
+
+- `Local dry-run request preview`
+- `Preview only`
+- `Execution disabled`
+- `Operator confirmation required`
+- `Not LIVE/PAPER/order`
+- `No private API / no balance fetch / no order fetch`
+- `This preview does not execute commands`
+- `Future execution requires separate approved phase`
+
+Allowed artifacts are shown as safe labels only: safe summary, equity curve,
+and fast summary. Forbidden artifacts are shown as safe labels only: raw market
+data, raw trades rows, orders, balances, and secrets. These labels are policy
+warnings, not payloads. Raw trade rows / entry_exec / exit_exec / qty / trade
+id are not shown, and API key / secret / token / authorization / raw order /
+balance snapshot / raw billing are not shown.
+
+The adapter validates the request and preview fail-closed. It rejects non-free
+product, invalid request type, invalid dry-run mode, `operator_confirmed=true`,
+`execution_enabled_after_confirmation=true`, LIVE/PAPER/order command text,
+balance/order/private API command text, unsafe output directory text, unknown
+fail-closed reasons, unexpected payload fields, raw trade rows, order payloads,
+balance payloads, secrets, generated artifact policy paths, and package/release
+paths.
+
+The Phase 20 adapter display is preview-only and adapter display is not
+LIVE/PAPER/order. Generated GUI preview output is not committed. Generated
+dry-run GUI preview output is not committed. Future execution still requires
+separate approval/phase.
 
 ## Required Future Operator Confirmation
 
@@ -423,6 +495,10 @@ or repo-external zip.
 - Phase 19 request builder does not execute dry-run.
 - Phase 19 request builder does not run backtest/runner/producer/inventory.
 - Phase 19 request builder does not use subprocess / QProcess / background worker.
+- Phase 20 adds request builder read-only GUI preview adapter docs/tests/helper.
+- Phase 20 adapter creates GUI preview item only.
+- Phase 20 adapter does not execute dry-run.
+- Phase 20 GUI source is not connected.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.

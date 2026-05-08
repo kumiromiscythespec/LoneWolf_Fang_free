@@ -22,6 +22,11 @@ asset. Phase 15 fixes the synthetic fixture only manual GUI runtime smoke record
 format as docs/test-only; GUI runtime smoke is not executed in Phase 15. Phase
 16 adds the synthetic manual smoke record schema validator and sample static
 fixture as docs/tests-only; GUI runtime smoke is not executed in Phase 16.
+Phase 17 fixes the future local-only dry-run design boundary as docs/tests-only:
+no local dry-run implementation, no GUI source change, no runtime source
+change, no command execution, no subprocess / QProcess / background worker, no
+producer/backtest/runner/inventory auto-run, no LIVE/PAPER/order, and no MEXC
+private API.
 
 ## Scope
 
@@ -990,6 +995,87 @@ screenshots, account details, private keys, or package artifacts.
 Future local-only dry-run design is future phase. Explicit local-only dry-run
 design is future phase. Execution button is future phase. LIVE/PAPER/order and
 packaging/release remain separated.
+
+## Phase 17 Future Local-Only Dry-Run Design Boundary
+
+Free Phase 17 is future local-only dry-run design boundary. It is
+docs/tests-only and changes no GUI source, runtime source, execution path,
+APP_VERSION, package, exe, installer, setup, signing, release asset, strategy,
+indicator, exchange, risk, order runtime logic, entry/exit timing, fee logic,
+PnL formula, quantity logic, signal timing, or DD calculation.
+
+The authoritative design boundary is
+`docs/precomputed_signals_gui_local_dry_run_design.md`.
+
+Phase 17 keeps these boundaries fixed:
+
+- no local dry-run implementation
+- no GUI source change
+- no runtime source change
+- no command execution
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, worker, or background execution path
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- command preview remains preview-only
+- copy UX remains clipboard-only
+- GUI diagnostics remain read-only
+- manual smoke record remains display-only
+- no LIVE/PAPER/order
+- no MEXC private API
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- raw trade rows are never displayed or recorded
+- future local-only dry-run requires explicit operator confirmation
+- future local-only dry-run is not live/paper/order
+- future execution must be a separate phase
+
+Future local-only dry-run may only be an explicit operator-confirmed action
+using an already selected, validated precomputed signal tape. It may only use a
+future local saved-tape fast path. It must not use LIVE, PAPER, order submit,
+order fetch, balance fetch, private API, MEXC private API, raw market data, or
+producer auto-run.
+
+Allowed `dry_run_mode` values are `backtest_fast_path_local_only` and
+`runner_replay_fast_path_local_only`. Not allowed values are `live`, `paper`,
+`order_submit`, `order_fetch`, `balance_fetch`, `private_api`,
+`producer_auto_run`, `inventory_auto_scan`, and `background_worker`.
+
+The future dry-run request schema is docs-only in Phase 17 and must include
+`request_type=precomputed_signal_local_dry_run_request`, `signal_dir`,
+`product`, `symbol`, `entry_tf`, `filter_tf`, `signal_set_id`, `dry_run_mode`,
+`output_dir`, confirmation flags, LIVE/PAPER exclusion flags, safety flags,
+command preview text, allowed artifacts, forbidden artifacts, `status`, and
+`status_reason`. `operator_confirmed=false by default`; it may become true only
+after explicit future confirmation.
+
+Allowed future artifacts are safe summary JSON, fast-path `equity_curve.csv`,
+fast-path `trades.csv` only if redacted / synthetic / saved-tape compatible,
+`fast_summary.json`, safe local metadata logs, and safe metadata-only manual
+records.
+
+Forbidden future artifacts include raw market data, raw OHLCV, raw trades rows,
+`entry_exec`, `exit_exec`, `qty`, trade id, order id, raw order, order,
+balance snapshot, balance, API key, secret, token, authorization, raw billing,
+screenshots containing secrets / balances / orders / account details, package
+zip, exe, installer, setup binary, release assets, runtime dirs copied into the
+repo, exports dirs copied into the repo, and zip-in-zip artifacts.
+
+Required future fail-closed conditions include invalid selection, missing
+`signal_dir`, missing manifest / missing summary / missing `trades.csv`, unsafe
+manifest, unsafe summary, forbidden field, positive legacy max_drawdown,
+live/paper request, order/balance/private API request, output path under
+release/package artifact area, missing operator confirmation, background
+execution request, producer auto-run request, inventory auto-scan request,
+package/release mutation, and APP_VERSION mutation.
+
+Phase 15/16 manual smoke record remains display-only. A dry-run result record
+is a separate future artifact and must not be reused as order/runtime proof.
+Generated dry-run request files, generated dry-run output, screenshots, real
+signal tape bodies, and raw market data must not be committed or included in
+Phase 17 migration zips.
 
 ## DD Schema V2
 

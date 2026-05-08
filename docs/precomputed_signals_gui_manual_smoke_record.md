@@ -412,3 +412,45 @@ not add command execution, producer/backtest/runner/inventory auto-run,
 subprocess, `QProcess`, background worker, LIVE/PAPER/order connection, MEXC
 private API access, APP_VERSION changes, package/release changes, generated
 runtime output, generated smoke records, or screenshots.
+
+## Phase 17 Local-Only Dry-Run Relationship
+
+Free Phase 17 is future local-only dry-run design boundary. It is
+docs/tests-only and does not change the manual smoke record schema.
+
+Phase 17 preserves these manual smoke record boundaries:
+
+- no local dry-run implementation
+- no GUI source change
+- no runtime source change
+- no command execution
+- no subprocess / QProcess / background worker
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- raw trade rows are never displayed or recorded
+- manual smoke record remains display-only
+- future local-only dry-run requires explicit operator confirmation
+- future local-only dry-run is not live/paper/order
+- future execution must be a separate phase
+
+The Phase 15/16 manual smoke record remains display-only and synthetic fixture
+only. It must not be reused as local dry-run proof, LIVE/PAPER proof, order
+proof, balance proof, private API proof, or runtime execution proof.
+
+Any future local-only dry-run result record is a separate future artifact. It
+must remain safe metadata only unless a later approved phase defines a stricter
+schema. Phase 17 must not create generated dry-run request files, generated
+dry-run output, screenshots, command preview output, diagnostics output,
+inventory output, selection output, adapter output, or package/release assets.
+
+Future local-only dry-run request schema work must keep
+`request_type=precomputed_signal_local_dry_run_request`,
+`operator_confirmed=false by default`, `not_selectable_for_live=true`, and
+`not_selectable_for_paper=true`. Confirmation must state that the action is
+local-only and not LIVE/PAPER/order, and must show `signal_dir`, product `free`,
+symbol/timeframe, and output directory.

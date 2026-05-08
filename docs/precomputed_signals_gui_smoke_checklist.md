@@ -306,3 +306,75 @@ to `pass`, `fail`, `blocked`, and `not_run`; `smoke_mode` limited to
 Future local-only dry-run design is future phase. Execution button is future
 phase. LIVE/PAPER/order, MEXC private API, and packaging/release remain
 separated from the precomputed signal tape GUI.
+
+## Phase 17 Local-Only Dry-Run Design Boundary
+
+Free Phase 17 is future local-only dry-run design boundary. It is
+docs/tests-only and is documented in
+`docs/precomputed_signals_gui_local_dry_run_design.md`.
+
+Phase 17 checklist boundary:
+
+- no local dry-run implementation
+- no GUI source change
+- no runtime source change
+- no command execution
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, worker, or background execution path
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- raw trade rows are never displayed or recorded
+- command preview remains preview-only
+- copy UX remains clipboard-only
+- GUI diagnostics remain read-only
+- manual smoke record remains display-only
+- future local-only dry-run requires explicit operator confirmation
+- future local-only dry-run is not live/paper/order
+- future execution must be a separate phase
+
+Allowed future `dry_run_mode` enum:
+
+- `backtest_fast_path_local_only`
+- `runner_replay_fast_path_local_only`
+
+Not allowed future modes:
+
+- `live`
+- `paper`
+- `order_submit`
+- `order_fetch`
+- `balance_fetch`
+- `private_api`
+- `producer_auto_run`
+- `inventory_auto_scan`
+- `background_worker`
+
+Future preflight must fail closed for invalid selection, missing `signal_dir`,
+missing manifest / missing summary / missing `trades.csv`, unsafe manifest,
+unsafe summary, forbidden field, positive legacy max_drawdown, live/paper
+request, order/balance/private API request, output path under package/release
+artifact area, missing operator confirmation, background execution request,
+producer auto-run request, or inventory auto-scan request.
+
+Allowed future artifacts are safe summary JSON, fast-path `equity_curve.csv`,
+redacted / synthetic / saved-tape compatible fast-path `trades.csv`,
+`fast_summary.json`, safe local metadata logs, and safe metadata-only manual
+records.
+
+Forbidden future artifacts are raw market data, raw OHLCV, raw trades rows,
+`entry_exec`, `exit_exec`, `qty`, trade id, order id, raw order, order, balance
+snapshot, balance, API key, secret, token, authorization, raw billing,
+screenshots containing secrets / balances / orders / account details, package
+zip, exe, installer, setup binary, release assets, runtime dirs copied into the
+repo, exports dirs copied into the repo, and zip-in-zip artifacts.
+
+The future dry-run request schema must use
+`request_type=precomputed_signal_local_dry_run_request` and keep
+`operator_confirmed=false by default` until explicit operator confirmation is
+recorded in a future phase. Phase 17 must not create actual request files.

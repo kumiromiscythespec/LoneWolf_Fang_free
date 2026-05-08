@@ -171,3 +171,58 @@ or background worker paths.
 Future local-only dry-run design is future phase. APP_VERSION, package/release,
 setup, installer, exe, signing, release assets, generated real tape body, raw
 market data, generated smoke records, and screenshots remain outside Phase 16.
+
+## Phase 17 local-only dry-run design boundary
+
+Free Phase 17 is future local-only dry-run design boundary. It is
+docs/tests-only. GUI runtime smoke is not executed in Phase 17 because this
+phase adds no runtime behavior.
+
+Use `docs/precomputed_signals_gui_local_dry_run_design.md` as the Phase 17
+design boundary. The procedure boundary is:
+
+- no local dry-run implementation
+- no GUI source change
+- no runtime source change
+- no command execution
+- no subprocess / QProcess / background worker
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- raw trade rows are never displayed or recorded
+- future local-only dry-run requires explicit operator confirmation
+- future local-only dry-run is not live/paper/order
+- future execution must be a separate phase
+
+Command preview remains preview-only. Copy UX remains clipboard-only. GUI
+diagnostics remain read-only. Manual smoke record remains display-only and
+synthetic fixture only.
+
+Allowed future `dry_run_mode` values are
+`backtest_fast_path_local_only` and `runner_replay_fast_path_local_only`.
+Not allowed values are `live`, `paper`, `order_submit`, `order_fetch`,
+`balance_fetch`, `private_api`, `producer_auto_run`, `inventory_auto_scan`, and
+`background_worker`.
+
+Future confirmation must show `signal_dir`, product `free`, symbol/timeframe,
+`not_selectable_for_live=true`, `not_selectable_for_paper=true`, and output
+directory. It must state that the action is local-only and not LIVE/PAPER/order.
+The default is `operator_confirmed=false by default`.
+
+Future fail-closed conditions include invalid selection, missing manifest,
+unsafe manifest, forbidden field, positive legacy max_drawdown, missing summary,
+missing `trades.csv`, live/paper request, order/balance/private API request,
+missing operator confirmation, and background execution request.
+
+Allowed future artifacts are safe summary JSON, local fast-path
+`equity_curve.csv`, redacted / synthetic / saved-tape compatible fast-path
+`trades.csv`, `fast_summary.json`, and safe metadata-only logs or records.
+Forbidden artifacts include raw market data, raw OHLCV, raw trades rows,
+`entry_exec`, `exit_exec`, `qty`, trade id, API key, secret, token,
+authorization, raw billing, order, balance, package zip, exe, installer, setup
+binary, release assets, screenshots, runtime dirs copied into the repo, exports
+dirs copied into the repo, and zip-in-zip artifacts.

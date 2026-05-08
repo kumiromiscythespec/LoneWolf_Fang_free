@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_gui_command_copy_ux_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
 # BUILD_ID: 2026-04-20_free_ui_wording_cleanup_v1
@@ -69,12 +70,13 @@ import urllib.request
 import zipfile
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import config as C
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal, qVersion
 from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -151,10 +153,14 @@ from app.gui.exchange_registry import (
 from app.gui.chart_dialog import ChartDialog
 from app.gui.logo_loader import LogoAsset, load_logo_asset, render_logo_pixmap
 from app.gui.precomputed_signal_picker import (
+    build_precomputed_signal_copy_state,
     build_precomputed_signal_picker_state,
     default_precomputed_signal_picker_root,
     format_precomputed_signal_picker_empty_text,
     format_precomputed_signal_picker_display_text,
+    get_copyable_precomputed_command,
+    mark_precomputed_command_copied,
+    validate_precomputed_signal_copy_state,
 )
 from app.gui.result_chart import (
     CHART_MODE_CANDLE,
@@ -170,7 +176,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_picker_wiring_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_command_copy_ux_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -328,6 +334,13 @@ _UI_TEXTS = {
         "dialog.backtest_guidance.range_out_of_data.title": "期間がデータ範囲外",
         "dialog.backtest_guidance.range_out_of_data.message": "選択した Since / Until が利用可能なデータ範囲外です。\n\nsince={since}\nuntil={until}\ndataset_root={dataset_root}\n\n利用可能な月に合わせて Since / Until を調整してください。",
         "dialog.backtest_guidance.range_out_of_data.action": "Since / Until へ移動",
+        "action.copy_precomputed_backtest_command": "バックテストコマンドをコピー",
+        "action.copy_precomputed_replay_command": "リプレイコマンドをコピー",
+        "status.precomputed_copy_ready": "プレビュー専用 / このパネルからは実行しません / LIVE/PAPER には使用不可",
+        "status.precomputed_copied": "コピーしました / プレビュー専用 / このパネルからは実行しません / LIVE/PAPER には使用不可",
+        "status.precomputed_copy_disabled": "プレビュー専用 / このパネルからは実行しません / LIVE/PAPER には使用不可",
+        "tooltip.copy_precomputed_backtest_command": "バックテストのプレビューコマンド文字列だけをコピーします。このパネルからは実行しません。",
+        "tooltip.copy_precomputed_replay_command": "リプレイのプレビューコマンド文字列だけをコピーします。このパネルからは実行しません。",
     },
     "en": {
         "window.title": APP_WINDOW_TITLE,
@@ -375,6 +388,8 @@ _UI_TEXTS = {
         "action.select_replay_data": "Select Replay Data...",
         "action.select_dataset_root": "Select Dataset Root...",
         "action.select_precomputed_signal_tape": "Select Signal Tape...",
+        "action.copy_precomputed_backtest_command": "Copy backtest command",
+        "action.copy_precomputed_replay_command": "Copy replay command",
         "action.start_replay": "Run Replay",
         "action.start_backtest": "Run Backtest",
         "action.start_paper": "Start Paper",
@@ -394,6 +409,11 @@ _UI_TEXTS = {
         "action.close": "Close",
         "action.refresh": "Refresh",
         "status.preview_error": "preview_error",
+        "status.precomputed_copy_ready": "Preview only / Execution disabled / Not selectable for LIVE/PAPER",
+        "status.precomputed_copied": "Copied / Preview only / Execution disabled / Not selectable for LIVE/PAPER",
+        "status.precomputed_copy_disabled": "Preview only / Execution disabled / Not selectable for LIVE/PAPER",
+        "tooltip.copy_precomputed_backtest_command": "Copy the backtest preview command text. This panel does not execute commands.",
+        "tooltip.copy_precomputed_replay_command": "Copy the replay preview command text. This panel does not execute commands.",
         "chart.mode.equity": "Equity",
         "chart.mode.net": "Net",
         "chart.mode.max_dd": "Max DD",
@@ -638,6 +658,8 @@ class MainWindow(QWidget):
         self._selected_replay_csv_source: str = ""
         self._selected_precomputed_signal_dir: str = ""
         self._selected_precomputed_signal_picker_item: dict[str, Any] = {}
+        self._selected_precomputed_signal_command_preview: dict[str, Any] = {}
+        self._selected_precomputed_signal_copy_state: dict[str, Any] = build_precomputed_signal_copy_state({})
         self._selected_precomputed_signal_status: str = "empty"
         self._selected_precomputed_signal_warning: str = ""
         self._last_auto_range_source: str = ""
@@ -840,6 +862,19 @@ class MainWindow(QWidget):
         self.precomputed_signal_summary.setMaximumHeight(132)
         self.precomputed_signal_summary.setPlainText(format_precomputed_signal_picker_empty_text(ui_language=self._ui_language))
         replay_layout.addWidget(self.precomputed_signal_summary)
+
+        row_precomputed_signal_copy = QHBoxLayout()
+        row_precomputed_signal_copy.setSpacing(8)
+        self.precomputed_signal_copy_status = QLabel("Preview only / Execution disabled / Not selectable for LIVE/PAPER")
+        self.precomputed_signal_copy_status.setWordWrap(True)
+        self.btn_copy_precomputed_backtest_command = QPushButton("Copy backtest command")
+        self.btn_copy_precomputed_runner_replay_command = QPushButton("Copy replay command")
+        self.btn_copy_precomputed_backtest_command.setEnabled(False)
+        self.btn_copy_precomputed_runner_replay_command.setEnabled(False)
+        row_precomputed_signal_copy.addWidget(self.precomputed_signal_copy_status, stretch=1)
+        row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_backtest_command)
+        row_precomputed_signal_copy.addWidget(self.btn_copy_precomputed_runner_replay_command)
+        replay_layout.addLayout(row_precomputed_signal_copy)
         self.btn_run_replay.setVisible(False)
         root.addWidget(self.replay_group)
 
@@ -1196,6 +1231,10 @@ class MainWindow(QWidget):
         self.btn_select_replay.clicked.connect(self.on_select_replay_data)
         self.btn_select_replay_dir.clicked.connect(self.on_select_replay_folder)
         self.btn_select_precomputed_signal.clicked.connect(self.on_select_precomputed_signal_tape)
+        self.btn_copy_precomputed_backtest_command.clicked.connect(lambda: self._copy_precomputed_signal_command("backtest"))
+        self.btn_copy_precomputed_runner_replay_command.clicked.connect(
+            lambda: self._copy_precomputed_signal_command("runner_replay")
+        )
         self.btn_run_replay.clicked.connect(self.on_run_replay)
         self.result_panel.refreshRequested.connect(self.on_refresh_result_panel)
         self.result_panel.expandRequested.connect(self.on_expand_result_chart)
@@ -1856,6 +1895,10 @@ class MainWindow(QWidget):
         self.precomputed_signal_label.setText(self.tr("label.precomputed_signal_tape"))
         self.precomputed_signal_dir.setPlaceholderText(self.tr("placeholder.precomputed_signal_dir"))
         self.btn_select_precomputed_signal.setText(self.tr("action.select_precomputed_signal_tape"))
+        self.btn_copy_precomputed_backtest_command.setText(self.tr("action.copy_precomputed_backtest_command"))
+        self.btn_copy_precomputed_runner_replay_command.setText(self.tr("action.copy_precomputed_replay_command"))
+        self.btn_copy_precomputed_backtest_command.setToolTip(self.tr("tooltip.copy_precomputed_backtest_command"))
+        self.btn_copy_precomputed_runner_replay_command.setToolTip(self.tr("tooltip.copy_precomputed_replay_command"))
         self._refresh_precomputed_signal_picker_display()
         self.replay_symbol_field_label.setText(self.tr("label.symbol"))
         self.replay_tf_label.setText(self.tr("label.tf"))
@@ -2538,6 +2581,44 @@ class MainWindow(QWidget):
         self.report_out.setText(os.path.abspath(path))
         self.report_out.setCursorPosition(0)
 
+    def _precomputed_signal_copy_status_text(self, copy_state: Mapping[str, Any] | dict[str, Any]) -> str:
+        state = validate_precomputed_signal_copy_state(copy_state)
+        if state.get("copied_backtest_command") is True or state.get("copied_runner_replay_command") is True:
+            return self.tr("status.precomputed_copied")
+        if state.get("can_copy_backtest_command") is True or state.get("can_copy_runner_replay_command") is True:
+            return self.tr("status.precomputed_copy_ready")
+        warning = str(state.get("copy_warning") or "").strip()
+        base = self.tr("status.precomputed_copy_disabled")
+        return f"{base} / {warning}" if warning else base
+
+    def _update_precomputed_signal_copy_ui(self, copy_state: Mapping[str, Any] | dict[str, Any] | None = None) -> None:
+        if not hasattr(self, "btn_copy_precomputed_backtest_command"):
+            return
+        state = validate_precomputed_signal_copy_state(copy_state or self._selected_precomputed_signal_copy_state)
+        self._selected_precomputed_signal_copy_state = dict(state)
+        self.btn_copy_precomputed_backtest_command.setEnabled(state.get("can_copy_backtest_command") is True)
+        self.btn_copy_precomputed_runner_replay_command.setEnabled(state.get("can_copy_runner_replay_command") is True)
+        status_text = self._precomputed_signal_copy_status_text(state)
+        self.precomputed_signal_copy_status.setText(status_text)
+        self.precomputed_signal_copy_status.setToolTip(status_text)
+        self.btn_copy_precomputed_backtest_command.setToolTip(self.tr("tooltip.copy_precomputed_backtest_command"))
+        self.btn_copy_precomputed_runner_replay_command.setToolTip(self.tr("tooltip.copy_precomputed_replay_command"))
+
+    def _copy_precomputed_signal_command(self, kind: str) -> None:
+        command_text = get_copyable_precomputed_command(self._selected_precomputed_signal_command_preview, kind)
+        if not command_text:
+            self._update_precomputed_signal_copy_ui(
+                build_precomputed_signal_copy_state(self._selected_precomputed_signal_command_preview)
+            )
+            return
+        QApplication.clipboard().setText(command_text)
+        self._selected_precomputed_signal_copy_state = mark_precomputed_command_copied(
+            self._selected_precomputed_signal_copy_state,
+            kind,
+        )
+        self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
+        self._append(f"[precomputed] copied {kind} command preview text only\n")
+
     def _refresh_precomputed_signal_picker_display(self) -> None:
         if not hasattr(self, "precomputed_signal_summary"):
             return
@@ -2550,6 +2631,7 @@ class MainWindow(QWidget):
             display_text = format_precomputed_signal_picker_empty_text(ui_language=self._ui_language)
         self.precomputed_signal_summary.setPlainText(display_text)
         self.precomputed_signal_summary.setToolTip(display_text)
+        self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
         if hasattr(self, "precomputed_signal_dir"):
             self.precomputed_signal_dir.setText(str(self._selected_precomputed_signal_dir or ""))
             self.precomputed_signal_dir.setToolTip(str(self._selected_precomputed_signal_dir or ""))
@@ -2561,6 +2643,14 @@ class MainWindow(QWidget):
         item = state.get("picker_item") if isinstance(state, dict) else {}
         self._selected_precomputed_signal_dir = str(state.get("signal_dir") or signal_dir or "").strip()
         self._selected_precomputed_signal_picker_item = dict(item or {}) if isinstance(item, dict) else {}
+        command_preview = state.get("command_preview") if isinstance(state, dict) else {}
+        copy_state = state.get("copy_state") if isinstance(state, dict) else {}
+        self._selected_precomputed_signal_command_preview = (
+            dict(command_preview or {}) if isinstance(command_preview, dict) else {}
+        )
+        self._selected_precomputed_signal_copy_state = validate_precomputed_signal_copy_state(
+            copy_state if isinstance(copy_state, dict) else build_precomputed_signal_copy_state(command_preview or {})
+        )
         self._selected_precomputed_signal_status = str(state.get("status") or "").strip()
         self._selected_precomputed_signal_warning = str(state.get("warning") or "").strip()
         display_text = str(state.get("display_text") or "")
@@ -2569,6 +2659,7 @@ class MainWindow(QWidget):
         self.precomputed_signal_dir.setCursorPosition(0)
         self.precomputed_signal_summary.setPlainText(display_text)
         self.precomputed_signal_summary.setToolTip(display_text)
+        self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
         self._append(
             "[precomputed] signal tape selected "
             f"status={self._selected_precomputed_signal_status or 'unknown'} "

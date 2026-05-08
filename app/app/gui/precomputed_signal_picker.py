@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_command_preview_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_command_copy_ux_v1
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import precomputed_signals_gui_adapter as gui_adapter
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_command_preview_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_command_copy_ux_v1"
 
 DISPLAY_ONLY_NOTICE = "Replay/backtest only"
 LIVE_PAPER_WARNING = "Not selectable for LIVE/PAPER"
@@ -19,6 +19,12 @@ BACKTEST_COMMAND_PREVIEW_LABEL = "Backtest command preview only"
 RUNNER_REPLAY_COMMAND_PREVIEW_LABEL = "Replay command preview only"
 COMMAND_PREVIEW_DISABLED_WARNING = "Command preview disabled for this selection."
 COMMAND_PREVIEW_ENABLED_WARNING = "Command preview only; execution is disabled in this panel."
+COPY_HELPER_WARNING = "Copy helper only handles preview command text; this panel does not execute commands."
+COPY_READY_STATUS = "Preview only / Execution disabled / Not selectable for LIVE/PAPER"
+COPIED_STATUS = "Copied"
+COPY_DISABLED_INVALID_PREVIEW = "invalid_command_preview"
+COPY_DISABLED_EMPTY_COMMAND = "empty_command_text"
+COPY_DISABLED_UNSAFE_COMMAND = "unsafe_command_text"
 JA_COMMAND_PREVIEW_NOTICE = "バックテスト / リプレイ コマンドプレビューのみ"
 JA_EXECUTION_DISABLED_NOTICE = "このパネルからは実行しません"
 JA_BACKTEST_COMMAND_PREVIEW_LABEL = "バックテスト用コマンドプレビュー"
@@ -37,6 +43,56 @@ COMMAND_PREVIEW_FIELDS = (
     "warning",
     "source_symbol",
     "source_tf_pair",
+)
+
+COPY_STATE_FIELDS = (
+    "backtest_command_text",
+    "runner_replay_command_text",
+    "can_copy_backtest_command",
+    "can_copy_runner_replay_command",
+    "copied_backtest_command",
+    "copied_runner_replay_command",
+    "copy_status_text",
+    "copy_warning",
+    "copy_disabled_reason",
+    "preview_only",
+    "execution_enabled",
+    "live_command_available",
+    "paper_command_available",
+)
+
+COPYABLE_COMMAND_FIELDS = {
+    "backtest": "backtest_command_text",
+    "runner_replay": "runner_replay_command_text",
+}
+
+FORBIDDEN_COPY_COMMAND_TEXT = (
+    "entry_exec",
+    "exit_exec",
+    "trade_id",
+    "trade id",
+    "order_id",
+    "order id",
+    "raw_order",
+    "raw order",
+    "balance",
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "authorization",
+    "raw_billing",
+    "raw billing",
+    "raw market data",
+    "raw ohlcv",
+    "ohlcv",
+    "private_key",
+    "private key",
+    "--qty",
+    " qty ",
+    "qty=",
+    '"qty"',
+    "'qty'",
 )
 
 
@@ -279,6 +335,192 @@ def validate_precomputed_signal_command_preview(preview: Mapping[str, Any]) -> d
     return normalized
 
 
+def _copy_disabled_state(
+    reason: str = COPY_DISABLED_INVALID_PREVIEW,
+    warning: str = "",
+) -> dict[str, Any]:
+    return {
+        "backtest_command_text": "",
+        "runner_replay_command_text": "",
+        "can_copy_backtest_command": False,
+        "can_copy_runner_replay_command": False,
+        "copied_backtest_command": False,
+        "copied_runner_replay_command": False,
+        "copy_status_text": "",
+        "copy_warning": _safe_command_field(warning) or "Copy disabled for this command preview.",
+        "copy_disabled_reason": _safe_command_field(reason) or COPY_DISABLED_INVALID_PREVIEW,
+        "preview_only": True,
+        "execution_enabled": False,
+        "live_command_available": False,
+        "paper_command_available": False,
+    }
+
+
+def _forbidden_copy_command_match(command_text: str) -> str:
+    command_lower = f" {_safe_command_field(command_text).lower()} "
+    for forbidden in FORBIDDEN_COPY_COMMAND_TEXT:
+        token = str(forbidden or "").lower()
+        if not token:
+            continue
+        if token.startswith(" ") or token.endswith(" "):
+            if token in command_lower:
+                return token.strip()
+        elif token in command_lower:
+            return token
+    return ""
+
+
+def _copyable_command_from_payload(payload: Mapping[str, Any], kind: str) -> tuple[str, str]:
+    field_name = COPYABLE_COMMAND_FIELDS.get(kind)
+    if not field_name:
+        return "", COPY_DISABLED_INVALID_PREVIEW
+    command_text = _safe_command_field(payload.get(field_name))
+    if not command_text:
+        return "", COPY_DISABLED_EMPTY_COMMAND
+    if _forbidden_copy_command_match(command_text):
+        return "", COPY_DISABLED_UNSAFE_COMMAND
+    command_lower = command_text.lower()
+    if "--mode live" in command_lower or "--mode paper" in command_lower:
+        return "", COPY_DISABLED_INVALID_PREVIEW
+    if kind == "backtest":
+        if "backtest.py" not in command_text:
+            return "", COPY_DISABLED_INVALID_PREVIEW
+        if "--use-precomputed-signals" not in command_text or "--precomputed-signals-dir" not in command_text:
+            return "", COPY_DISABLED_INVALID_PREVIEW
+    if kind == "runner_replay":
+        if "runner.py" not in command_text:
+            return "", COPY_DISABLED_INVALID_PREVIEW
+        if "--mode replay" not in command_text:
+            return "", COPY_DISABLED_INVALID_PREVIEW
+        if "--use-precomputed-signals" not in command_text or "--precomputed-signals-dir" not in command_text:
+            return "", COPY_DISABLED_INVALID_PREVIEW
+    return command_text, ""
+
+
+def build_precomputed_signal_copy_state(command_preview: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        payload = validate_precomputed_signal_command_preview(command_preview)
+    except Exception:
+        return _copy_disabled_state(
+            COPY_DISABLED_INVALID_PREVIEW,
+            "Copy disabled for invalid command preview.",
+        )
+
+    backtest_command, backtest_reason = _copyable_command_from_payload(payload, "backtest")
+    replay_command, replay_reason = _copyable_command_from_payload(payload, "runner_replay")
+    can_copy_backtest = bool(backtest_command)
+    can_copy_replay = bool(replay_command)
+    if not can_copy_backtest and not can_copy_replay:
+        reason = replay_reason or backtest_reason or COPY_DISABLED_EMPTY_COMMAND
+        return _copy_disabled_state(reason, "Copy disabled because no safe preview command text is available.")
+
+    state = {
+        "backtest_command_text": backtest_command,
+        "runner_replay_command_text": replay_command,
+        "can_copy_backtest_command": can_copy_backtest,
+        "can_copy_runner_replay_command": can_copy_replay,
+        "copied_backtest_command": False,
+        "copied_runner_replay_command": False,
+        "copy_status_text": COPY_READY_STATUS,
+        "copy_warning": COPY_HELPER_WARNING,
+        "copy_disabled_reason": "",
+        "preview_only": True,
+        "execution_enabled": False,
+        "live_command_available": False,
+        "paper_command_available": False,
+    }
+    return validate_precomputed_signal_copy_state(state)
+
+
+def get_copyable_precomputed_command(command_preview: Mapping[str, Any], kind: str) -> str:
+    normalized_kind = _safe_command_field(kind)
+    if normalized_kind not in COPYABLE_COMMAND_FIELDS:
+        return ""
+    copy_state = build_precomputed_signal_copy_state(command_preview)
+    if normalized_kind == "backtest" and copy_state.get("can_copy_backtest_command") is True:
+        return _safe_command_field(copy_state.get("backtest_command_text"))
+    if normalized_kind == "runner_replay" and copy_state.get("can_copy_runner_replay_command") is True:
+        return _safe_command_field(copy_state.get("runner_replay_command_text"))
+    return ""
+
+
+def mark_precomputed_command_copied(copy_state: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    normalized_kind = _safe_command_field(kind)
+    if normalized_kind not in COPYABLE_COMMAND_FIELDS:
+        return _copy_disabled_state(
+            COPY_DISABLED_INVALID_PREVIEW,
+            "Copy disabled for unsupported command kind.",
+        )
+
+    state = validate_precomputed_signal_copy_state(copy_state)
+    if normalized_kind == "backtest":
+        if state.get("can_copy_backtest_command") is not True:
+            return state
+        state["copied_backtest_command"] = True
+        state["copied_runner_replay_command"] = False
+    else:
+        if state.get("can_copy_runner_replay_command") is not True:
+            return state
+        state["copied_backtest_command"] = False
+        state["copied_runner_replay_command"] = True
+    state["copy_status_text"] = COPIED_STATUS
+    state["copy_warning"] = COPY_HELPER_WARNING
+    state["copy_disabled_reason"] = ""
+    return validate_precomputed_signal_copy_state(state)
+
+
+def validate_precomputed_signal_copy_state(copy_state: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(copy_state, Mapping):
+        return _copy_disabled_state(COPY_DISABLED_INVALID_PREVIEW, "Copy disabled for invalid copy state.")
+    payload = dict(copy_state)
+    if payload.get("preview_only") is not True:
+        return _copy_disabled_state(COPY_DISABLED_INVALID_PREVIEW, "Copy disabled because preview_only is not true.")
+    if payload.get("execution_enabled") is not False:
+        return _copy_disabled_state(COPY_DISABLED_INVALID_PREVIEW, "Copy disabled because execution is enabled.")
+    if payload.get("live_command_available") is not False:
+        return _copy_disabled_state(COPY_DISABLED_INVALID_PREVIEW, "Copy disabled because a LIVE command is available.")
+    if payload.get("paper_command_available") is not False:
+        return _copy_disabled_state(COPY_DISABLED_INVALID_PREVIEW, "Copy disabled because a PAPER command is available.")
+
+    backtest_command, backtest_reason = _copyable_command_from_payload(payload, "backtest")
+    replay_command, replay_reason = _copyable_command_from_payload(payload, "runner_replay")
+    can_copy_backtest = bool(payload.get("can_copy_backtest_command") is True and backtest_command)
+    can_copy_replay = bool(payload.get("can_copy_runner_replay_command") is True and replay_command)
+    if not can_copy_backtest:
+        backtest_command = ""
+    if not can_copy_replay:
+        replay_command = ""
+
+    copied_backtest = bool(payload.get("copied_backtest_command") is True and can_copy_backtest)
+    copied_replay = bool(payload.get("copied_runner_replay_command") is True and can_copy_replay)
+    if copied_backtest and copied_replay:
+        copied_replay = False
+
+    if can_copy_backtest or can_copy_replay:
+        status_text = COPIED_STATUS if copied_backtest or copied_replay else COPY_READY_STATUS
+        return {
+            "backtest_command_text": backtest_command,
+            "runner_replay_command_text": replay_command,
+            "can_copy_backtest_command": can_copy_backtest,
+            "can_copy_runner_replay_command": can_copy_replay,
+            "copied_backtest_command": copied_backtest,
+            "copied_runner_replay_command": copied_replay,
+            "copy_status_text": _safe_command_field(payload.get("copy_status_text")) or status_text,
+            "copy_warning": _safe_command_field(payload.get("copy_warning")) or COPY_HELPER_WARNING,
+            "copy_disabled_reason": "",
+            "preview_only": True,
+            "execution_enabled": False,
+            "live_command_available": False,
+            "paper_command_available": False,
+        }
+
+    reason = _safe_command_field(payload.get("copy_disabled_reason")) or replay_reason or backtest_reason
+    return _copy_disabled_state(
+        reason or COPY_DISABLED_EMPTY_COMMAND,
+        _safe_command_field(payload.get("copy_warning")) or "Copy disabled because no safe preview command text is available.",
+    )
+
+
 def format_precomputed_signal_command_preview(
     preview: Mapping[str, Any],
     *,
@@ -414,11 +656,13 @@ def build_precomputed_signal_picker_state(
     display_text = format_precomputed_signal_picker_display_text(item, ui_language=ui_language)
     command_preview = build_precomputed_signal_command_preview(item)
     command_preview_text = format_precomputed_signal_command_preview(command_preview, ui_language=ui_language)
+    copy_state = build_precomputed_signal_copy_state(command_preview)
     return {
         "signal_dir": _safe_text(item.get("signal_dir")),
         "picker_item": item,
         "command_preview": command_preview,
         "command_preview_text": command_preview_text,
+        "copy_state": copy_state,
         "display_text": display_text,
         "status": _safe_text(item.get("status")),
         "warning": _safe_text(item.get("picker_warning")),

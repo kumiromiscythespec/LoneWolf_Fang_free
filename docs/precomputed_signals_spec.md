@@ -10,9 +10,10 @@ files into the Free signal tape format without running strategy logic. Phase 7
 adds a read-only GUI picker pre-stage adapter that maps an existing selection
 contract to safe display metadata only. Phase 8 wires that adapter into the
 Free GUI as a display-only picker panel for an operator-selected `signal_dir`.
-Phase 9 adds GUI command preview text for the selected `signal_dir` so an
-operator can copy the explicit backtest/replay fast-path commands without the
-GUI executing them.
+Phase 9 adds GUI command preview text for the selected `signal_dir` without the
+GUI executing it. Phase 10 adds copy UX only so an operator can copy the
+explicit backtest/replay fast-path command text without adding any execution
+path.
 
 ## Scope
 
@@ -614,6 +615,68 @@ raw billing payloads, raw market data, raw OHLCV, generated command preview
 outputs, or generated real signal tape bodies. Generated real signal tape
 bodies and raw market data remain repo-external and must not be committed to
 the repo or included in migration zips.
+
+## Phase 10 GUI Command Preview Copy UX Only
+
+Free Phase 10 adds copy UX only to the GUI command preview panel. It does not
+add command execution. It keeps the Phase 9 command preview as the single source
+for copyable text and exposes only these operator actions:
+
+- `Copy backtest command`
+- `Copy replay command`
+
+The copy helper accepts the Phase 9 command preview view model and returns only
+safe command text for `backtest_command_text` or
+`runner_replay_command_text`. The backtest preview command must explicitly
+include `--use-precomputed-signals` and `--precomputed-signals-dir`. The runner
+replay preview command must explicitly include `--mode replay`,
+`--use-precomputed-signals`, and `--precomputed-signals-dir`.
+
+The copy state preserves these invariants:
+
+- `preview_only=true`
+- `execution_enabled=false`
+- `live_command_available=false`
+- `paper_command_available=false`
+
+Copy is disabled when the preview is invalid, command text is empty,
+`preview_only` is not true, execution is enabled, a LIVE command is available,
+or a PAPER command is available. Live, paper, order, and any other command kind
+fail closed and are not copyable.
+
+The GUI status states `Preview only`, `Execution disabled`,
+`Not selectable for LIVE/PAPER`, and `This panel does not execute commands`.
+After a user-triggered clipboard write it may show `Copied`. Japanese UI may
+show `バックテストコマンドをコピー`, `リプレイコマンドをコピー`, `コピーしました`,
+`プレビュー専用`, `このパネルからは実行しません`, and
+`LIVE/PAPER には使用不可`.
+
+Phase 10 does not run `precompute_signals.py`, does not run `backtest.py`, does
+not run `runner.py`, does not run the inventory command, and does not run the
+selection, adapter, or command-preview command automatically. It does not add
+`subprocess`, `os.system`, `QProcess`, `Popen`, `startDetached`,
+multiprocessing, threading, scheduler, or background worker execution for copy
+UX.
+
+Phase 10 does not connect precomputed signal tape selection, command preview,
+or copy state to LIVE, PAPER, order creation, order fetch, order submit, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. Existing GUI LIVE,
+PAPER, and order paths remain untouched and do not consume the selected signal
+tape or command preview.
+
+The copy UX does not display or copy raw `trades.csv` rows, row-level
+`entry_exec`, `exit_exec`, row-level `qty`, exact trade ids, order ids, raw
+order payloads, balance snapshots, API keys, secrets, tokens, authorization
+headers, raw billing payloads, raw market data, raw OHLCV, generated command
+preview output, generated clipboard output, or generated real signal tape
+bodies. Generated real signal tape bodies and raw market data remain
+repo-external and must not be committed to the repo or included in migration
+zips.
+
+Phase 10 does not change `APP_VERSION`, package, exe, setup, installer, signing,
+release assets, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
 
 ## Safety Scope
 

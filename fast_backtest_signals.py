@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_backtest_fast_path_v1
 # BUILD_ID: 2026-05-08_free_precomputed_signals_foundation_v1
 from __future__ import annotations
 
@@ -5,6 +6,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -21,7 +23,7 @@ from signal_tape import (
     validate_no_secret_payload,
 )
 
-BUILD_ID = "2026-05-08_free_precomputed_signals_foundation_v1"
+BUILD_ID = "2026-05-08_free_precomputed_backtest_fast_path_v1"
 REQUIRED_TAPE_FILES = ("manifest.json", "trades.csv", "summary.json")
 
 
@@ -214,6 +216,37 @@ def write_equity_curve_csv(path: str | Path, rows: Iterable[Mapping[str, Any]]) 
         writer.writeheader()
         for row in rows:
             writer.writerow(dict(row))
+
+
+def write_fast_backtest_artifacts(
+    export_dir: str | Path,
+    result: Mapping[str, Any],
+    *,
+    signals_dir: str | Path,
+    write_report: bool = False,
+) -> dict[str, str]:
+    out_dir = Path(export_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    equity_path = out_dir / "equity_curve.csv"
+    trades_path = out_dir / "trades.csv"
+    write_equity_curve_csv(equity_path, result.get("equity_curve", []))
+
+    source_trades = _signals_dir_path(signals_dir) / "trades.csv"
+    if source_trades.resolve() != trades_path.resolve():
+        shutil.copyfile(source_trades, trades_path)
+
+    paths = {
+        "equity_curve_csv": str(equity_path),
+        "trades_csv": str(trades_path),
+    }
+    if write_report:
+        summary_path = out_dir / "fast_summary.json"
+        summary_path.write_text(
+            json.dumps(dict(result.get("summary") or {}), ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        paths["fast_summary_json"] = str(summary_path)
+    return paths
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

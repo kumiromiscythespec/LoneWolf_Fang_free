@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_backtest_fast_path_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-18_free_shared_market_data_fallback_v1
@@ -136,12 +137,13 @@ from app.core.export_paths import (
     write_last_run_json,
 )
 
-BUILD_ID = "2026-04-18_free_shared_market_data_fallback_v1"
+BUILD_ID = "2026-05-08_free_precomputed_backtest_fast_path_v1"
 
 OPEN_COST_DIAG_LIMIT_DEFAULT = 8
 _CURRENT_EXPORT_DIR = ""
 _CURRENT_RUN_ID = ""
 _CURRENT_EXPORT_SYMBOL = ""
+_PRECOMPUTED_SIGNALS_PRODUCT = "free"
 _PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
 _AUTO_PREPARE_REQUESTS: set[str] = set()
 
@@ -222,6 +224,90 @@ def _export_path(*parts: str) -> str:
     out = base.joinpath(*[str(p) for p in parts if str(p)])
     out.parent.mkdir(parents=True, exist_ok=True)
     return str(out)
+
+
+def _precomputed_cli_initial_equity(args: argparse.Namespace) -> float:
+    explicit = float(getattr(args, "precomputed_signals_initial_equity", 0.0) or 0.0)
+    if explicit > 0.0:
+        return explicit
+    return float(getattr(args, "initial", 300000.0) or 300000.0)
+
+
+def _precomputed_cli_expected_symbol(raw_symbols: str) -> str | None:
+    raw = str(raw_symbols or "").strip()
+    if not raw:
+        return None
+    return str(raw.split(",", 1)[0]).strip() or None
+
+
+def _run_precomputed_signals_backtest_cli(args: argparse.Namespace, *, raw_symbols: str) -> int:
+    signals_dir = str(getattr(args, "precomputed_signals_dir", "") or "").strip()
+    if not signals_dir:
+        logger.error("[PRECOMPUTED] fail closed: --precomputed-signals-dir is required with --use-precomputed-signals")
+        return 2
+
+    try:
+        from fast_backtest_signals import run_fast_backtest, write_fast_backtest_artifacts
+
+        result = run_fast_backtest(
+            signals_dir,
+            initial_equity=_precomputed_cli_initial_equity(args),
+            expected_product=_PRECOMPUTED_SIGNALS_PRODUCT,
+            expected_symbol=_precomputed_cli_expected_symbol(raw_symbols),
+            expected_entry_tf=str(getattr(args, "entry_tf", "") or ""),
+            expected_filter_tf=str(getattr(args, "filter_tf", "") or ""),
+            strict=bool(getattr(args, "precomputed_signals_strict", False)),
+        )
+        manifest = dict(result.get("manifest") or {})
+        export_dir = _activate_export_context(
+            run_id=str(getattr(args, "run_id", "") or ""),
+            symbol=str(manifest.get("symbol") or _precomputed_cli_expected_symbol(raw_symbols) or "BTC/USDT"),
+            mode="BACKTEST",
+        )
+        artifacts = write_fast_backtest_artifacts(
+            export_dir,
+            result,
+            signals_dir=signals_dir,
+            write_report=bool(getattr(args, "precomputed_signals_write_report", False)),
+        )
+    except Exception as exc:
+        logger.error("[PRECOMPUTED] fail closed: %s", exc)
+        return 2
+
+    summary = dict(result.get("summary") or {})
+    logger.info("===== PRECOMPUTED SIGNAL TAPE BACKTEST RESULT =====")
+    logger.info("[PRECOMPUTED] product=%s signal_set_id=%s", manifest.get("product"), manifest.get("signal_set_id"))
+    logger.info("[PRECOMPUTED] symbol=%s entry_tf=%s filter_tf=%s", manifest.get("symbol"), manifest.get("entry_tf"), manifest.get("filter_tf"))
+    logger.info(
+        "[PRECOMPUTED] trades=%s net_total=%.6f final_equity=%.6f max_dd_abs=%.6f max_dd_pct=%.6f max_drawdown_legacy_signed=%.6f",
+        int(summary.get("trade_count", 0) or 0),
+        float(summary.get("net_total", 0.0) or 0.0),
+        float(summary.get("final_equity", 0.0) or 0.0),
+        float(summary.get("max_dd_display_abs", summary.get("max_dd_abs", 0.0)) or 0.0),
+        float(summary.get("max_dd_display_pct", summary.get("max_dd_pct", 0.0)) or 0.0),
+        float(summary.get("max_drawdown", 0.0) or 0.0),
+    )
+    logger.info("[PRECOMPUTED] max_drawdown_legacy_note=%s", summary.get("max_drawdown_legacy_note", ""))
+    logger.info("[PRECOMPUTED] exports=%s", json.dumps(artifacts, ensure_ascii=True, sort_keys=True))
+    _write_last_run_reference(
+        mode="BACKTEST",
+        replay_report=str(artifacts.get("fast_summary_json", "")),
+        trade_log=str(artifacts.get("trades_csv", "")),
+        extra={
+            "engine": "precomputed_signals",
+            "signal_set_id": str(manifest.get("signal_set_id", "")),
+            "research_only": True,
+            "paper_live_order_execution": False,
+        },
+    )
+    payload = {
+        "mode": "BACKTEST",
+        "engine": "precomputed_signals",
+        "summary": summary,
+        "exports": artifacts,
+    }
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+    return 0
 
 
 def _write_last_run_reference(*, mode: str, replay_report: str = "", trade_log: str = "", extra: dict[str, Any] | None = None) -> str:
@@ -7763,6 +7849,11 @@ def main() -> int:
     parser.add_argument("--until-year", type=int, default=0, help="Continuous dataset range end year (inclusive).")
     parser.add_argument("--entry-tf", type=str, default=str(getattr(C, "ENTRY_TF", getattr(C, "TIMEFRAME_ENTRY", "1m"))))
     parser.add_argument("--filter-tf", type=str, default=str(getattr(C, "FILTER_TF", getattr(C, "TIMEFRAME_FILTER", "1h"))))
+    parser.add_argument("--use-precomputed-signals", action="store_true", help="Explicitly use a saved research-only signal tape fast path.")
+    parser.add_argument("--precomputed-signals-dir", type=str, default="", help="Directory containing manifest.json, trades.csv, and summary.json.")
+    parser.add_argument("--precomputed-signals-strict", action="store_true", help="Verify manifest file hashes before fast accounting.")
+    parser.add_argument("--precomputed-signals-write-report", action="store_true", help="Write fast_summary.json beside exported fast path CSVs.")
+    parser.add_argument("--precomputed-signals-initial-equity", type=float, default=0.0, help="Initial equity override for signal tape accounting.")
 
     parser.add_argument("--warmup", type=int, default=int(getattr(C, "BACKTEST_WARMUP_BARS", 300)))
     parser.add_argument("--initial", type=float, default=float(getattr(C, "BACKTEST_INITIAL_EQUITY", 300000.0)))
@@ -7790,6 +7881,9 @@ def main() -> int:
         C.apply_preset(preset_name)
 
     raw_symbols = str(getattr(args, "symbol", "") or "").strip() or str(getattr(args, "symbols", "") or "")
+    if bool(getattr(args, "use_precomputed_signals", False)):
+        return _run_precomputed_signals_backtest_cli(args, raw_symbols=raw_symbols)
+
     symbols, symbol_source = _resolve_backtest_symbols(raw_symbols)
     if symbols:
         logger.info("[BACKTEST][SYMBOL] symbol=%s source=%s symbols=%s", str(symbols[0]), str(symbol_source), list(symbols))

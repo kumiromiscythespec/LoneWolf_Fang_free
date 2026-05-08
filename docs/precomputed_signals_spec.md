@@ -1,8 +1,9 @@
 # Free precomputed signal tape foundation
 
-This document describes the LoneWolf Fang Free Phase 1 foundation for reading
-precomputed signal tapes. Phase 1 is intentionally limited to schema,
-validation, reader helpers, and fast research accounting.
+This document describes the LoneWolf Fang Free precomputed signal tape migration.
+Phase 1 added the schema, validation, reader helpers, and fast research
+accounting foundation. Phase 2 connects that accounting path to `backtest.py`
+only behind an explicit opt-in flag.
 
 ## Scope
 
@@ -25,13 +26,80 @@ Phase 1 includes:
 Phase 1 does not include:
 
 - producer implementation; `precompute_signals.py` is deferred
-- `backtest.py` explicit fast path; deferred to Phase 2 or later
 - `runner.py` replay-only fast path; deferred to Phase 3 or later
 - GUI DD display wiring; deferred to a later phase
 - LIVE or PAPER runtime connection
 - order fetch, order submit, balance fetch, or MEXC private API access
 - strategy, indicators, exchange, risk, or order runtime logic changes
 - generated signal tape body, raw market data, runtime exports, package zips, exe, setup, or installer assets
+
+## Phase 2 Backtest Explicit Fast Path
+
+Free Phase 2 connects `backtest.py` to the saved signal tape accounting helper
+with explicit CLI flags:
+
+```powershell
+python backtest.py --use-precomputed-signals --precomputed-signals-dir <signal_set_dir>
+```
+
+Optional flags:
+
+- `--precomputed-signals-write-report`
+- `--precomputed-signals-initial-equity <float>`
+- `--precomputed-signals-strict`
+
+When `--use-precomputed-signals` is absent, the existing Free backtest path is
+preserved. No signal tape is discovered or used automatically.
+
+When `--use-precomputed-signals --precomputed-signals-dir <dir>` is present,
+`backtest.py` short-circuits into `fast_backtest_signals.run_fast_backtest`.
+The fast path reads only `manifest.json`, `summary.json`, and `trades.csv` from
+the supplied directory, recomputes saved-tape accounting, and writes comparable
+`equity_curve.csv` and `trades.csv` outputs in the normal backtest export
+directory. With `--precomputed-signals-write-report`, it also writes
+`fast_summary.json`.
+
+The backtest fast path fails closed when:
+
+- `--precomputed-signals-dir` is missing
+- `manifest.json`, `summary.json`, or `trades.csv` is missing
+- manifest `product` is not `free`
+- manifest safety scope is not research-only
+- manifest `research_only=true` is not present through the safety scope
+- manifest `paper_live_order_execution=false` is not present through the safety scope
+- summary `research_only=true` is absent or false
+- summary `paper_live_order_execution=false` is absent or true
+- manifest, summary, or trades contain forbidden private/runtime fields
+- legacy `max_drawdown` is positive
+
+The canonical root remains:
+
+`%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals`
+
+The environment override remains:
+
+`LWF_PRECOMPUTED_SIGNALS_ROOT`
+
+The Free product path is:
+
+`<root>\free\<symbol_normalized>\<entry_tf>_<filter_tf>\<signal_set_id>`
+
+Example:
+
+`%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals\free\BTCUSDT\5m_1h\sig_xxx`
+
+Phase 2 does not add a producer. `precompute_signals.py` is still deferred.
+Phase 2 does not connect `runner.py`; runner replay fast path is Phase 3 or
+later. Phase 2 does not connect GUI; GUI DD display remains a later phase.
+
+Phase 2 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
+strategy, indicators, exchange, risk, order runtime logic, entry timing, exit
+timing, fee logic, quantity logic, PnL formulas, or DD calculation.
+
+Generated signal tape bodies and raw market data remain local artifacts. They
+must not be committed to the repo or included in migration zips or release
+packages.
 
 ## Safety Scope
 

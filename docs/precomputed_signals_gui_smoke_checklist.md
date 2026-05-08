@@ -216,3 +216,48 @@ records that:
 Future execution button is not part of Phase 14. Backtest/replay execution from the GUI requires a future explicit confirmation / dry-run / local-only phase.
 LIVE/PAPER/order must remain separated from precomputed signal tape selection,
 diagnostics, command preview, and copy UX.
+
+## Phase 15 Manual Smoke Record Boundary
+
+Free Phase 15 is synthetic fixture only manual GUI runtime smoke record format.
+It is docs/test-only. GUI runtime smoke is not executed in Phase 15.
+
+The Phase 15 record format is fixed in
+`docs/precomputed_signals_gui_manual_smoke_record.md`. It keeps future manual
+GUI runtime smoke records synthetic fixture only and safe metadata only.
+
+Phase 15 does not change GUI source, runtime source, execution paths,
+APP_VERSION, package/release state, setup, installer, exe, signing, release
+assets, strategy, indicators, exchange, risk, order runtime logic, signal
+timing, or DD calculation.
+
+The record format preserves these boundaries:
+
+- no command execution
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, launch button, worker, or background worker path
+- APP_VERSION unchanged
+- package/release not touched
+- no real market data
+- no generated real signal tape body
+- raw trade rows are never recorded
+- `max_drawdown` remains signed negative legacy field
+- GUI display prefers `max_dd_abs / max_dd_pct`
+
+Phase 15 record `result_status` is limited to `pass`, `fail`, `blocked`, and
+`not_run`. `smoke_mode` is limited to `synthetic_fixture_display_only`,
+`docs_static_check_only`, and `not_run`. `fixture_type` is limited to
+`synthetic_signal_tape`, `synthetic_selection_contract`,
+`synthetic_picker_item`, and `none`.
+
+Screenshots optional. Screenshots must not include secrets / balances / orders,
+account details, raw trades rows, raw market data, or generated real tape body.
+Screenshots must be omitted from repo and zip unless explicitly sanitized.
+
+Future local-only dry-run is future phase. Execution button is future phase.
+LIVE/PAPER/order and packaging/release remain separated.

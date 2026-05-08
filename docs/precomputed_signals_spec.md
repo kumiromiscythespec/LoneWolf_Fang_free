@@ -18,7 +18,8 @@ those diagnostics for operator-facing compact status, file presence, hash,
 safety, fast-path, and LIVE/PAPER boundary display. Phase 14 is GUI smoke
 checklist / docs-only hardening; it changes no GUI source, runtime source,
 execution path, APP_VERSION, package, exe, setup, installer, signing, or release
-asset.
+asset. Phase 15 fixes the synthetic fixture only manual GUI runtime smoke record
+format as docs/test-only; GUI runtime smoke is not executed in Phase 15.
 
 ## Scope
 
@@ -839,6 +840,85 @@ Manifest, summary, and trade payloads fail closed when they contain private
 runtime fields or credential-like text such as MEXC API fields, secret/token
 material, authorization headers, raw order payloads, balance snapshots, private
 keys, or billing payloads.
+
+## Phase 15 Synthetic Fixture Only Manual GUI Runtime Smoke Record Format
+
+Free Phase 15 adds
+`docs/precomputed_signals_gui_manual_smoke_record.md` as a docs/test-only record
+format for future manual GUI runtime smoke. Phase 15 is synthetic fixture only
+manual GUI runtime smoke record format. GUI runtime smoke is not executed in
+Phase 15.
+
+The record is safe metadata only. It does not change GUI source, runtime
+source, command preview behavior, copy UX behavior, diagnostics behavior,
+execution paths, APP_VERSION, package/release state, setup, installer, exe,
+signing, release assets, strategy, indicators, exchange, risk, order runtime
+logic, signal timing, DD calculation, entry/exit logic, fee logic, PnL formula,
+or quantity logic.
+
+The record scope is synthetic fixture only and display-only:
+
+- no command execution
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- no order submit/fetch
+- no balance fetch
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, launch button, worker, or background worker path
+- APP_VERSION unchanged
+- package/release not touched
+- no real market data
+- no generated real signal tape body
+- raw trade rows are never recorded
+
+The safe record schema requires branch, HEAD, APP_VERSION, recorded time,
+operator, `signal_dir`, product, symbol, `entry_tf`, `filter_tf`,
+`signal_set_id`, selection status, `safe_error_code`, expected labels checked,
+disabled states checked, command preview checked, copy UX checked, diagnostics
+checked, LIVE/PAPER boundary checked, raw trade row visibility check, forbidden
+execution observations, `result_status`, `result_reason`, and sanitized notes.
+
+Allowed `result_status` values are `pass`, `fail`, `blocked`, and `not_run`.
+Allowed `smoke_mode` values are `synthetic_fixture_display_only`,
+`docs_static_check_only`, and `not_run`. Allowed `fixture_type` values are
+`synthetic_signal_tape`, `synthetic_selection_contract`,
+`synthetic_picker_item`, and `none`.
+
+Allowed smoke record fields remain aggregate `net_total`, `final_equity`,
+`trade_count`, DD display fields, compact hashes, status / warnings,
+`safe_error_code`, `signal_dir`, branch, commit, and APP_VERSION.
+
+Forbidden smoke record fields are raw trades rows, `entry_exec`, `exit_exec`,
+`qty`, exact trade id, order id, raw order, balance, API key, secret, token,
+authorization, raw billing, raw market data, raw OHLCV, generated real signal
+tape body, generated smoke output, generated diagnostics output, generated
+command preview output, generated clipboard output, and screenshots containing
+secrets / account / balances / orders.
+
+Pass means expected labels are visible, expected disabled states are confirmed,
+command preview is visible but not executed, copy UX is clipboard-only,
+diagnostics are visible, raw trade rows are not visible, and no
+LIVE/PAPER/order/private API path is observed. Fail means any command is
+executed by the GUI, producer/backtest/runner/inventory auto-runs,
+LIVE/PAPER/order/private API starts, balance/order fetch occurs, raw trades rows
+or row-level private/runtime fields are displayed, or secrets/auth/billing/order
+/ balance appears. Blocked means the synthetic fixture, safe launch, worktree,
+APP_VERSION, package/release boundary, or LIVE/PAPER/order disabled state cannot
+be confirmed. Not run means docs/static-only validation was chosen or GUI
+runtime smoke was intentionally deferred.
+
+Screenshots optional. Screenshots must not include secrets / balances / orders,
+account details, raw trades rows, raw market data, raw OHLCV, generated real
+tape body, API key, secret, token, authorization, raw billing, or raw order
+payloads. Screenshots must be omitted from repo and zip unless explicitly
+sanitized.
+
+Future local-only dry-run is future phase. Explicit local-only dry-run design is
+future phase. Execution button is future phase. LIVE/PAPER/order remains
+separated, and packaging/release remains separated.
 
 ## DD Schema V2
 

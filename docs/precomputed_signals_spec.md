@@ -53,6 +53,13 @@ execution, no GUI source change, no runtime source change, no command
 execution, no subprocess / QProcess / background worker, no LIVE/PAPER/order,
 and no MEXC private API. The static sample is not actual approval, not runtime
 output, and not an execution audit record.
+Phase 24 fixes the execution audit record schema / static sample as
+docs/tests-only. It adds no approval UI implementation, no dry-run execution
+implementation, no approval record generation at runtime, no execution audit
+record generation at runtime, no GUI source change, no runtime source change,
+no command execution, no subprocess / QProcess / background worker, no
+LIVE/PAPER/order, and no MEXC private API. The static sample is `not_run`,
+not runtime output, not approval proof, and not order/trading record proof.
 
 ## Scope
 
@@ -1565,13 +1572,86 @@ Execution audit boundary: approval record is not execution audit record.
 Approval record does not prove execution. Execution audit record must be
 generated only in a future execution phase. Phase 23 must not create execution
 audit record. Future execution audit must reference approval_record_hash and
-request_hash and must assert no LIVE/PAPER/order/private API/background
-execution.
+request_hash, keep selection_hash linkage, and must assert no
+LIVE/PAPER/order/private API/background execution.
 
 Phase 18 request schema is planning artifact. Phase 19 request builder creates
 preview only. Phase 20 GUI preview adapter creates display item only. Phase 21
 GUI wiring displays preview only. Phase 22 approval boundary defines future
 approval rules. Phase 23 provides static approval sample/checklist only. Future
+execution requires separate explicit approval and implementation phase.
+
+## Phase 24 Local-Only Dry-Run Execution Audit Schema And Static Sample
+
+Free Phase 24 is execution audit record schema / static sample docs-tests and
+is docs/tests-only. The canonical schema document is
+`docs/precomputed_signals_gui_local_dry_run_execution_audit_schema.md`. The
+sanitized static sample is
+`docs/precomputed_signals_gui_local_dry_run_execution_audit_sample.json`.
+
+Phase 24 has no approval UI implementation, no dry-run execution
+implementation, no approval record generation at runtime, no execution audit
+record generation at runtime, no GUI source change, no runtime source change,
+no command execution, no subprocess / QProcess / background worker, no
+producer/backtest/runner/inventory auto-run, no LIVE/PAPER/order, no MEXC
+private API, APP_VERSION unchanged, and package/release not touched.
+
+The execution audit record schema uses
+`record_type=precomputed_signal_local_dry_run_execution_record` and
+`execution_audit_schema_version=free_precomputed_local_dry_run_execution_audit_v1`.
+It is a future artifact only for future approved local saved-tape
+backtest/replay fast path execution. Execution audit record is not approval
+record. Approval record does not prove execution. Execution audit record is not
+order/trading record, not LIVE/PAPER trading record, and not release/package
+proof.
+
+approval_record_hash / request_hash linkage is mandatory. approval_record_hash
+/ request_hash / selection_hash linkage is mandatory. Missing
+approval_record_hash, missing request_hash, missing selection_hash,
+approval_record_hash mismatch, request_hash mismatch, selection_hash mismatch,
+or approval_scope mismatch must fail closed.
+
+Allowed dry_run_mode values remain `backtest_fast_path_local_only` and
+`runner_replay_fast_path_local_only`. Allowed result_status values are `pass`,
+`fail`, `blocked`, `invalid`, and `not_run`. The Phase 24 static sample uses
+`result_status=not_run`, null execution timestamps, zero duration, synthetic
+approval_record_hash / request_hash / selection_hash placeholders, an empty
+output_artifact_manifest, and sanitized notes that state no execution occurred.
+
+The output artifact manifest schema contains safe local metadata only:
+`artifact_type`, `path`, `sha256`, `size_bytes`, `safe_to_archive`,
+`contains_raw_market_data`, `contains_raw_trade_rows`,
+`contains_order_or_balance`, `contains_secret_or_auth`, and `notes_sanitized`.
+Allowed artifact types are `safe_summary_json`, `fast_summary_json`,
+`equity_curve_csv`, `fast_path_trades_csv_safe_condition`,
+`safe_metadata_log`, `sanitized_manual_smoke_record`, and
+`local_output_manifest`. Forbidden artifact types are `raw_market_data`,
+`raw_ohlcv`, `raw_trades_rows`, `entry_exec_rows`, `exit_exec_rows`,
+`qty_rows`, `order_payload`, `balance_snapshot`, `api_key`, `secret`, `token`,
+`authorization`, `raw_billing`, `package_zip`, `exe`, `installer`,
+`release_asset`, and `screenshot_with_sensitive_data`.
+
+Required assertions are no LIVE/PAPER/order/private API/background execution,
+no private API, no order/balance path, forbidden fields absent, raw trade rows
+absent, generated artifacts policy checked, approval_record_hash verified, and
+request_hash verified. Fail-closed reasons include `none`,
+`approval_record_missing`, `approval_record_hash_mismatch`, `request_missing`,
+`request_hash_mismatch`, `selection_hash_mismatch`, `approval_scope_mismatch`,
+`invalid_request`, `invalid_selection`, `operator_confirmation_missing`,
+`live_or_paper_requested`, `order_or_balance_requested`,
+`private_api_requested`, `background_execution_requested`, `unsafe_output_dir`,
+`forbidden_field_detected`, `positive_legacy_max_drawdown`,
+`output_artifact_policy_violation`, `raw_trade_rows_detected`,
+`missing_no_live_paper_order_assertion`,
+`missing_no_private_api_assertion`,
+`missing_no_background_execution_assertion`, and
+`unknown_safety_violation`.
+
+Phase 18 request schema is planning artifact. Phase 19 request builder creates
+preview only. Phase 20 GUI preview adapter creates display item only. Phase 21
+GUI wiring displays preview only. Phase 22 approval boundary defines future
+approval rules. Phase 23 approval static sample/checklist does not execute
+anything. Phase 24 execution audit schema defines future audit only. Future
 execution requires separate explicit approval and implementation phase.
 
 ## DD Schema V2

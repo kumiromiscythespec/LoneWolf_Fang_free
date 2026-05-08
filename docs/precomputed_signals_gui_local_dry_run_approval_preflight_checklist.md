@@ -11,15 +11,26 @@ generation at runtime, execution audit record generation, subprocess launch
 paths, QProcess launch paths, background workers, private API paths,
 LIVE/PAPER/order paths, package/release changes, or APP_VERSION changes.
 
+Free Phase 24 fixes the execution audit record schema / static sample
+docs-tests in
+`docs/precomputed_signals_gui_local_dry_run_execution_audit_schema.md` and
+`docs/precomputed_signals_gui_local_dry_run_execution_audit_sample.json`.
+Phase 24 is docs/tests-only. It does not implement dry-run execution and does
+not generate an execution audit record at runtime.
+
 ## Scope
 
 - Phase 23 is approval preflight checklist / approval record static sample docs-tests.
+- Phase 24 is execution audit record schema / static sample docs-tests.
 - Phase 23 is docs/tests-only.
+- Phase 24 is docs/tests-only.
 - no GUI source change.
 - no runtime source change.
 - no approval UI implementation.
+- no dry-run execution implementation.
 - no approval record generation at runtime.
 - no execution audit record generation.
+- no execution audit record generation at runtime.
 - no dry-run execution.
 - no command execution.
 - no subprocess / QProcess / background worker.
@@ -33,6 +44,7 @@ LIVE/PAPER/order paths, package/release changes, or APP_VERSION changes.
 - generated real tape body / raw market data excluded.
 - generated approval record / generated execution audit record excluded.
 - future execution must be a separate phase.
+- future execution requires separate explicit approval and implementation phase.
 
 ## Approval Scope
 
@@ -302,10 +314,22 @@ Execution audit record is not approval record. Approval record does not prove
 execution. Execution audit record must be generated only in a future execution
 phase. Phase 23 must not create execution audit record.
 
+Phase 24 defines the future execution audit schema and static sanitized
+`not_run` sample only. Phase 24 is docs/tests-only, adds no approval UI
+implementation, adds no dry-run execution implementation, and adds no execution
+audit record generation at runtime. Execution audit record is not order/trading
+record.
+
 Future execution audit must reference:
 
 - `approval_record_hash`
 - `request_hash`
+- `selection_hash`
+
+approval_record_hash / request_hash linkage is mandatory. approval_record_hash
+/ request_hash / selection_hash linkage is mandatory. Missing
+approval_record_hash, missing request_hash, missing selection_hash, or
+approval_scope mismatch must fail closed.
 
 Future execution audit must assert:
 
@@ -320,6 +344,11 @@ Phase 23 must not create approval record generation at runtime and must not
 create execution audit record generation. The static sample is not execution
 proof and is not approval proof.
 
+Phase 24 output artifact manifest schema allows only safe local artifact
+metadata and forbids raw market data, raw trades rows, order payload, balance
+snapshot, package zip, exe, installer, release asset, screenshots, credentials,
+and private or account payloads.
+
 ## Relationship To Existing Phases
 
 - Phase 18 request schema is planning artifact.
@@ -328,9 +357,11 @@ proof and is not approval proof.
 - Phase 21 GUI wiring displays preview only.
 - Phase 22 approval boundary defines future approval rules.
 - Phase 23 provides static approval sample/checklist only.
+- Phase 23 approval static sample/checklist does not execute anything.
+- Phase 24 execution audit schema defines future audit only.
 - future execution requires separate explicit approval and implementation phase.
 
 Future execution must not be introduced through command preview, copy UX,
 selection diagnostics, request builder preview, GUI preview adapter, GUI preview
-wiring, manual smoke record, approval checklist docs, package/release approval,
-or APP_VERSION changes.
+wiring, manual smoke record, approval checklist docs, execution audit schema
+docs, package/release approval, or APP_VERSION changes.

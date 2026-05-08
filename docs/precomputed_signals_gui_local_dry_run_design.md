@@ -36,6 +36,15 @@ adds no approval UI implementation, no approval record generation at runtime,
 no execution audit record generation, no dry-run execution, no GUI source
 change, no runtime source change, no command execution, no subprocess /
 QProcess / background worker, no LIVE/PAPER/order, and no MEXC private API.
+Free Phase 24: execution audit record schema / static sample docs-tests fixes
+the future execution audit record schema and sanitized static `not_run` sample
+in `docs/precomputed_signals_gui_local_dry_run_execution_audit_schema.md` and
+`docs/precomputed_signals_gui_local_dry_run_execution_audit_sample.json`. It
+adds no approval UI implementation, no dry-run execution implementation, no
+approval record generation at runtime, no execution audit record generation at
+runtime, no GUI source change, no runtime source change, no command execution,
+no subprocess / QProcess / background worker, no LIVE/PAPER/order, and no MEXC
+private API.
 
 ## Scope
 
@@ -46,21 +55,26 @@ QProcess / background worker, no LIVE/PAPER/order, and no MEXC private API.
 - Free Phase 22: local-only dry-run execution approval boundary.
 - Free Phase 23: approval preflight checklist / approval record static sample
   docs-tests.
+- Free Phase 24: execution audit record schema / static sample docs-tests.
 - docs/tests-only.
 - Phase 22 is docs/tests-only.
 - Phase 23 is docs/tests-only.
+- Phase 24 is docs/tests-only.
 - no approval UI implementation.
 - no dry-run execution implementation.
 - no approval record generation.
 - no approval record generation at runtime.
 - no execution audit record generation.
+- no execution audit record generation at runtime.
 - Phase 17-20 no GUI source change; Phase 21 adds read-only/display-only GUI
   source wiring only.
 - Phase 22 no GUI source change.
 - Phase 23 no GUI source change.
+- Phase 24 no GUI source change.
 - no runtime source change.
 - Phase 22 no runtime source change.
 - Phase 23 no runtime source change.
+- Phase 24 no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
 - GUI displays dry-run request preview only.
@@ -105,10 +119,13 @@ QProcess / background worker, no LIVE/PAPER/order, and no MEXC private API.
 - explicit operator approval required.
 - approval is not live/paper/order approval.
 - approval record is not execution audit record.
+- execution audit record is not approval record.
+- execution audit record is not order/trading record.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
 - future execution requires separate explicit approval phase.
+- future execution requires separate explicit approval and implementation phase.
 
 Phase 17 must not create generated dry-run output, generated dry-run request
 files, screenshots, command preview output, diagnostics output, inventory
@@ -414,6 +431,52 @@ execution. Future execution must be a separate phase and must reference an
 approval_record_hash and request_hash only after a separately approved
 implementation exists.
 
+## Current Phase 24 Execution Audit Schema And Static Sample
+
+Free Phase 24 is execution audit record schema / static sample docs-tests.
+Phase 24 is docs/tests-only and is defined by:
+
+- `docs/precomputed_signals_gui_local_dry_run_execution_audit_schema.md`
+- `docs/precomputed_signals_gui_local_dry_run_execution_audit_sample.json`
+
+Phase 24 has no approval UI implementation, no dry-run execution
+implementation, no approval record generation at runtime, no execution audit
+record generation at runtime, no GUI source change, no runtime source change,
+no command execution, no subprocess / QProcess / background worker, no
+producer/backtest/runner/inventory auto-run, no LIVE/PAPER/order, no MEXC
+private API, APP_VERSION unchanged, and package/release not touched.
+
+The Phase 24 execution audit schema uses
+`record_type=precomputed_signal_local_dry_run_execution_record`,
+`execution_audit_schema_version=free_precomputed_local_dry_run_execution_audit_v1`,
+`approval_scope=local_saved_tape_backtest_replay_only`, allowed dry_run_mode
+values of `backtest_fast_path_local_only` and
+`runner_replay_fast_path_local_only`, and result_status values of `pass`,
+`fail`, `blocked`, `invalid`, and `not_run`. The Phase 24 static sample is
+`not_run` only.
+
+approval_record_hash / request_hash linkage is mandatory. approval_record_hash
+/ request_hash / selection_hash linkage is mandatory. Missing
+approval_record_hash, request_hash, selection_hash, or approval_scope mismatch
+must fail closed. Execution audit record is not approval record. Execution
+audit record is not order/trading record.
+
+The output artifact manifest schema allows only safe local artifact metadata:
+`safe_summary_json`, `fast_summary_json`, `equity_curve_csv`,
+`fast_path_trades_csv_safe_condition`, `safe_metadata_log`,
+`sanitized_manual_smoke_record`, and `local_output_manifest`. Forbidden
+artifact types include `raw_market_data`, `raw_ohlcv`, `raw_trades_rows`,
+`entry_exec_rows`, `exit_exec_rows`, `qty_rows`, `order_payload`,
+`balance_snapshot`, `api_key`, `secret`, `token`, `authorization`,
+`raw_billing`, `package_zip`, `exe`, `installer`, `release_asset`, and
+`screenshot_with_sensitive_data`.
+
+Required Phase 24 assertions include no LIVE/PAPER/order/private API/background
+execution, no private API, no order/balance path, forbidden fields absent, raw
+trade rows absent, generated artifact policy checked, approval_record_hash
+verified, and request_hash verified. Future execution must be separate explicit
+approval and implementation phase.
+
 ## Required Future Operator Confirmation
 
 Future dry-run must require explicit operator confirmation. The confirmation
@@ -688,16 +751,27 @@ or repo-external zip.
 - Phase 23 no approval record generation at runtime.
 - Phase 23 no execution audit record generation.
 - Phase 23 no dry-run execution.
+- Phase 24 defines execution audit schema/static sample only.
+- Phase 24 is docs/tests-only.
+- Phase 24 no approval UI implementation.
+- Phase 24 no dry-run execution implementation.
+- Phase 24 no approval record generation at runtime.
+- Phase 24 no execution audit record generation at runtime.
+- Phase 24 no GUI source change.
+- Phase 24 no runtime source change.
 - approval record is not execution audit record.
+- execution audit record is not approval record.
+- execution audit record is not order/trading record.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.
 - future execution still requires separate approval/phase.
 - future execution requires separate explicit approval phase.
+- future execution requires separate explicit approval and implementation phase.
 
 Any future executor must have a new explicit approval boundary. It must not be
 introduced through command preview, copy UX, selection diagnostics, manual smoke
-record schema, or checklist docs.
+record schema, checklist docs, or execution audit schema docs.
 
 ## Manual Smoke Record Relationship
 

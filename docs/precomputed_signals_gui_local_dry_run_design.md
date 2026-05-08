@@ -9,15 +9,22 @@ Phase 18 extends this boundary with a docs/test-only request schema and a
 synthetic static sample fixture. The request schema is documented in
 `docs/precomputed_signals_gui_local_dry_run_request_schema.md`; the sample is
 `docs/precomputed_signals_gui_local_dry_run_request_sample.json`.
+Free Phase 19: local-only dry-run request builder docs/helper adds a helper that
+creates a safe request preview only. It does not add dry-run execution.
 
 ## Scope
 
 - Phase 17 is future local-only dry-run design boundary.
+- Free Phase 19: local-only dry-run request builder docs/helper.
 - docs/tests-only.
 - no GUI source change.
 - no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
+- request builder creates a safe request preview only.
+- request builder does not execute dry-run.
+- request builder does not run backtest/runner/producer/inventory.
+- request builder does not use subprocess / QProcess / background worker.
 - no execution button.
 - no command execution.
 - no subprocess / QProcess / background worker.
@@ -35,6 +42,7 @@ synthetic static sample fixture. The request schema is documented in
 - future local-only dry-run requires explicit operator confirmation.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
+- future execution still requires separate approval/phase.
 
 Phase 17 must not create generated dry-run output, generated dry-run request
 files, screenshots, command preview output, diagnostics output, inventory
@@ -125,6 +133,60 @@ Phase 18 keeps these request schema boundaries fixed:
 The Phase 18 static request sample is synthetic and sanitized. It is not a
 generated dry-run request, not generated runtime output, not a command execution
 record, not runtime/order proof, and not live/paper/order proof.
+
+## Current Phase 19 Request Builder Boundary
+
+Free Phase 19: local-only dry-run request builder docs/helper adds
+`precomputed_signals_local_dry_run_request.py` and focused tests. The helper is
+local-only, read-only with respect to signal selection, and preview-only. The
+request builder creates a safe request preview only: a request dict, safe text
+preview, or safe JSON preview written only to a user-specified path.
+
+The request builder does not execute dry-run, does not run
+backtest/runner/producer/inventory, does not use subprocess / QProcess /
+background worker, does not add a GUI execution button, and does not touch
+runtime execution source. It does not connect to LIVE/PAPER/order, MEXC private
+API, balance fetch, order fetch, or submit paths.
+
+Phase 19 keeps these defaults fixed:
+
+- `operator_confirmed=false by default`
+- `execution_enabled_after_confirmation=false`
+- `operator_confirmation_required=true`
+- `preview_only_before_confirmation=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+
+Allowed `dry_run_mode` values remain only:
+
+- `backtest_fast_path_local_only`
+- `runner_replay_fast_path_local_only`
+
+The builder fails closed for invalid selection, missing signal directory,
+missing manifest, missing summary, missing `trades.csv`, unsafe manifest,
+unsafe summary, forbidden field, positive legacy max_drawdown, LIVE/PAPER
+request, order/balance request, private API request, missing operator
+confirmation, background execution request, package/release output path, and
+generated artifact policy violation.
+
+Allowed artifacts remain safe summaries, fast-path equity curve CSV,
+fast-path trades CSV only under the safe condition, fast summary JSON, safe
+metadata log, and sanitized manual smoke record. Forbidden artifacts remain raw
+market data, raw OHLCV, raw trades rows, `entry_exec`, `exit_exec`, `qty`, trade
+id, order id, raw order, balance snapshot, API key, secret, token,
+authorization, raw billing, package zip, exe, installer, release asset, and
+screenshots containing secrets, balances, or orders.
+
+The builder output must not include generated real tape body, raw market data,
+raw trade rows, `entry_exec`, `exit_exec`, `qty`, trade id, order payloads,
+balance data, secrets, generated dry-run output, screenshots, package zips, exe,
+installers, or release assets. Generated request output not committed remains a
+hard rule for repo diffs and migration zips.
+
+Future execution still requires separate approval/phase. Phase 19 does not make
+local-only dry-run executable.
 
 ## Required Future Operator Confirmation
 
@@ -356,10 +418,15 @@ or repo-external zip.
 - Phase 18 does not implement request builder.
 - Phase 18 does not create request files.
 - Phase 18 does not execute local dry-run.
-- future Phase 19 may add local-only dry-run preview request builder.
+- Phase 19 adds local-only dry-run preview request builder docs/helper.
+- Phase 19 request builder creates a safe request preview only.
+- Phase 19 request builder does not execute dry-run.
+- Phase 19 request builder does not run backtest/runner/producer/inventory.
+- Phase 19 request builder does not use subprocess / QProcess / background worker.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.
 - future execution must be a separate phase.
+- future execution still requires separate approval/phase.
 
 Any future executor must have a new explicit approval boundary. It must not be
 introduced through command preview, copy UX, selection diagnostics, manual smoke

@@ -1204,6 +1204,78 @@ builder docs/helper if explicitly approved. Future runtime dry-run execution
 must be separate and explicitly approved. LIVE/PAPER/order remains permanently
 separated.
 
+## Phase 19 Local-Only Dry-Run Request Builder
+
+Free Phase 19: local-only dry-run request builder docs/helper adds
+`precomputed_signals_local_dry_run_request.py` and
+`tests/test_precomputed_signals_local_dry_run_request_builder.py`. The request
+builder creates a safe request preview only. It builds a request dict from an
+existing read-only selection contract or selected `signal_dir`, formats a safe
+text preview, and may write a safe JSON preview to a user-specified path.
+
+The request builder does not execute dry-run. It does not run
+backtest/runner/producer/inventory, does not use subprocess / QProcess /
+background worker, does not add a GUI execution button, does not change GUI
+source, and does not change runtime execution source. It does not connect to
+LIVE/PAPER/order, MEXC private API, balance fetch, order fetch, or submit paths.
+APP_VERSION remains unchanged.
+
+Phase 19 request identity is:
+
+- `request_type=precomputed_signal_local_dry_run_request`
+- `request_schema_version=free_precomputed_local_dry_run_request_v1`
+- `phase=free_precomputed_signals_phase19_request_builder`
+- `product=free`
+
+Allowed `dry_run_mode` values remain:
+
+- `backtest_fast_path_local_only`
+- `runner_replay_fast_path_local_only`
+
+Required defaults remain:
+
+- `operator_confirmation_required=true`
+- `operator_confirmed=false by default`
+- `preview_only_before_confirmation=true`
+- `execution_enabled_after_confirmation=false`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+
+The helper fails closed for invalid selection, missing `signal_dir`, missing
+manifest, missing summary, missing `trades.csv`, unsafe manifest, unsafe
+summary, forbidden fields, positive legacy max_drawdown, LIVE/PAPER request,
+order/balance request, private API request, missing operator confirmation,
+background execution request, output paths under package/release areas, and
+generated artifact policy violations. Future execution still requires separate
+approval/phase.
+
+Output directory safety rules:
+
+- safe examples include
+  `%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals_dry_runs\free\<signal_set_id>`
+  and test `tmp_path`.
+- unsafe examples include package zip, exe, installer, setup/signing, release
+  asset, raw market data, raw OHLCV, and generated runtime output areas inside
+  the repo.
+
+Allowed artifacts remain `safe_summary_json`, `fast_path_equity_curve_csv`,
+`fast_path_trades_csv_safe_condition`, `fast_summary_json`,
+`safe_metadata_log`, and `sanitized_manual_smoke_record`. Forbidden artifacts
+remain `raw_market_data`, `raw_ohlcv`, `raw_trades_rows`, `entry_exec`,
+`exit_exec`, `qty`, `trade_id`, `order_id`, `raw_order`,
+`balance_snapshot`, `api_key`, `secret`, `token`, `authorization`,
+`raw_billing`, `package_zip`, `exe`, `installer`, `release_asset`, and
+`screenshots_with_secrets_or_balances_or_orders`.
+
+The request builder output must not include raw trade rows, `entry_exec`,
+`exit_exec`, `qty`, trade id, order id, raw order payload, balance snapshot, API
+key, secret, token, authorization, raw billing, generated real tape body, raw
+market data, generated dry-run outputs, screenshots, package zips, exe,
+installers, or release assets. Generated request output not committed remains a
+hard repo and migration zip rule.
+
 ## DD Schema V2
 
 DD schema v2 keeps `max_drawdown` as a signed negative legacy compatibility

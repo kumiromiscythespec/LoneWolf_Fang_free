@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_request_schema_docs_v1
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_request_builder_docs_v1
 from __future__ import annotations
 
 import json
@@ -15,6 +15,7 @@ SCHEMA_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_request
 DESIGN_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_design.md"
 SPEC_DOC = REPO_ROOT / "docs" / "precomputed_signals_spec.md"
 SAMPLE_PATH = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_request_sample.json"
+BUILDER_SOURCE = REPO_ROOT / "precomputed_signals_local_dry_run_request.py"
 DOC_PATHS = (SCHEMA_DOC, DESIGN_DOC, SPEC_DOC)
 GUI_SOURCE_PATHS = (
     REPO_ROOT / "app" / "app" / "gui" / "main_window.py",
@@ -55,6 +56,7 @@ EXISTING_GUARD_TESTS = (
     "tests/test_precomputed_signals_gui_manual_smoke_record_docs.py",
     "tests/test_precomputed_signals_gui_manual_smoke_record_schema.py",
     "tests/test_precomputed_signals_gui_local_dry_run_design_docs.py",
+    "tests/test_precomputed_signals_local_dry_run_request_builder.py",
 )
 
 REQUEST_TYPE = "precomputed_signal_local_dry_run_request"
@@ -639,6 +641,26 @@ def test_docs_include_fail_closed_operator_confirmation_and_phase18_future_bound
         "dry-run request is not execution proof",
     ):
         assert expected in text
+
+
+def test_docs_include_phase19_request_builder_preview_only_boundary() -> None:
+    text = _doc_text()
+
+    for expected in (
+        "Free Phase 19: local-only dry-run request builder docs/helper",
+        "request builder creates a safe request preview only",
+        "request builder does not execute dry-run",
+        "request builder does not run backtest/runner/producer/inventory",
+        "request builder does not use subprocess / QProcess / background worker",
+        "operator_confirmed=false by default",
+        "execution_enabled_after_confirmation=false",
+        "future execution still requires separate approval/phase",
+        "generated request output not committed",
+        "request_schema_version=free_precomputed_local_dry_run_request_v1",
+        "phase=free_precomputed_signals_phase19_request_builder",
+    ):
+        assert expected in text
+    assert BUILDER_SOURCE.exists()
 
 
 def test_gui_and_runtime_sources_have_no_phase18_execution_or_network_changes() -> None:

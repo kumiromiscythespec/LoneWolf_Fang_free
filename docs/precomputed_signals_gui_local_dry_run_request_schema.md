@@ -5,9 +5,25 @@ signal tape GUI as docs/tests-only. The schema is a future design artifact. It
 does not create a request builder, request file, executor, GUI command path, or
 runtime dry-run path.
 
+Free Phase 19: local-only dry-run request builder docs/helper adds
+`precomputed_signals_local_dry_run_request.py`. The request builder creates a
+safe request preview only. It builds a request dict, formats a safe text
+preview, and may write a safe JSON preview to a user-specified path. The request
+builder does not execute dry-run, does not run backtest/runner/producer/inventory,
+does not use subprocess / QProcess / background worker, and does not connect to
+LIVE/PAPER/order or private API. Future execution still requires separate
+approval/phase.
+
 ## Scope
 
 - Phase 18 is local-only dry-run request schema docs/test-only.
+- Free Phase 19: local-only dry-run request builder docs/helper.
+- request builder creates a safe request preview only.
+- request builder does not execute dry-run.
+- request builder does not run backtest/runner/producer/inventory.
+- request builder does not use subprocess / QProcess / background worker.
+- request builder does not create generated dry-run output.
+- generated request output not committed.
 - no GUI source change.
 - no runtime source change.
 - no dry-run implementation.
@@ -34,6 +50,7 @@ runtime dry-run path.
 - future local-only dry-run requires explicit operator confirmation.
 - future local-only dry-run is not live/paper/order.
 - future execution must be a separate phase.
+- future execution still requires separate approval/phase.
 
 ## Request Definition
 
@@ -45,15 +62,22 @@ The request schema fields are:
 
 - `schema_version`: integer schema family for the request object.
 - `request_schema_version`: string version for this docs/test-only schema.
+  Phase 19 builder output uses `free_precomputed_local_dry_run_request_v1`.
 - `request_type`: must be `precomputed_signal_local_dry_run_request`.
 - `phase`: phase label, for this phase
   `free_precomputed_signals_phase18_local_dry_run_request_schema_docs_only`.
+  Phase 19 builder output uses
+  `free_precomputed_signals_phase19_request_builder`.
 - `product`: must be `free`.
 - `signal_dir`: selected precomputed signal tape directory.
 - `symbol`: selected symbol.
+- `symbol_normalized`: selected normalized symbol.
 - `entry_tf`: selected entry timeframe.
 - `filter_tf`: selected filter timeframe.
 - `signal_set_id`: selected signal set id.
+- `selection_status`: read-only selection contract status.
+- `selection_status_reason`: sanitized selection contract status reason.
+- `selection_safe_error_code`: sanitized selection contract safe error code.
 - `dry_run_mode`: future local saved-tape fast path mode.
 - `output_dir`: future local output directory.
 - `requested_at_utc`: UTC timestamp string for the request artifact.
@@ -88,9 +112,13 @@ selection:
 
 - `signal_dir`
 - `symbol`
+- `symbol_normalized`
 - `entry_tf`
 - `filter_tf`
 - `signal_set_id`
+- `selection_status`
+- `selection_status_reason`
+- `selection_safe_error_code`
 
 dry-run:
 
@@ -170,12 +198,16 @@ Required defaults:
 - `preview_only_before_confirmation = true`
 - `execution_enabled_after_confirmation = false`
 - `execution_enabled_after_confirmation = false in Phase 18 sample`
+- `execution_enabled_after_confirmation=false in Phase 19 builder output`
 - `not_selectable_for_live = true`
 - `not_selectable_for_paper = true`
 - `safety_research_only = true`
 - `paper_live_order_execution = false`
 - `status = draft or blocked or not_run`
+- Phase 19 builder default status is `valid_preview` when the selected tape is
+  valid and the request preview is safe.
 - request is not executable in Phase 18.
+- request is not executable in Phase 19.
 
 Allowed `status` enum:
 
@@ -188,6 +220,10 @@ Allowed `status` enum:
 Recommended sample status:
 
 - `not_run`
+
+Recommended Phase 19 builder status:
+
+- `valid_preview`
 
 ## Allowed Artifacts
 
@@ -259,20 +295,72 @@ Allowed `fail_closed_reasons` enum values:
 - `unknown_safety_violation`
 
 Any unknown safety issue must fail closed before execution. Phase 18 has no
-executor, so the sample remains `not_run`.
+executor, so the sample remains `not_run`. Phase 19 has no executor either;
+the builder output remains a preview/planning artifact.
 
 ## Command Preview Rules
 
 - `command_text_preview` is preview-only.
 - `command_text_preview` must not be executed in Phase 18.
 - `command_text_preview` may include:
-  - `python backtest.py --use-precomputed-signals --precomputed-signals-dir "<signal_dir>"`
-  - `python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir "<signal_dir>"`
+  - `python backtest.py --use-precomputed-signals --precomputed-signals-dir "<signal_dir>" --precomputed-signals-write-report`
+  - `python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir "<signal_dir>" --precomputed-signals-write-report`
 - `command_text_preview` must not include live / paper / order.
 - `command_text_preview` must not include secrets / token / auth / order /
   balance.
 - Copying command text is not confirmation.
 - A Phase 18 request is not executable.
+- A Phase 19 request builder preview is not executable.
+
+## Phase 19 Request Builder Helper Boundary
+
+Free Phase 19: local-only dry-run request builder docs/helper is local-only and
+preview-only. The helper may use the existing read-only selection contract for a
+selected `signal_dir`; it must not run producer, backtest, runner, inventory, or
+any GUI command path. It must not import or call strategy, indicators, exchange,
+ccxt, risk, order runtime logic, or private API code.
+
+The helper output is a request dict / safe JSON preview only. The helper may
+write safe JSON only to a user-specified path such as a temporary test path or a
+local app-data preview path. Generated request output not committed remains a
+hard rule, and generated dry-run request files must not be included in the repo
+or migration zip.
+
+Required Phase 19 builder defaults:
+
+- `operator_confirmation_required=true`
+- `operator_confirmed=false by default`
+- `preview_only_before_confirmation=true`
+- `execution_enabled_after_confirmation=false`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+
+Phase 19 builder validation fails closed when product is not `free`, the
+`dry_run_mode` is not allowed, the selection contract is invalid, `signal_dir`
+is missing, manifest/summary/trades metadata is missing, positive legacy
+`max_drawdown` is detected, forbidden fields appear, operator confirmation is
+already true, execution is enabled, LIVE/PAPER/order text is requested, private
+API text is requested, background execution is requested, or `output_dir` points
+at package/release, setup/installer/exe, raw market data, or other generated
+artifact policy areas.
+
+The request builder output must not include raw trade rows, `entry_exec`,
+`exit_exec`, `qty`, trade id, order id, raw order payload, balance snapshot, API
+key, secret, token, authorization, raw billing, generated real signal tape body,
+raw market data, or screenshots.
+
+Safe output directory examples:
+
+- `%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals_dry_runs\free\<signal_set_id>`
+- a test `tmp_path`
+
+Unsafe output directory examples:
+
+- package zip, exe, installer, setup, signing, or release asset areas
+- raw market data or raw OHLCV areas
+- repo paths intended for generated runtime output
 
 ## Operator Confirmation Rules
 
@@ -321,8 +409,14 @@ confirmation.
 - Phase 18 does not add producer/backtest/runner/inventory auto-run.
 - Phase 18 does not add LIVE/PAPER/order.
 - Phase 18 does not add MEXC private API.
-- future Phase 19 may add request builder docs/helper if explicitly approved.
+- Phase 19 adds request builder docs/helper only.
+- Phase 19 request builder creates a safe request preview only.
+- Phase 19 request builder does not execute dry-run.
+- Phase 19 request builder does not run backtest/runner/producer/inventory.
+- Phase 19 request builder does not use subprocess / QProcess / background worker.
+- Phase 19 request builder keeps generated request output not committed.
 - future runtime dry-run execution must be separate and explicitly approved.
+- future execution still requires separate approval/phase.
 - LIVE/PAPER/order remains permanently separated.
 
 The static sample fixture

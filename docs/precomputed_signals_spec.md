@@ -3,7 +3,9 @@
 This document describes the LoneWolf Fang Free precomputed signal tape migration.
 Phase 1 added the schema, validation, reader helpers, and fast research
 accounting foundation. Phase 2 connects that accounting path to `backtest.py`
-only behind an explicit opt-in flag.
+only behind an explicit opt-in flag. Phase 3 connects the same saved-tape
+accounting helper to `runner.py` for replay-only use, also behind explicit
+flags.
 
 ## Scope
 
@@ -26,7 +28,6 @@ Phase 1 includes:
 Phase 1 does not include:
 
 - producer implementation; `precompute_signals.py` is deferred
-- `runner.py` replay-only fast path; deferred to Phase 3 or later
 - GUI DD display wiring; deferred to a later phase
 - LIVE or PAPER runtime connection
 - order fetch, order submit, balance fetch, or MEXC private API access
@@ -99,6 +100,84 @@ timing, fee logic, quantity logic, PnL formulas, or DD calculation.
 
 Generated signal tape bodies and raw market data remain local artifacts. They
 must not be committed to the repo or included in migration zips or release
+packages.
+
+## Phase 3 Runner Replay-Only Fast Path
+
+Free Phase 3 connects `runner.py` to the saved signal tape accounting helper
+for replay mode only:
+
+```powershell
+python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir <signal_set_dir>
+```
+
+The existing Free replay selector remains supported:
+
+```powershell
+python runner.py --replay --use-precomputed-signals --precomputed-signals-dir <signal_set_dir>
+```
+
+Optional runner flags:
+
+- `--precomputed-signals-write-report`
+- `--precomputed-signals-initial-equity <float>`
+- `--precomputed-signals-strict`
+
+When `--use-precomputed-signals` is absent, the existing `runner.py` path is
+preserved. No signal tape is discovered or used automatically.
+
+When replay mode and `--use-precomputed-signals --precomputed-signals-dir <dir>`
+are both present, `runner.py` short-circuits into
+`fast_backtest_signals.run_fast_backtest`. The fast path reads only
+`manifest.json`, `summary.json`, and `trades.csv` from the supplied directory,
+recomputes saved-tape accounting, and writes replay-compatible
+`equity_curve.csv` and `trades.csv` outputs in the normal runner export
+directory. With `--precomputed-signals-write-report`, it also writes
+`fast_summary.json`.
+
+The runner fast path fails closed when:
+
+- replay mode is not explicitly selected
+- live mode is selected with `--use-precomputed-signals`
+- paper mode is selected with `--use-precomputed-signals`
+- `--precomputed-signals-dir` is missing
+- `manifest.json`, `summary.json`, or `trades.csv` is missing
+- manifest `product` is not `free`
+- manifest safety scope is not research-only
+- manifest `research_only=true` is not present through the safety scope
+- manifest `paper_live_order_execution=false` is not present through the safety scope
+- summary `research_only=true` is absent or false
+- summary `paper_live_order_execution=false` is absent or true
+- manifest, summary, or trades contain forbidden private/runtime fields
+- legacy `max_drawdown` is positive
+
+The canonical root remains:
+
+`%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals`
+
+The environment override remains:
+
+`LWF_PRECOMPUTED_SIGNALS_ROOT`
+
+The Free product path is:
+
+`<root>\free\<symbol_normalized>\<entry_tf>_<filter_tf>\<signal_set_id>`
+
+Example:
+
+`%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals\free\BTCUSDT\5m_1h\sig_xxx`
+
+Phase 3 does not add a producer. `precompute_signals.py` is still deferred.
+Phase 3 does not connect GUI; GUI DD display remains a later phase.
+
+Phase 3 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
+strategy, indicators, exchange, risk, order runtime logic, entry timing, exit
+timing, fee logic, quantity logic, PnL formulas, signal timing, or DD
+calculation. It does not launch a producer when a tape is stale or missing.
+
+Generated real signal tape bodies and raw market data remain local artifacts.
+They must not be committed to the repo or included in migration zips or release
 packages.
 
 ## Safety Scope

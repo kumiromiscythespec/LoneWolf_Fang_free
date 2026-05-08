@@ -257,6 +257,65 @@ Generated real signal tape bodies and raw market data remain local artifacts.
 They must not be committed to the repo or included in migration zips or release
 packages.
 
+## Phase 5 Operator Inventory / Discovery
+
+Free Phase 5 adds `precomputed_signals_inventory.py`, a read-only operator-facing
+inventory layer for existing Free precomputed signal tapes. It discovers tapes
+under `%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals\free` by default.
+`LWF_PRECOMPUTED_SIGNALS_ROOT` can override the root, and `--root` can point to a
+specific safe local inventory root.
+
+The inventory product is `free`. Any other `--product` fails closed. The helper
+does not create signal tapes, does not run the producer, does not run
+`backtest.py`, and does not run `runner.py`.
+
+Example:
+
+```powershell
+python precomputed_signals_inventory.py `
+  --product free `
+  --root "%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals" `
+  --symbol BTC/USDT `
+  --entry-tf 5m `
+  --filter-tf 1h `
+  --format json `
+  --out C:\path\to\safe_inventory.json
+```
+
+The inventory reads only safe metadata from `manifest.json` and `summary.json`.
+It checks that `trades.csv` exists and reports checksum metadata already present
+in the manifest, but it does not read or emit raw `trades.csv` rows. It never
+prints row-level `entry_exec`, `exit_exec`, quantity values, trade ids, order ids,
+raw order payloads, balances, credentials, tokens, authorization headers, raw
+billing payloads, raw market data, or generated signal tape body.
+
+Valid rows expose safe aggregate metadata only, including product, symbol,
+timeframes, `signal_set_id`, `signal_dir`, creation time, dataset id, time range,
+trade count, `net_total`, `final_equity`, DD schema v2 display fields, safety
+booleans, file presence, manifest hash, summary hash, and the manifest-provided
+`trades.csv` checksum. Operators can pass a valid row's `signal_dir` to:
+
+```powershell
+python backtest.py --use-precomputed-signals --precomputed-signals-dir <signal_dir>
+python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir <signal_dir>
+```
+
+Invalid tapes are reported with `signal_dir`, `status=invalid`, a safe reason,
+and a safe error code only. Unsafe manifest or summary payloads, forbidden
+private/runtime fields, missing required metadata, missing tape files, unsafe
+safety flags, and positive legacy `max_drawdown` values are invalid. With
+`--strict`, any invalid discovered tape makes the inventory command exit
+non-zero.
+
+Phase 5 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change GUI
+files, `APP_VERSION`, strategy, indicators, exchange, risk, order runtime logic,
+entry timing, exit timing, fee logic, quantity logic, PnL formulas, signal
+timing, or DD calculation. GUI DD display remains a later phase. Generated real
+signal tape bodies, raw market data, generated inventory outputs, package zips,
+executables, installers, and release assets must not be committed to the repo or
+included in migration zips.
+
 ## Safety Scope
 
 Every accepted manifest must include this exact safety scope:

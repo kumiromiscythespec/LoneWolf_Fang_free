@@ -6,7 +6,9 @@ accounting foundation. Phase 2 connects that accounting path to `backtest.py`
 only behind an explicit opt-in flag. Phase 3 connects the same saved-tape
 accounting helper to `runner.py` for replay-only use, also behind explicit
 flags. Phase 4 adds a safe producer that converts existing research export
-files into the Free signal tape format without running strategy logic.
+files into the Free signal tape format without running strategy logic. Phase 7
+adds a read-only GUI picker pre-stage adapter that maps an existing selection
+contract to safe display metadata only.
 
 ## Scope
 
@@ -398,6 +400,96 @@ DD calculation.
 Generated real signal tape bodies, raw market data, generated inventory outputs,
 generated selection outputs, package zips, executables, installers, and release
 assets must not be committed to the repo or included in migration zips.
+
+## Phase 7 GUI Picker Pre-Stage / Read-Only Adapter
+
+Free Phase 7 adds `precomputed_signals_gui_adapter.py` as a pure read-only
+adapter for a future GUI picker. It is not GUI wiring. It does not change
+`app/gui/main_window.py`, `app/gui/result_chart.py`,
+`app/app/gui/main_window.py`, or `app/app/gui/result_chart.py`.
+
+Example:
+
+```powershell
+python precomputed_signals_gui_adapter.py `
+  --signal-dir "<signal_set_dir>" `
+  --format json `
+  --out C:\path\to\safe_gui_picker_item.json
+```
+
+The adapter accepts either an in-memory Phase 6 selection contract or a
+single operator-provided `signal_dir`. For `signal_dir`, it delegates to the
+Phase 6 read-only selection validation and then maps the result into a GUI
+picker item. It does not discover tapes, does not run the inventory command,
+does not run the producer, does not run `backtest.py`, and does not run
+`runner.py`.
+
+The GUI picker item is a safe display model for future backtest/replay
+selection. It includes only safe metadata such as product, symbol, timeframes,
+`signal_set_id`, `signal_dir`, creation time, dataset id, time range, trade
+count, `net_total`, `final_equity`, DD display fields, picker title/subtitle,
+and safety/selectability flags. It does not include raw `trades.csv` rows,
+row-level `entry_exec`, `exit_exec`, quantity values, exact trade ids, order
+ids, raw order payloads, balances, credentials, tokens, authorization headers,
+raw billing payloads, raw OHLCV, raw market data, or generated signal tape body.
+
+Valid Free GUI picker items keep these flags:
+
+- `selectable_for_backtest_fast_path=true`
+- `selectable_for_runner_replay_fast_path=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+
+Invalid selections fail closed as GUI picker items with `status=invalid`. They
+are never selectable for backtest fast path or runner replay fast path, and they
+only expose a safe reason and warning. Raw payloads are not echoed.
+
+DD display is display-only mapping. Human-facing text uses the non-negative
+display fields first:
+
+- `max_dd_display_abs`, falling back to `max_dd_abs`
+- `max_dd_display_pct`, falling back to `max_dd_pct`
+- `max_drawdown` remains the signed negative legacy compatibility field
+- `max_drawdown == max_dd_signed`
+- `max_drawdown` is never treated as positive display DD
+
+Japanese display wording for future GUI work should preserve this meaning:
+
+- `最大DD（正値表示）`
+- `max_drawdown は signed negative legacy compatibility field`
+
+Example display text:
+
+```text
+Max DD (abs, display): 1,559.7350 | Max DD pct (display): 0.0244% | Legacy signed max_drawdown: -1,559.7350
+```
+
+The product remains `free`. The canonical root remains:
+
+`%LOCALAPPDATA%\LoneWolfFang\data\precomputed_signals`
+
+The environment override remains:
+
+`LWF_PRECOMPUTED_SIGNALS_ROOT`
+
+The Free product path remains:
+
+`<root>\free\<symbol_normalized>\<entry_tf>_<filter_tf>\<signal_set_id>`
+
+Future phases can wire the GUI picker to this adapter. Phase 7 intentionally
+does not connect button handlers, order controls, live/paper selectors, or
+runtime execution paths.
+
+Phase 7 does not connect to LIVE, PAPER, order creation, order fetch, balance
+fetch, MEXC private APIs, exchange clients, or `ccxt`. It does not change
+`APP_VERSION`, strategy, indicators, exchange, risk, order runtime logic, entry
+timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
+DD calculation.
+
+Generated real signal tape bodies, raw market data, generated inventory outputs,
+generated selection outputs, generated GUI adapter outputs, package zips,
+executables, installers, and release assets must not be committed to the repo
+or included in migration zips.
 
 ## Safety Scope
 

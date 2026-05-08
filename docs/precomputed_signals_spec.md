@@ -8,7 +8,8 @@ accounting helper to `runner.py` for replay-only use, also behind explicit
 flags. Phase 4 adds a safe producer that converts existing research export
 files into the Free signal tape format without running strategy logic. Phase 7
 adds a read-only GUI picker pre-stage adapter that maps an existing selection
-contract to safe display metadata only.
+contract to safe display metadata only. Phase 8 wires that adapter into the
+Free GUI as a display-only picker panel for an operator-selected `signal_dir`.
 
 ## Scope
 
@@ -31,7 +32,7 @@ Phase 1 includes:
 Phase 1 does not include:
 
 - producer implementation; `precompute_signals.py` is deferred
-- GUI DD display wiring; deferred to a later phase
+- GUI execution wiring; deferred to a later phase
 - LIVE or PAPER runtime connection
 - order fetch, order submit, balance fetch, or MEXC private API access
 - strategy, indicators, exchange, risk, or order runtime logic changes
@@ -490,6 +491,67 @@ Generated real signal tape bodies, raw market data, generated inventory outputs,
 generated selection outputs, generated GUI adapter outputs, package zips,
 executables, installers, and release assets must not be committed to the repo
 or included in migration zips.
+
+## Phase 8 GUI Picker Wiring / Display-Only Connection
+
+Free Phase 8 adds GUI picker wiring for precomputed signal tapes. The wiring is
+display-only. It lets an operator explicitly select a `signal_dir` and shows a
+safe summary in the existing Replay / Backtest GUI area.
+
+The GUI reads the Phase 7 adapter schema through
+`precomputed_signals_gui_adapter.build_gui_picker_item_from_signal_dir()` via a
+small GUI helper. The GUI does not read raw `trades.csv` rows, generated tape
+body, raw market data, raw OHLCV, exact trade ids, row-level `entry_exec` /
+`exit_exec` values, row-level quantities, raw order payloads, balances,
+credentials, tokens, authorization headers, or raw billing payloads.
+
+Displayed safe fields are limited to the selected `signal_dir`, product/symbol,
+entry and filter timeframes, `signal_set_id`, `dataset_id`, creation timestamp,
+trade count, `net_total`, `final_equity`, DD display text, DD display amount and
+percentage, adapter status, picker warning, and selection safety flags.
+
+Valid display-only picker items preserve these flags:
+
+- `selectable_for_backtest_fast_path=true`
+- `selectable_for_runner_replay_fast_path=true`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+
+The GUI renders the selection as `Replay/backtest only` and
+`Not selectable for LIVE/PAPER` (Japanese UI may show `バックテスト / リプレイ専用`
+and `LIVE/PAPER には使用不可`). These flags are warning/display state only in
+Phase 8. The selected signal tape is not wired to run buttons.
+
+DD display remains display-only and uses the non-negative display fields first:
+
+- `max_dd_display_abs`, falling back to `max_dd_abs`
+- `max_dd_display_pct`, falling back to `max_dd_pct`
+- `max_dd_display_label = "Max DD (abs, display)"`
+
+`max_drawdown` remains the signed negative legacy compatibility field, and
+`max_drawdown == max_dd_signed`. The GUI must not reinterpret a positive legacy
+`max_drawdown` as positive display DD; positive legacy-only payloads fail closed
+through the adapter/selection contract.
+
+Phase 8 does not run `precompute_signals.py`, does not run `backtest.py`, does
+not run `runner.py`, and does not run the inventory command automatically. It
+does not add any button to launch producer, backtest, runner, inventory, or any
+signal-tape execution path.
+
+Phase 8 does not connect precomputed signal tape selection to LIVE, PAPER,
+order creation, order fetch, order submit, balance fetch, MEXC private APIs,
+exchange clients, or `ccxt`. Future phases may consider an explicit
+backtest/replay action connection, but it must remain separated from
+LIVE/PAPER/order paths.
+
+Phase 8 does not change `APP_VERSION`, strategy, indicators, exchange, risk,
+order runtime logic, entry timing, exit timing, fee logic, quantity logic, PnL
+formulas, signal timing, or DD calculation.
+
+Generated real signal tape bodies, raw market data, generated inventory outputs,
+generated selection outputs, generated GUI adapter outputs, package zips,
+executables, installers, release assets, and zip-in-zip artifacts must not be
+committed to the repo or included in migration zips.
 
 ## Safety Scope
 

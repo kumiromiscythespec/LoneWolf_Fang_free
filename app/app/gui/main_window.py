@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
 # BUILD_ID: 2026-04-20_free_ui_wording_cleanup_v1
 # BUILD_ID: 2026-04-19_free_gui_title_bar_version_1_1_1_v1
@@ -68,7 +69,7 @@ import urllib.request
 import zipfile
 from collections import deque
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import config as C
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal, qVersion
@@ -149,6 +150,12 @@ from app.gui.exchange_registry import (
 )
 from app.gui.chart_dialog import ChartDialog
 from app.gui.logo_loader import LogoAsset, load_logo_asset, render_logo_pixmap
+from app.gui.precomputed_signal_picker import (
+    build_precomputed_signal_picker_state,
+    default_precomputed_signal_picker_root,
+    format_precomputed_signal_picker_empty_text,
+    format_precomputed_signal_picker_display_text,
+)
 from app.gui.result_chart import (
     CHART_MODE_CANDLE,
     LiveChartState,
@@ -163,7 +170,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-04-29_free_gui_pipeline_pythonpath_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_picker_wiring_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -217,6 +224,7 @@ _UI_TEXTS = {
         "label.log_level": "ログレベル",
         "label.language": "表示言語",
         "label.dataset_root": "データセットルート",
+        "label.precomputed_signal_tape": "事前計算シグナル",
         "label.tf": "時間足",
         "label.since": "開始",
         "label.until": "終了",
@@ -245,6 +253,7 @@ _UI_TEXTS = {
         "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST のみ",
         "note.preview_only": "プレビューのみです。売買動作やサイズ設定は変更されません。",
         "placeholder.dataset_root": "<PREFIX>_5m と <PREFIX>_1h を含むデータセットルートを選択",
+        "placeholder.precomputed_signal_dir": "signal_dir を明示選択",
         "placeholder.api_key": "{exchange} キー",
         "placeholder.api_secret": "{exchange} シークレット",
         "placeholder.api_passphrase": "{exchange} passphrase",
@@ -252,6 +261,7 @@ _UI_TEXTS = {
         "action.support_snapshot": "Support Snapshot",
         "action.select_replay_data": "Replay Data を選択...",
         "action.select_dataset_root": "Dataset Root を選択...",
+        "action.select_precomputed_signal_tape": "Signal Tape を選択...",
         "action.start_replay": "Replay 実行",
         "action.start_backtest": "Backtest 実行",
         "action.start_paper": "Paper 開始",
@@ -295,6 +305,7 @@ _UI_TEXTS = {
         "dialog.start_failed.title": "起動失敗",
         "dialog.save_png.title": "PNG保存",
         "dialog.select_report_output.title": "レポート出力先を選択",
+        "dialog.select_precomputed_signal_tape.title": "事前計算シグナルの signal_dir を選択",
         "dialog.already_running.title": "実行中",
         "dialog.already_running.message": "Bot はすでに実行中です。",
         "dialog.invalid_period.title": "期間エラー",
@@ -327,6 +338,7 @@ _UI_TEXTS = {
         "label.log_level": "Log Level",
         "label.language": "Language",
         "label.dataset_root": "Dataset Root",
+        "label.precomputed_signal_tape": "Precomputed Signal Tape",
         "label.tf": "TF",
         "label.since": "Since",
         "label.until": "Until",
@@ -355,12 +367,14 @@ _UI_TEXTS = {
         "note.free_build": "FREE build: PAPER / REPLAY / BACKTEST only",
         "note.preview_only": "Preview only. Trading behavior and sizing are unchanged.",
         "placeholder.dataset_root": "Select dataset root containing <PREFIX>_5m and <PREFIX>_1h",
+        "placeholder.precomputed_signal_dir": "Select signal_dir explicitly",
         "placeholder.api_key": "{exchange} key",
         "placeholder.api_secret": "{exchange} secret",
         "placeholder.api_passphrase": "{exchange} passphrase",
         "placeholder.yyyy_mm": "YYYY-MM",
         "action.select_replay_data": "Select Replay Data...",
         "action.select_dataset_root": "Select Dataset Root...",
+        "action.select_precomputed_signal_tape": "Select Signal Tape...",
         "action.start_replay": "Run Replay",
         "action.start_backtest": "Run Backtest",
         "action.start_paper": "Start Paper",
@@ -404,6 +418,7 @@ _UI_TEXTS = {
         "dialog.start_failed.title": "Start failed",
         "dialog.save_png.title": "Save PNG",
         "dialog.select_report_output.title": "Select Report Output",
+        "dialog.select_precomputed_signal_tape.title": "Select precomputed signal_dir",
         "dialog.already_running.title": "Already running",
         "dialog.already_running.message": "Bot is already running.",
         "dialog.invalid_period.title": "Invalid period",
@@ -621,6 +636,10 @@ class MainWindow(QWidget):
         self._replay_dataset_prefix: str = symbol_to_prefix(str(self._settings.dataset_prefix or self._default_symbol))
         self._replay_dataset_year: int = int(self._settings.dataset_year or 0)
         self._selected_replay_csv_source: str = ""
+        self._selected_precomputed_signal_dir: str = ""
+        self._selected_precomputed_signal_picker_item: dict[str, Any] = {}
+        self._selected_precomputed_signal_status: str = "empty"
+        self._selected_precomputed_signal_warning: str = ""
         self._last_auto_range_source: str = ""
         self._auto_range_enabled: bool = True
         self._proc_role: str = "runner"
@@ -801,6 +820,26 @@ class MainWindow(QWidget):
         row_replay_controls.addStretch(1)
         row_replay_controls.addWidget(self.btn_run_replay)
         replay_layout.addLayout(row_replay_controls)
+
+        row_precomputed_signal = QHBoxLayout()
+        row_precomputed_signal.setSpacing(8)
+        self.precomputed_signal_label = QLabel("Precomputed Signal Tape")
+        row_precomputed_signal.addWidget(self.precomputed_signal_label)
+        self.precomputed_signal_dir = QLineEdit()
+        self.precomputed_signal_dir.setReadOnly(True)
+        self.precomputed_signal_dir.setPlaceholderText("Select signal_dir explicitly")
+        self.btn_select_precomputed_signal = QPushButton("Select Signal Tape...")
+        row_precomputed_signal.addWidget(self.precomputed_signal_dir, stretch=1)
+        row_precomputed_signal.addWidget(self.btn_select_precomputed_signal)
+        replay_layout.addLayout(row_precomputed_signal)
+
+        self.precomputed_signal_summary = QTextEdit()
+        self.precomputed_signal_summary.setReadOnly(True)
+        self.precomputed_signal_summary.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.precomputed_signal_summary.setMinimumHeight(86)
+        self.precomputed_signal_summary.setMaximumHeight(132)
+        self.precomputed_signal_summary.setPlainText(format_precomputed_signal_picker_empty_text(ui_language=self._ui_language))
+        replay_layout.addWidget(self.precomputed_signal_summary)
         self.btn_run_replay.setVisible(False)
         root.addWidget(self.replay_group)
 
@@ -1156,6 +1195,7 @@ class MainWindow(QWidget):
         self.btn_check_updates.clicked.connect(self.on_check_updates)
         self.btn_select_replay.clicked.connect(self.on_select_replay_data)
         self.btn_select_replay_dir.clicked.connect(self.on_select_replay_folder)
+        self.btn_select_precomputed_signal.clicked.connect(self.on_select_precomputed_signal_tape)
         self.btn_run_replay.clicked.connect(self.on_run_replay)
         self.result_panel.refreshRequested.connect(self.on_refresh_result_panel)
         self.result_panel.expandRequested.connect(self.on_expand_result_chart)
@@ -1813,6 +1853,10 @@ class MainWindow(QWidget):
         self.replay_data.setPlaceholderText(self.tr("placeholder.dataset_root"))
         self.btn_select_replay.setText(self.tr("action.select_replay_data"))
         self.btn_select_replay_dir.setText(self.tr("action.select_dataset_root"))
+        self.precomputed_signal_label.setText(self.tr("label.precomputed_signal_tape"))
+        self.precomputed_signal_dir.setPlaceholderText(self.tr("placeholder.precomputed_signal_dir"))
+        self.btn_select_precomputed_signal.setText(self.tr("action.select_precomputed_signal_tape"))
+        self._refresh_precomputed_signal_picker_display()
         self.replay_symbol_field_label.setText(self.tr("label.symbol"))
         self.replay_tf_label.setText(self.tr("label.tf"))
         self.replay_since_label.setText(self.tr("label.since"))
@@ -2493,6 +2537,64 @@ class MainWindow(QWidget):
             return
         self.report_out.setText(os.path.abspath(path))
         self.report_out.setCursorPosition(0)
+
+    def _refresh_precomputed_signal_picker_display(self) -> None:
+        if not hasattr(self, "precomputed_signal_summary"):
+            return
+        if self._selected_precomputed_signal_picker_item:
+            display_text = format_precomputed_signal_picker_display_text(
+                self._selected_precomputed_signal_picker_item,
+                ui_language=self._ui_language,
+            )
+        else:
+            display_text = format_precomputed_signal_picker_empty_text(ui_language=self._ui_language)
+        self.precomputed_signal_summary.setPlainText(display_text)
+        self.precomputed_signal_summary.setToolTip(display_text)
+        if hasattr(self, "precomputed_signal_dir"):
+            self.precomputed_signal_dir.setText(str(self._selected_precomputed_signal_dir or ""))
+            self.precomputed_signal_dir.setToolTip(str(self._selected_precomputed_signal_dir or ""))
+            if not str(self._selected_precomputed_signal_dir or "").strip():
+                self.precomputed_signal_dir.setCursorPosition(0)
+
+    def _apply_precomputed_signal_tape_selection(self, signal_dir: str) -> None:
+        state = build_precomputed_signal_picker_state(signal_dir, ui_language=self._ui_language)
+        item = state.get("picker_item") if isinstance(state, dict) else {}
+        self._selected_precomputed_signal_dir = str(state.get("signal_dir") or signal_dir or "").strip()
+        self._selected_precomputed_signal_picker_item = dict(item or {}) if isinstance(item, dict) else {}
+        self._selected_precomputed_signal_status = str(state.get("status") or "").strip()
+        self._selected_precomputed_signal_warning = str(state.get("warning") or "").strip()
+        display_text = str(state.get("display_text") or "")
+        self.precomputed_signal_dir.setText(self._selected_precomputed_signal_dir)
+        self.precomputed_signal_dir.setToolTip(self._selected_precomputed_signal_dir)
+        self.precomputed_signal_dir.setCursorPosition(0)
+        self.precomputed_signal_summary.setPlainText(display_text)
+        self.precomputed_signal_summary.setToolTip(display_text)
+        self._append(
+            "[precomputed] signal tape selected "
+            f"status={self._selected_precomputed_signal_status or 'unknown'} "
+            f"signal_dir={self._selected_precomputed_signal_dir}\n"
+        )
+
+    def on_select_precomputed_signal_tape(self) -> None:
+        start_dir = default_precomputed_signal_picker_root()
+        current = str(self._selected_precomputed_signal_dir or "").strip()
+        if current and os.path.exists(current):
+            start_dir = current if os.path.isdir(current) else os.path.dirname(current)
+        elif os.path.isdir(start_dir):
+            start_dir = str(start_dir)
+        else:
+            start_dir = str(self._paths.repo_root or os.getcwd())
+        path = QFileDialog.getExistingDirectory(
+            self,
+            self.tr("dialog.select_precomputed_signal_tape.title"),
+            start_dir,
+        )
+        if not path:
+            return
+        try:
+            self._apply_precomputed_signal_tape_selection(os.path.abspath(path))
+        except Exception as exc:
+            QMessageBox.warning(self, "Precomputed Signal Tape", str(exc))
 
     def _open_replay_log_file(self, prefix: str = "replay") -> None:
         self._close_replay_log_file()

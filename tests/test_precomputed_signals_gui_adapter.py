@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_adapter_v1
 from __future__ import annotations
 
@@ -349,32 +350,26 @@ def test_gui_adapter_module_import_boundary_and_app_version_unchanged() -> None:
     assert 'APP_VERSION = "1.1.3"' in (REPO_ROOT / "config.py").read_text(encoding="utf-8")
 
 
-def test_gui_source_files_are_unchanged() -> None:
-    gui_paths = [
-        "app/gui/main_window.py",
-        "app/gui/result_chart.py",
-        "app/app/gui/main_window.py",
-        "app/app/gui/result_chart.py",
-    ]
-    unstaged = subprocess.run(
-        ["git", "diff", "--name-only", "--", *gui_paths],
-        cwd=REPO_ROOT,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--", *gui_paths],
-        cwd=REPO_ROOT,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def test_gui_source_uses_adapter_through_display_only_picker_helper() -> None:
+    main_source = (REPO_ROOT / "app" / "app" / "gui" / "main_window.py").read_text(encoding="utf-8")
+    helper_source = (REPO_ROOT / "app" / "app" / "gui" / "precomputed_signal_picker.py").read_text(encoding="utf-8")
 
-    assert unstaged.stdout.strip() == ""
-    assert staged.stdout.strip() == ""
+    assert "build_precomputed_signal_picker_state" in main_source
+    assert "on_select_precomputed_signal_tape" in main_source
+    assert "precomputed_signals_gui_adapter" in helper_source
+    assert "build_gui_picker_item_from_signal_dir" in helper_source
+    for forbidden in (
+        "precomputed_signals_inventory",
+        "precompute_signals",
+        "launch_backtest",
+        "launch_runner",
+        "launch_replay",
+        "fetch_balance",
+        "fetch_order",
+        "create_order",
+        "submit_order",
+    ):
+        assert forbidden not in helper_source
 
 
 def test_adapter_invalid_signal_dir_does_not_read_raw_trade_rows(tmp_path: Path) -> None:

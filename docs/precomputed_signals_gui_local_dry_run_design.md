@@ -5,6 +5,10 @@ precomputed signal tape GUI. This phase is docs/tests-only.
 
 This document fixes the safety boundary for a possible future local-only
 dry-run feature before any implementation exists. It does not add execution.
+Phase 18 extends this boundary with a docs/test-only request schema and a
+synthetic static sample fixture. The request schema is documented in
+`docs/precomputed_signals_gui_local_dry_run_request_schema.md`; the sample is
+`docs/precomputed_signals_gui_local_dry_run_request_sample.json`.
 
 ## Scope
 
@@ -87,6 +91,40 @@ Current Phase 17 boundary:
 Phase 17 docs and tests may describe future request fields, allowed modes,
 artifacts, and fail-closed conditions. They must not create actual request files
 or execute any future request.
+
+## Current Phase 18 Request Schema Boundary
+
+Free Phase 18 is local-only dry-run request schema docs/test-only. It adds no
+GUI source, no runtime source, no local dry-run implementation, no request
+builder implementation, no generated request file, and no command execution.
+
+Phase 18 fixes these request schema defaults:
+
+- `request_type=precomputed_signal_local_dry_run_request`
+- `product=free`
+- `operator_confirmation_required=true`
+- `operator_confirmed=false by default`
+- `preview_only_before_confirmation=true`
+- `execution_enabled_after_confirmation=false`
+- `not_selectable_for_live=true`
+- `not_selectable_for_paper=true`
+- `safety_research_only=true`
+- `paper_live_order_execution=false`
+- `status=not_run` for the static sample
+
+Phase 18 keeps these request schema boundaries fixed:
+
+- Phase 18 does not implement request builder.
+- Phase 18 does not create request files.
+- Phase 18 does not execute local dry-run.
+- Phase 18 does not add subprocess / QProcess / background worker.
+- Phase 18 does not add producer/backtest/runner/inventory auto-run.
+- Phase 18 does not add LIVE/PAPER/order.
+- future runtime dry-run execution must be separate and explicitly approved.
+
+The Phase 18 static request sample is synthetic and sanitized. It is not a
+generated dry-run request, not generated runtime output, not a command execution
+record, not runtime/order proof, and not live/paper/order proof.
 
 ## Required Future Operator Confirmation
 
@@ -314,7 +352,10 @@ or repo-external zip.
 ## Future Implementation Split
 
 - Phase 17 only defines design boundary.
-- future Phase 18 may add dry-run request schema docs/test only.
+- Phase 18 adds dry-run request schema docs/test only.
+- Phase 18 does not implement request builder.
+- Phase 18 does not create request files.
+- Phase 18 does not execute local dry-run.
 - future Phase 19 may add local-only dry-run preview request builder.
 - future runtime dry-run execution must be separate and explicitly approved.
 - LIVE/PAPER/order remains permanently separated.

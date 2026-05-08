@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_design_boundary_v1
+# BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_request_schema_docs_v1
 from __future__ import annotations
 
 import re
@@ -7,12 +7,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DESIGN_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_design.md"
+REQUEST_SCHEMA_DOC = REPO_ROOT / "docs" / "precomputed_signals_gui_local_dry_run_request_schema.md"
 DOC_PATHS = (
     REPO_ROOT / "docs" / "precomputed_signals_spec.md",
     REPO_ROOT / "docs" / "precomputed_signals_gui_smoke_procedure.md",
     REPO_ROOT / "docs" / "precomputed_signals_gui_smoke_checklist.md",
     REPO_ROOT / "docs" / "precomputed_signals_gui_manual_smoke_record.md",
     DESIGN_DOC,
+    REQUEST_SCHEMA_DOC,
 )
 GUI_SOURCE_PATHS = (
     REPO_ROOT / "app" / "app" / "gui" / "main_window.py",
@@ -116,6 +118,25 @@ def test_current_phase17_boundary_keeps_preview_copy_diagnostics_and_manual_reco
         "manual smoke record remains display-only",
         "manual smoke record remains synthetic fixture only",
         "Phase 17 must not create actual request files",
+    ):
+        assert expected in text
+
+
+def test_phase18_request_schema_boundary_is_docs_tests_only_and_linked() -> None:
+    text = _doc_text()
+
+    for expected in (
+        "Free Phase 18 is local-only dry-run request schema docs/test-only",
+        "docs/precomputed_signals_gui_local_dry_run_request_schema.md",
+        "docs/precomputed_signals_gui_local_dry_run_request_sample.json",
+        "no request builder implementation",
+        "no generated request file",
+        "operator_confirmed=false by default",
+        "execution_enabled_after_confirmation=false",
+        "Phase 18 does not implement request builder",
+        "Phase 18 does not create request files",
+        "Phase 18 does not execute local dry-run",
+        "future runtime dry-run execution must be separate and explicitly approved",
     ):
         assert expected in text
 

@@ -26,7 +26,11 @@ Phase 17 fixes the future local-only dry-run design boundary as docs/tests-only:
 no local dry-run implementation, no GUI source change, no runtime source
 change, no command execution, no subprocess / QProcess / background worker, no
 producer/backtest/runner/inventory auto-run, no LIVE/PAPER/order, and no MEXC
-private API.
+private API. Phase 18 fixes the future local-only dry-run request schema as
+docs/tests-only with a synthetic static sample and validator; it still adds no
+request builder, generated request file, local dry-run implementation, GUI
+source change, runtime source change, command execution, subprocess / QProcess /
+background worker, LIVE/PAPER/order connection, or MEXC private API.
 
 ## Scope
 
@@ -1076,6 +1080,129 @@ is a separate future artifact and must not be reused as order/runtime proof.
 Generated dry-run request files, generated dry-run output, screenshots, real
 signal tape bodies, and raw market data must not be committed or included in
 Phase 17 migration zips.
+
+## Phase 18 Local-Only Dry-Run Request Schema
+
+Free Phase 18 is local-only dry-run request schema docs/test-only. It freezes
+the future request schema, enum values, default safety flags, fail-closed
+reasons, and a sanitized static sample fixture. It changes no GUI source,
+runtime source, execution path, APP_VERSION, package, exe, installer, setup,
+signing, release asset, strategy, indicator, exchange, risk, order runtime
+logic, entry/exit timing, fee logic, PnL formula, quantity logic, signal timing,
+or DD calculation.
+
+The authoritative request schema is
+`docs/precomputed_signals_gui_local_dry_run_request_schema.md`. The static
+sample fixture is
+`docs/precomputed_signals_gui_local_dry_run_request_sample.json`.
+
+Phase 18 keeps these boundaries fixed:
+
+- Phase 18 is docs/tests-only
+- no local dry-run implementation
+- no request builder implementation
+- no generated request file
+- no GUI source change
+- no runtime source change
+- no command execution
+- no subprocess / QProcess / background worker
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- raw trade rows are never included
+- operator_confirmed=false by default
+- future local-only dry-run requires explicit operator confirmation
+- future local-only dry-run is not live/paper/order
+- future execution must be a separate phase
+
+The required request type is
+`precomputed_signal_local_dry_run_request`. Required identity fields are
+`schema_version`, `request_schema_version`, `request_type`, `phase`, and
+`product`. Required selection fields are `signal_dir`, `symbol`, `entry_tf`,
+`filter_tf`, and `signal_set_id`. Required dry-run fields are `dry_run_mode`,
+`output_dir`, and `command_text_preview`. Required confirmation fields are
+`operator_confirmation_required`, `operator_confirmed`,
+`preview_only_before_confirmation`, and
+`execution_enabled_after_confirmation`. Required safety fields are
+`not_selectable_for_live`, `not_selectable_for_paper`,
+`safety_research_only`, and `paper_live_order_execution`. Required preflight
+fields are `selection_contract_valid`, `manifest_present`, `summary_present`,
+`trades_csv_present`, `manifest_hash_present`, `summary_hash_present`,
+`trades_csv_hash_from_manifest_present`,
+`positive_legacy_max_drawdown_rejected`, `forbidden_fields_rejected`,
+`live_paper_order_rejected`, `private_api_rejected`,
+`background_execution_rejected`, and `package_release_artifacts_excluded`.
+Required status fields are `status`, `status_reason`, and
+`fail_closed_reasons`.
+
+Allowed `dry_run_mode` values are `backtest_fast_path_local_only` and
+`runner_replay_fast_path_local_only`. Not allowed values are `live`, `paper`,
+`order_submit`, `order_fetch`, `balance_fetch`, `private_api`,
+`producer_auto_run`, `inventory_auto_scan`, and `background_worker`.
+
+Required defaults are `product=free`,
+`operator_confirmation_required=true`, `operator_confirmed=false`,
+`operator_confirmed=false by default`, `preview_only_before_confirmation=true`,
+`execution_enabled_after_confirmation=false`,
+`execution_enabled_after_confirmation=false in Phase 18 sample`,
+`not_selectable_for_live=true`, `not_selectable_for_paper=true`,
+`safety_research_only=true`, and `paper_live_order_execution=false`. Allowed
+`status` values are `draft`, `valid_preview`, `blocked`, `invalid`, and
+`not_run`; the recommended sample status is `not_run`. The request is not
+executable in Phase 18.
+
+Allowed `allowed_artifacts` enum values are `safe_summary_json`,
+`fast_path_equity_curve_csv`, `fast_path_trades_csv_safe_condition`,
+`fast_summary_json`, `safe_metadata_log`, and
+`sanitized_manual_smoke_record`.
+
+Forbidden `forbidden_artifacts` enum values are `raw_market_data`,
+`raw_ohlcv`, `raw_trades_rows`, `entry_exec`, `exit_exec`, `qty`, `trade_id`,
+`order_id`, `raw_order`, `balance_snapshot`, `api_key`, `secret`, `token`,
+`authorization`, `raw_billing`, `package_zip`, `exe`, `installer`,
+`release_asset`, and `screenshots_with_secrets_or_balances_or_orders`.
+
+Allowed `fail_closed_reasons` enum values are `invalid_selection`,
+`missing_signal_dir`, `missing_manifest`, `missing_summary`,
+`missing_trades_csv`, `unsafe_manifest`, `unsafe_summary`, `forbidden_field`,
+`positive_legacy_max_drawdown`, `live_or_paper_requested`,
+`order_or_balance_requested`, `private_api_requested`,
+`missing_operator_confirmation`, `background_execution_requested`,
+`output_path_in_package_release_area`, `generated_artifact_policy_violation`,
+and `unknown_safety_violation`.
+
+`command_text_preview` is preview-only and may show only the local saved-tape
+fast path forms:
+
+```powershell
+python backtest.py --use-precomputed-signals --precomputed-signals-dir "<signal_dir>"
+python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir "<signal_dir>"
+```
+
+`command_text_preview` must not include live, paper, order, secrets, token,
+auth, balance, private API, or any execution instruction. It must not be
+executed in Phase 18.
+
+Future dry-run must require explicit operator confirmation. Confirmation text
+must state local-only, not LIVE/PAPER/order, no private API, no order/balance
+fetch, `signal_dir`, product `free`, symbol/timeframe, `output_dir`, and the
+generated artifacts policy. Confirmation is separate from copy command UX, and
+missing confirmation fails closed.
+
+Phase 15/16 manual smoke record remains display-only. The local dry-run request
+is a separate future artifact. Manual smoke record is not runtime/order proof,
+and dry-run request is not execution proof. Screenshots remain optional and
+sanitized only.
+
+Phase 18 does not implement request builder. Phase 18 does not create request
+files. Phase 18 does not execute local dry-run. Future Phase 19 may add request
+builder docs/helper if explicitly approved. Future runtime dry-run execution
+must be separate and explicitly approved. LIVE/PAPER/order remains permanently
+separated.
 
 ## DD Schema V2
 

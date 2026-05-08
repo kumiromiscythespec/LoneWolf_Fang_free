@@ -261,3 +261,48 @@ Screenshots must be omitted from repo and zip unless explicitly sanitized.
 
 Future local-only dry-run is future phase. Execution button is future phase.
 LIVE/PAPER/order and packaging/release remain separated.
+
+## Phase 16 Manual Smoke Record Schema Boundary
+
+Free Phase 16 is synthetic manual smoke record schema validator / sample static
+fixture. Phase 16 is docs/tests-only. GUI runtime smoke is not executed in
+Phase 16, and GUI runtime smoke not executed in Phase 15/16 remains fixed.
+
+The static sample record in
+`docs/precomputed_signals_gui_manual_smoke_record_sample.json` is sanitized and
+synthetic. It is not generated runtime output, not a generated smoke record,
+and not evidence that GUI runtime smoke was performed.
+
+Phase 16 keeps the same checklist boundary:
+
+- no command execution
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- no order submit/fetch
+- no balance fetch
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, launch button, worker, or background worker path
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- generated smoke record excluded
+- screenshots are optional and must not be committed unless sanitized in a
+  future phase
+- raw trade rows are never recorded
+- `max_drawdown` remains signed negative legacy field
+- GUI display prefers `max_dd_abs / max_dd_pct`
+
+The Phase 16 schema fixes `record_type` as
+`precomputed_signal_gui_manual_smoke_record` and `phase` as
+`free_precomputed_signals_phase15_or_later`. It keeps `result_status` limited
+to `pass`, `fail`, `blocked`, and `not_run`; `smoke_mode` limited to
+`synthetic_fixture_display_only`, `docs_static_check_only`, and `not_run`; and
+`fixture_type` limited to `synthetic_signal_tape`,
+`synthetic_selection_contract`, `synthetic_picker_item`, and `none`.
+
+Future local-only dry-run design is future phase. Execution button is future
+phase. LIVE/PAPER/order, MEXC private API, and packaging/release remain
+separated from the precomputed signal tape GUI.

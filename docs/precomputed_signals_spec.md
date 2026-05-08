@@ -19,7 +19,9 @@ safety, fast-path, and LIVE/PAPER boundary display. Phase 14 is GUI smoke
 checklist / docs-only hardening; it changes no GUI source, runtime source,
 execution path, APP_VERSION, package, exe, setup, installer, signing, or release
 asset. Phase 15 fixes the synthetic fixture only manual GUI runtime smoke record
-format as docs/test-only; GUI runtime smoke is not executed in Phase 15.
+format as docs/test-only; GUI runtime smoke is not executed in Phase 15. Phase
+16 adds the synthetic manual smoke record schema validator and sample static
+fixture as docs/tests-only; GUI runtime smoke is not executed in Phase 16.
 
 ## Scope
 
@@ -919,6 +921,75 @@ sanitized.
 Future local-only dry-run is future phase. Explicit local-only dry-run design is
 future phase. Execution button is future phase. LIVE/PAPER/order remains
 separated, and packaging/release remains separated.
+
+## Phase 16 Synthetic Manual Smoke Record Schema Validator / Static Sample
+
+Free Phase 16 adds docs/tests-only schema validation and a static sanitized
+sample fixture for the Phase 15-or-later manual GUI smoke record. GUI runtime
+smoke is not executed in Phase 16. GUI runtime smoke not executed in Phase
+15/16 is a fixed boundary.
+
+The static sample lives at
+`docs/precomputed_signals_gui_manual_smoke_record_sample.json`. It is
+synthetic, sanitized, not generated runtime output, not a generated smoke
+record, not raw GUI output, and not evidence that a GUI runtime smoke was
+performed.
+
+The schema is fixed in
+`docs/precomputed_signals_gui_manual_smoke_record.md`:
+
+- `record_type=precomputed_signal_gui_manual_smoke_record`
+- `phase=free_precomputed_signals_phase15_or_later`
+- `result_status` enum: `pass`, `fail`, `blocked`, `not_run`
+- `smoke_mode` enum: `synthetic_fixture_display_only`,
+  `docs_static_check_only`, `not_run`
+- `fixture_type` enum: `synthetic_signal_tape`,
+  `synthetic_selection_contract`, `synthetic_picker_item`, `none`
+
+The validator test is docs-policy only. It checks required fields, enum values,
+safe boolean types, pass/not_run invariants, forbidden record fields,
+forbidden credential/private/runtime text, screenshot policy, and static docs
+coverage. It does not add a production runtime validator.
+
+Phase 16 does not change GUI source, runtime source, execution paths,
+APP_VERSION, package/release state, setup, installer, exe, signing, release
+assets, strategy, indicators, exchange, risk, order runtime logic, signal
+timing, DD calculation, entry/exit logic, fee logic, PnL formula, or quantity
+logic.
+
+Phase 16 keeps these boundaries fixed:
+
+- no command execution
+- no producer/backtest/runner/inventory auto-run
+- no selection or adapter auto-run
+- no LIVE/PAPER/order
+- no MEXC private API
+- no order submit/fetch
+- no balance fetch
+- no subprocess / QProcess / background worker
+- no `os.system`, `Popen`, `startDetached`, threading, multiprocessing,
+  scheduler, launch button, worker, or background worker path
+- APP_VERSION unchanged
+- package/release not touched
+- generated real tape body / raw market data excluded
+- generated smoke record excluded
+- generated runtime output excluded
+- screenshots are optional and must not be committed unless sanitized in a
+  future phase
+- raw trade rows are never recorded
+- `max_drawdown` remains signed negative legacy field
+- GUI display prefers `max_dd_abs / max_dd_pct`
+
+The sample and validator must not include raw trades rows, `entry_exec`,
+`exit_exec`, `qty`, exact trade id, order id, raw order, balance, API key,
+secret, token, authorization, raw billing, raw market data, raw OHLCV,
+generated real signal tape body, generated smoke output, generated diagnostics
+output, generated command preview output, generated clipboard output,
+screenshots, account details, private keys, or package artifacts.
+
+Future local-only dry-run design is future phase. Explicit local-only dry-run
+design is future phase. Execution button is future phase. LIVE/PAPER/order and
+packaging/release remain separated.
 
 ## DD Schema V2
 

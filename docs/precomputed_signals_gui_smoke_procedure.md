@@ -147,3 +147,27 @@ must be omitted from repo and zip unless explicitly sanitized.
 
 Future local-only dry-run is future phase. Execution button is future phase.
 LIVE/PAPER/order and packaging/release remain separated.
+
+## Phase 16 schema validator and static sample
+
+Free Phase 16 is synthetic manual smoke record schema validator / sample static
+fixture. Phase 16 is docs/tests-only. GUI runtime smoke is not executed in
+Phase 16, and GUI runtime smoke not executed in Phase 15/16 remains an explicit
+procedure boundary.
+
+Use `docs/precomputed_signals_gui_manual_smoke_record_sample.json` only as a
+static sanitized sample. It is not generated runtime output, not a generated
+smoke record, not a screenshot reference, and not proof of a GUI runtime smoke
+run.
+
+The schema validator is a docs-policy test only. It validates required fields,
+allowed enum values, safe boolean types, pass/not_run invariants, forbidden
+field policy, screenshot policy, and the no-execution/no-network boundaries.
+It does not add a production runtime validator and does not call producer,
+backtest, runner, inventory, selection, adapter, LIVE, PAPER, order, balance,
+MEXC private API, subprocess, `QProcess`, scheduler, thread, process, worker,
+or background worker paths.
+
+Future local-only dry-run design is future phase. APP_VERSION, package/release,
+setup, installer, exe, signing, release assets, generated real tape body, raw
+market data, generated smoke records, and screenshots remain outside Phase 16.

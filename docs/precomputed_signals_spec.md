@@ -10,6 +10,9 @@ files into the Free signal tape format without running strategy logic. Phase 7
 adds a read-only GUI picker pre-stage adapter that maps an existing selection
 contract to safe display metadata only. Phase 8 wires that adapter into the
 Free GUI as a display-only picker panel for an operator-selected `signal_dir`.
+Phase 9 adds GUI command preview text for the selected `signal_dir` so an
+operator can copy the explicit backtest/replay fast-path commands without the
+GUI executing them.
 
 ## Scope
 
@@ -552,6 +555,65 @@ Generated real signal tape bodies, raw market data, generated inventory outputs,
 generated selection outputs, generated GUI adapter outputs, package zips,
 executables, installers, release assets, and zip-in-zip artifacts must not be
 committed to the repo or included in migration zips.
+
+## Phase 9 GUI Command Preview Only
+
+Free Phase 9 adds a display-only command preview to the GUI precomputed signal
+tape panel. The selected safe picker item supplies only its `signal_dir` and
+safe source labels; the GUI helper then builds copy-ready text plus argv lists
+for the already-existing explicit fast paths.
+
+Backtest preview:
+
+```powershell
+python backtest.py --use-precomputed-signals --precomputed-signals-dir "<signal_dir>" --precomputed-signals-write-report
+```
+
+Runner replay preview:
+
+```powershell
+python runner.py --mode replay --use-precomputed-signals --precomputed-signals-dir "<signal_dir>" --precomputed-signals-write-report
+```
+
+The preview model preserves these invariants:
+
+- `preview_only=true`
+- `execution_enabled=false`
+- `live_command_available=false`
+- `paper_command_available=false`
+- selected picker item `not_selectable_for_live=true`
+- selected picker item `not_selectable_for_paper=true`
+
+The GUI text states `Backtest / replay preview only`,
+`Execution is disabled in this panel`, and `Not selectable for LIVE/PAPER`.
+Japanese UI may show `バックテスト用コマンドプレビュー`,
+`リプレイ用コマンドプレビュー`, `このパネルからは実行しません`,
+and `LIVE/PAPER には使用不可`.
+
+Invalid picker items, empty `signal_dir`, or items that fail the LIVE/PAPER
+exclusion flags fail closed and show a safe warning only. The preview does not
+create LIVE or PAPER commands and does not wire the selected tape into existing
+run buttons.
+
+Phase 9 does not run `precompute_signals.py`, does not run `backtest.py`, does
+not run `runner.py`, does not run the inventory command, and does not run the
+selection or adapter command automatically. It adds no `subprocess`,
+`os.system`, `QProcess`, `Popen`, multiprocessing, threading, scheduler, or
+background worker path for the command preview.
+
+Phase 9 does not connect to LIVE, PAPER, order creation, order fetch, order
+submit, balance fetch, MEXC private APIs, exchange clients, or `ccxt`. It does
+not change `APP_VERSION`, strategy, indicators, exchange, risk, order runtime
+logic, entry timing, exit timing, fee logic, quantity logic, PnL formulas,
+signal timing, or DD calculation.
+
+The command preview does not display raw `trades.csv` rows, row-level
+`entry_exec`, `exit_exec`, or `qty`, exact trade ids, order ids, raw order
+payloads, balance snapshots, API keys, secrets, tokens, authorization headers,
+raw billing payloads, raw market data, raw OHLCV, generated command preview
+outputs, or generated real signal tape bodies. Generated real signal tape
+bodies and raw market data remain repo-external and must not be committed to
+the repo or included in migration zips.
 
 ## Safety Scope
 

@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_diagnostics_polish_v1
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import precomputed_signals_gui_adapter as gui_adapter
 import signal_tape as tape
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_selection_diagnostics_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_diagnostics_polish_v1"
 
 DISPLAY_ONLY_NOTICE = "Replay/backtest only"
 LIVE_PAPER_WARNING = "Not selectable for LIVE/PAPER"
@@ -129,6 +129,48 @@ DIAGNOSTICS_FIELDS = (
     "trades_csv_sha256_from_manifest",
     "diagnostics_warning",
     "picker_warning",
+)
+
+DIAGNOSTICS_DISPLAY_FIELDS = (
+    "diagnostics_status_label",
+    "diagnostics_status_kind",
+    "diagnostics_status_text",
+    "safe_error_code_label",
+    "compact_signal_dir",
+    "full_signal_dir",
+    "compact_manifest_sha256",
+    "full_manifest_sha256",
+    "compact_summary_sha256",
+    "full_summary_sha256",
+    "compact_trades_csv_sha256",
+    "full_trades_csv_sha256",
+    "tape_files_present_label",
+    "safety_flags_label",
+    "fast_path_availability_label",
+    "live_paper_not_selectable_label",
+    "hashes_label",
+    "dd_display_label",
+    "diagnostics_warning_text",
+    "diagnostics_details_text",
+    "diagnostics_tooltip_text",
+    "not_selectable_for_live",
+    "not_selectable_for_paper",
+)
+
+CREDENTIAL_LIKE_PATH_SEGMENT_MARKERS = (
+    "api_key",
+    "apikey",
+    "api-secret",
+    "api_secret",
+    "secret",
+    "token",
+    "authorization",
+    "auth",
+    "credential",
+    "password",
+    "passwd",
+    "private_key",
+    "private-key",
 )
 
 FORBIDDEN_COPY_COMMAND_TEXT = (
@@ -319,6 +361,83 @@ def _safe_diagnostics_text(value: Any, *, default: str = "") -> str:
     if _contains_forbidden_diagnostics_text(text):
         return default
     return text
+
+
+def compact_precomputed_hash(value: str, length: int = 10) -> str:
+    text = _safe_command_field(value)
+    if not text:
+        return "missing"
+    try:
+        limit = int(length)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, limit)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def _path_has_credential_like_segment(path: str) -> bool:
+    normalized = _safe_command_field(path).replace("/", "\\")
+    for segment in (part for part in normalized.split("\\") if part):
+        lowered = segment.lower()
+        collapsed = lowered.replace(" ", "_")
+        if any(marker in lowered or marker in collapsed for marker in CREDENTIAL_LIKE_PATH_SEGMENT_MARKERS):
+            return True
+    return False
+
+
+def _redact_credential_like_path(path: str) -> str:
+    text = _safe_command_field(path)
+    if not text:
+        return ""
+    separator = "\\" if "\\" in text or "/" not in text else "/"
+    normalized = text.replace("/", "\\")
+    parts: list[str] = []
+    for segment in normalized.split("\\"):
+        if not segment:
+            continue
+        lowered = segment.lower()
+        collapsed = lowered.replace(" ", "_")
+        if any(marker in lowered or marker in collapsed for marker in CREDENTIAL_LIKE_PATH_SEGMENT_MARKERS):
+            parts.append("[redacted]")
+        else:
+            parts.append(segment)
+    if not parts:
+        return ""
+    redacted = "\\".join(parts)
+    if separator == "/":
+        return redacted.replace("\\", "/")
+    return redacted
+
+
+def compact_precomputed_signal_dir(path: str) -> str:
+    text = _redact_credential_like_path(path)
+    if not text:
+        return "missing"
+    normalized = text.replace("/", "\\")
+    segments = [segment for segment in normalized.split("\\") if segment]
+    if not segments:
+        return "missing"
+    tail = segments[-4:]
+    compact = "\\".join(tail)
+    if len(segments) > len(tail):
+        if "[redacted]" in segments and "[redacted]" not in tail:
+            return "...\\[redacted]\\...\\" + compact
+        return "...\\" + compact
+    return compact
+
+
+def _presence_text(value: bool) -> str:
+    return "OK" if bool(value) else "missing"
+
+
+def _availability_text(value: bool) -> str:
+    return "OK" if bool(value) else "not selectable"
+
+
+def _safe_full_hash(value: Any) -> str:
+    return _safe_diagnostics_text(value) or "missing"
 
 
 def _empty_precomputed_signal_diagnostics(
@@ -682,80 +801,222 @@ def validate_precomputed_signal_diagnostics(diagnostics: Mapping[str, Any]) -> d
     return normalized
 
 
+def build_precomputed_signal_diagnostics_display(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
+    payload = validate_precomputed_signal_diagnostics(diagnostics)
+    status = _safe_text(payload.get("status")) or "invalid"
+    status_kind = "valid" if status == "valid" else "invalid"
+    status_text = _safe_diagnostics_text(payload.get("status_reason"), default=DIAGNOSTICS_INVALID_WARNING_TEXT)
+    safe_error_code = _safe_error_code(
+        payload.get("safe_error_code"),
+        default="" if status_kind == "valid" else "invalid_gui_picker_item",
+    )
+    files_present = _safe_tape_files_present(payload.get("tape_files_present"))
+    full_signal_dir = _redact_credential_like_path(_safe_text(payload.get("signal_dir")))
+    compact_manifest = compact_precomputed_hash(_safe_text(payload.get("manifest_sha256")))
+    compact_summary = compact_precomputed_hash(_safe_text(payload.get("summary_sha256")))
+    compact_trades = compact_precomputed_hash(_safe_text(payload.get("trades_csv_sha256_from_manifest")))
+    full_manifest = _safe_full_hash(payload.get("manifest_sha256"))
+    full_summary = _safe_full_hash(payload.get("summary_sha256"))
+    full_trades = _safe_full_hash(payload.get("trades_csv_sha256_from_manifest"))
+    backtest_selectable = payload.get("selectable_for_backtest_fast_path") is True
+    replay_selectable = payload.get("selectable_for_runner_replay_fast_path") is True
+    no_live_paper_execution = payload.get("safety_paper_live_order_execution") is not True
+
+    tape_files_present_label = (
+        "Files: "
+        f"manifest {_presence_text(files_present.get('manifest_json'))} / "
+        f"summary {_presence_text(files_present.get('summary_json'))} / "
+        f"trades.csv {_presence_text(files_present.get('trades_csv'))}"
+    )
+    safety_flags_label = (
+        "Safety: "
+        f"research-only {_presence_text(payload.get('safety_research_only') is True)} / "
+        f"no live-paper execution {_presence_text(no_live_paper_execution)}"
+    )
+    fast_path_availability_label = (
+        "Fast path: "
+        f"Backtest {_availability_text(backtest_selectable)} / "
+        f"Replay {_availability_text(replay_selectable)}"
+    )
+    hashes_label = (
+        "Hashes: "
+        f"manifest {compact_manifest} / "
+        f"summary {compact_summary} / "
+        f"trades.csv from manifest {compact_trades}"
+    )
+    dd_display_label = (
+        "DD: "
+        f"max_dd_display_abs {_format_amount(payload.get('max_dd_display_abs'))} / "
+        f"max_dd_display_pct {_format_pct(payload.get('max_dd_display_pct'))}"
+    )
+    warning_parts = [
+        _safe_diagnostics_text(payload.get("diagnostics_warning"), default=DIAGNOSTICS_WARNING_TEXT)
+        or DIAGNOSTICS_WARNING_TEXT
+    ]
+    picker_warning = _safe_diagnostics_text(payload.get("picker_warning"))
+    if picker_warning:
+        warning_parts.append(picker_warning)
+    diagnostics_warning_text = " ".join(part for part in warning_parts if part).strip()
+    diagnostics_details_text = (
+        f"Full signal_dir: {full_signal_dir or 'missing'}\n"
+        f"Full hashes: manifest {full_manifest} / summary {full_summary} / "
+        f"trades.csv from manifest {full_trades}"
+    )
+    diagnostics_tooltip_text = "\n".join(
+        (
+            f"Selection diagnostics: {status_kind}",
+            f"Status detail: {status_text or ('ok' if status_kind == 'valid' else DIAGNOSTICS_INVALID_WARNING_TEXT)}",
+            tape_files_present_label,
+            safety_flags_label,
+            fast_path_availability_label,
+            hashes_label,
+            diagnostics_details_text,
+            DIAGNOSTICS_NO_RAW_ROWS_TEXT,
+            DIAGNOSTICS_NO_EXECUTION_TEXT,
+        )
+    )
+
+    display = {
+        "diagnostics_status_label": f"Selection diagnostics: {status_kind}",
+        "diagnostics_status_kind": status_kind,
+        "diagnostics_status_text": status_text or ("ok" if status_kind == "valid" else DIAGNOSTICS_INVALID_WARNING_TEXT),
+        "safe_error_code_label": f"Safe error code: {safe_error_code or 'missing'}" if status_kind != "valid" else "",
+        "compact_signal_dir": compact_precomputed_signal_dir(full_signal_dir),
+        "full_signal_dir": full_signal_dir,
+        "compact_manifest_sha256": compact_manifest,
+        "full_manifest_sha256": full_manifest,
+        "compact_summary_sha256": compact_summary,
+        "full_summary_sha256": full_summary,
+        "compact_trades_csv_sha256": compact_trades,
+        "full_trades_csv_sha256": full_trades,
+        "tape_files_present_label": tape_files_present_label,
+        "safety_flags_label": safety_flags_label,
+        "fast_path_availability_label": fast_path_availability_label,
+        "live_paper_not_selectable_label": DIAGNOSTICS_LIVE_PAPER_TEXT,
+        "hashes_label": hashes_label,
+        "dd_display_label": dd_display_label,
+        "diagnostics_warning_text": diagnostics_warning_text,
+        "diagnostics_details_text": diagnostics_details_text,
+        "diagnostics_tooltip_text": diagnostics_tooltip_text,
+        "not_selectable_for_live": True,
+        "not_selectable_for_paper": True,
+    }
+    return validate_precomputed_signal_diagnostics_display(display)
+
+
+def validate_precomputed_signal_diagnostics_display(display: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(display, Mapping):
+        raise ValueError("precomputed signal diagnostics display must be a mapping")
+    payload = dict(display)
+    unknown = sorted(set(payload) - set(DIAGNOSTICS_DISPLAY_FIELDS))
+    if unknown:
+        raise ValueError("diagnostics display contains unsupported fields: " + ", ".join(unknown[:10]))
+    missing = [field for field in DIAGNOSTICS_DISPLAY_FIELDS if field not in payload]
+    if missing:
+        raise ValueError("diagnostics display missing fields: " + ", ".join(missing))
+    status_kind = _safe_command_field(payload.get("diagnostics_status_kind"))
+    if status_kind not in {"valid", "invalid", "warning"}:
+        status_kind = "invalid"
+    if payload.get("not_selectable_for_live") is not True:
+        raise ValueError("diagnostics display must keep not_selectable_for_live=true")
+    if payload.get("not_selectable_for_paper") is not True:
+        raise ValueError("diagnostics display must keep not_selectable_for_paper=true")
+
+    normalized: dict[str, Any] = {
+        "diagnostics_status_label": _safe_diagnostics_text(payload.get("diagnostics_status_label")),
+        "diagnostics_status_kind": status_kind,
+        "diagnostics_status_text": _safe_diagnostics_text(
+            payload.get("diagnostics_status_text"),
+            default=DIAGNOSTICS_INVALID_WARNING_TEXT,
+        )
+        or DIAGNOSTICS_INVALID_WARNING_TEXT,
+        "safe_error_code_label": _safe_diagnostics_text(payload.get("safe_error_code_label")),
+        "compact_signal_dir": _safe_diagnostics_text(payload.get("compact_signal_dir"), default="missing") or "missing",
+        "full_signal_dir": _safe_diagnostics_text(payload.get("full_signal_dir")),
+        "compact_manifest_sha256": compact_precomputed_hash(_safe_text(payload.get("compact_manifest_sha256"))),
+        "full_manifest_sha256": _safe_full_hash(payload.get("full_manifest_sha256")),
+        "compact_summary_sha256": compact_precomputed_hash(_safe_text(payload.get("compact_summary_sha256"))),
+        "full_summary_sha256": _safe_full_hash(payload.get("full_summary_sha256")),
+        "compact_trades_csv_sha256": compact_precomputed_hash(_safe_text(payload.get("compact_trades_csv_sha256"))),
+        "full_trades_csv_sha256": _safe_full_hash(payload.get("full_trades_csv_sha256")),
+        "tape_files_present_label": _safe_diagnostics_text(payload.get("tape_files_present_label")),
+        "safety_flags_label": _safe_diagnostics_text(payload.get("safety_flags_label")),
+        "fast_path_availability_label": _safe_diagnostics_text(payload.get("fast_path_availability_label")),
+        "live_paper_not_selectable_label": _safe_diagnostics_text(payload.get("live_paper_not_selectable_label"))
+        or DIAGNOSTICS_LIVE_PAPER_TEXT,
+        "hashes_label": _safe_diagnostics_text(payload.get("hashes_label")),
+        "dd_display_label": _safe_diagnostics_text(payload.get("dd_display_label")),
+        "diagnostics_warning_text": _safe_diagnostics_text(
+            payload.get("diagnostics_warning_text"),
+            default=DIAGNOSTICS_WARNING_TEXT,
+        )
+        or DIAGNOSTICS_WARNING_TEXT,
+        "diagnostics_details_text": _safe_diagnostics_text(payload.get("diagnostics_details_text")),
+        "diagnostics_tooltip_text": _safe_diagnostics_text(payload.get("diagnostics_tooltip_text")),
+        "not_selectable_for_live": True,
+        "not_selectable_for_paper": True,
+    }
+    if not normalized["diagnostics_status_label"]:
+        normalized["diagnostics_status_label"] = f"Selection diagnostics: {status_kind}"
+    if status_kind == "valid" and normalized["safe_error_code_label"]:
+        raise ValueError("valid diagnostics display must not show a safe error code")
+    tape.validate_no_secret_payload(normalized)
+    for value in normalized.values():
+        if isinstance(value, str) and _contains_forbidden_diagnostics_text(value):
+            raise ValueError("diagnostics display contains forbidden raw/private text")
+    return normalized
+
+
+def format_precomputed_signal_diagnostics_compact_text(display: Mapping[str, Any]) -> str:
+    payload = validate_precomputed_signal_diagnostics_display(display)
+    status_kind = _safe_text(payload.get("diagnostics_status_kind")) or "invalid"
+    lines = [
+        _safe_text(payload.get("diagnostics_status_label")) or f"Selection diagnostics: {status_kind}",
+        f"Status: {status_kind}",
+        f"Signal dir: {_safe_text(payload.get('compact_signal_dir')) or 'missing'}",
+        _safe_text(payload.get("live_paper_not_selectable_label")) or DIAGNOSTICS_LIVE_PAPER_TEXT,
+    ]
+    if status_kind != "valid":
+        lines.extend(
+            (
+                _safe_text(payload.get("safe_error_code_label")) or "Safe error code: invalid_gui_picker_item",
+                f"Reason: {_safe_text(payload.get('diagnostics_status_text')) or DIAGNOSTICS_INVALID_WARNING_TEXT}",
+                _safe_text(payload.get("fast_path_availability_label")),
+                _safe_text(payload.get("diagnostics_warning_text")),
+                DIAGNOSTICS_NO_RAW_ROWS_TEXT,
+                DIAGNOSTICS_NO_EXECUTION_TEXT,
+            )
+        )
+        return "\n".join(line for line in lines if line)
+
+    lines.extend(
+        (
+            _safe_text(payload.get("tape_files_present_label")),
+            _safe_text(payload.get("safety_flags_label")),
+            _safe_text(payload.get("fast_path_availability_label")),
+            "Backtest fast path: selectable",
+            "Replay fast path: selectable",
+            _safe_text(payload.get("hashes_label")),
+            f"Manifest hash: {_safe_text(payload.get('compact_manifest_sha256')) or 'missing'}",
+            f"Summary hash: {_safe_text(payload.get('compact_summary_sha256')) or 'missing'}",
+            f"Trades CSV hash from manifest: {_safe_text(payload.get('compact_trades_csv_sha256')) or 'missing'}",
+            _safe_text(payload.get("dd_display_label")),
+            _safe_text(payload.get("diagnostics_warning_text")),
+            DIAGNOSTICS_NO_RAW_ROWS_TEXT,
+            DIAGNOSTICS_NO_EXECUTION_TEXT,
+        )
+    )
+    return "\n".join(line for line in lines if line)
+
+
 def format_precomputed_signal_diagnostics_text(
     diagnostics: Mapping[str, Any],
     *,
     ui_language: str = "en",
 ) -> str:
-    payload = validate_precomputed_signal_diagnostics(diagnostics)
-    title = JA_DIAGNOSTICS_TITLE if _is_ja(ui_language) else DIAGNOSTICS_TITLE
-    status = _safe_text(payload.get("status")) or "invalid"
-
-    lines = [
-        title,
-        f"Status: {status}",
-        f"Signal dir: {_safe_text(payload.get('signal_dir')) or '--'}",
-        DIAGNOSTICS_LIVE_PAPER_TEXT,
-    ]
-    if status != "valid":
-        lines.extend(
-            (
-                f"Safe error code: {_safe_text(payload.get('safe_error_code')) or 'invalid_gui_picker_item'}",
-                f"Reason: {_safe_text(payload.get('status_reason')) or DIAGNOSTICS_INVALID_WARNING_TEXT}",
-                "Backtest fast path: not selectable",
-                "Replay fast path: not selectable",
-                f"Warning: {_safe_text(payload.get('picker_warning')) or DIAGNOSTICS_INVALID_WARNING_TEXT}",
-                DIAGNOSTICS_NO_RAW_ROWS_TEXT,
-                DIAGNOSTICS_NO_EXECUTION_TEXT,
-            )
-        )
-        return "\n".join(lines)
-
-    files = payload.get("tape_files_present")
-    files_present = _safe_tape_files_present(files)
-    lines.extend(
-        (
-            f"Product: {_safe_text(payload.get('product'))}",
-            f"Symbol: {_safe_text(payload.get('symbol'))}",
-            f"Symbol normalized: {_safe_text(payload.get('symbol_normalized'))}",
-            f"Timeframe: {_safe_text(payload.get('entry_tf'))} / {_safe_text(payload.get('filter_tf'))}",
-            f"Signal set: {_safe_text(payload.get('signal_set_id'))}",
-            f"Dataset: {_safe_text(payload.get('dataset_id'))}",
-            f"Created: {_safe_text(payload.get('created_at_utc'))}",
-            f"Since ms: {int(payload.get('since_ms') or 0)}",
-            f"Until ms: {int(payload.get('until_ms') or 0)}",
-            f"Trades: {int(payload.get('trade_count') or 0)}",
-            f"Net total: {_format_amount(payload.get('net_total'))}",
-            f"Final equity: {_format_amount(payload.get('final_equity'))}",
-            f"max_dd_display_abs: {_format_amount(payload.get('max_dd_display_abs'))}",
-            f"max_dd_display_pct: {_format_pct(payload.get('max_dd_display_pct'))}",
-            f"max_dd_display_label: {_safe_text(payload.get('max_dd_display_label'))}",
-            f"max_drawdown legacy note: {_safe_text(payload.get('max_drawdown_legacy_note'))}",
-            f"Research-only tape: {_safe_bool_text(payload.get('safety_research_only'))}",
-            f"paper/live order execution: {_safe_bool_text(payload.get('safety_paper_live_order_execution'))}",
-            "Backtest fast path: selectable"
-            if payload.get("selectable_for_backtest_fast_path") is True
-            else "Backtest fast path: not selectable",
-            "Replay fast path: selectable"
-            if payload.get("selectable_for_runner_replay_fast_path") is True
-            else "Replay fast path: not selectable",
-            f"not_selectable_for_live: {_safe_bool_text(payload.get('not_selectable_for_live'))}",
-            f"not_selectable_for_paper: {_safe_bool_text(payload.get('not_selectable_for_paper'))}",
-            (
-                "Tape files present: "
-                f"manifest_json={_safe_bool_text(files_present.get('manifest_json'))}, "
-                f"summary_json={_safe_bool_text(files_present.get('summary_json'))}, "
-                f"trades_csv={_safe_bool_text(files_present.get('trades_csv'))}"
-            ),
-            f"Manifest hash: {_safe_text(payload.get('manifest_sha256')) or '--'}",
-            f"Summary hash: {_safe_text(payload.get('summary_sha256')) or '--'}",
-            f"Trades CSV hash from manifest: {_safe_text(payload.get('trades_csv_sha256_from_manifest')) or '--'}",
-            f"Warning: {_safe_text(payload.get('picker_warning'))}",
-            DIAGNOSTICS_NO_RAW_ROWS_TEXT,
-            DIAGNOSTICS_NO_EXECUTION_TEXT,
-        )
-    )
-    return "\n".join(lines)
+    del ui_language
+    display = build_precomputed_signal_diagnostics_display(diagnostics)
+    return format_precomputed_signal_diagnostics_compact_text(display)
 
 
 def _copy_disabled_state(
@@ -1119,12 +1380,14 @@ def build_precomputed_signal_picker_state(
     command_preview = build_precomputed_signal_command_preview(item)
     command_preview_text = format_precomputed_signal_command_preview(command_preview, ui_language=ui_language)
     diagnostics = build_precomputed_signal_diagnostics(item)
-    diagnostics_text = format_precomputed_signal_diagnostics_text(diagnostics, ui_language=ui_language)
+    diagnostics_display = build_precomputed_signal_diagnostics_display(diagnostics)
+    diagnostics_text = format_precomputed_signal_diagnostics_compact_text(diagnostics_display)
     copy_state = build_precomputed_signal_copy_state(command_preview)
     return {
         "signal_dir": _safe_text(item.get("signal_dir")),
         "picker_item": item,
         "diagnostics": diagnostics,
+        "diagnostics_display": diagnostics_display,
         "diagnostics_text": diagnostics_text,
         "command_preview": command_preview,
         "command_preview_text": command_preview_text,

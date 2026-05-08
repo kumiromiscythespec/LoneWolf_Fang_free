@@ -1,7 +1,12 @@
-# Free Phase 12 precomputed signal GUI selection diagnostics
+# Free Phase 12/13 precomputed signal GUI selection diagnostics
 
 Free Phase 12 adds a read-only selection diagnostics display for the explicitly
 selected precomputed signal tape `signal_dir`.
+
+Free Phase 13 adds operator-facing diagnostics polish. It keeps the same
+read-only boundary while making valid / invalid status, file presence, hash
+metadata, safety flags, fast-path availability, and LIVE/PAPER exclusion easier
+to scan.
 
 ## Contract
 
@@ -64,6 +69,42 @@ Allowed diagnostics fields are limited to safe aggregate and metadata values:
 The diagnostics text states `Selection diagnostics`, `LIVE/PAPER: not
 selectable`, `No raw trade rows are displayed`, and `This panel does not execute
 commands`.
+
+## Phase 13 Operator-Facing Polish
+
+Phase 13 keeps diagnostics read-only and formats the operator panel as compact
+safe text:
+
+- `Selection diagnostics: valid` or `Selection diagnostics: invalid`
+- `Safe error code: missing_manifest` for invalid selections
+- `Files: manifest OK / summary OK / trades.csv OK`
+- `Safety: research-only OK / no live-paper execution OK`
+- `Fast path: Backtest OK / Replay OK`
+- `LIVE/PAPER: not selectable`
+- compact hash labels such as `Manifest hash: 8f3a21c9aa...`
+- compact `signal_dir` labels showing the final Free product / symbol /
+  timeframe pair / signal set segments
+- `No raw trade rows are displayed`
+- `This panel does not execute commands`
+
+Full `signal_dir` and full hash values may be kept in safe details or tooltip
+fields for manual operator confirmation. The visible panel uses shortened hash
+and path labels. Credential-like path segments are redacted in display fields.
+
+Phase 13 diagnostics are derived from manifest / summary / selection safe
+metadata only. The diagnostics do not show raw trades rows, `entry_exec`,
+`exit_exec`, row-level `qty`, exact trade id, raw order payload, balance
+snapshot, API key, secret, token, authorization header, raw billing payload, raw
+market data, generated diagnostics output, generated GUI adapter output,
+generated selection output, generated command preview output, generated
+clipboard output, or generated real signal tape body.
+
+The GUI still does not execute commands. It does not run producer / backtest /
+runner / inventory automatically. It does not connect to LIVE / PAPER / order
+execution, MEXC API, balance fetch, order fetch, or order submit paths. It does
+not add `subprocess`, `os.system`, `QProcess`, `Popen`, `startDetached`,
+threading, multiprocessing, scheduler, or background worker execution for
+diagnostics polish.
 
 ## Safety
 

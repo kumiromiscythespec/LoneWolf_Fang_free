@@ -13,7 +13,9 @@ Free GUI as a display-only picker panel for an operator-selected `signal_dir`.
 Phase 9 adds GUI command preview text for the selected `signal_dir` without the
 GUI executing it. Phase 10 adds copy UX only so an operator can copy the
 explicit backtest/replay fast-path command text without adding any execution
-path.
+path. Phase 12 adds read-only GUI selection diagnostics, and Phase 13 polishes
+those diagnostics for operator-facing compact status, file presence, hash,
+safety, fast-path, and LIVE/PAPER boundary display.
 
 ## Scope
 

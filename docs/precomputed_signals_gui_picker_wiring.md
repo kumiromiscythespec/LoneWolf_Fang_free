@@ -259,6 +259,38 @@ Valid diagnostics preserve these safety flags:
 Invalid diagnostics show a safe error code, status reason, and warning only; raw
 payloads are not surfaced.
 
+## Phase 13 Operator-Facing Diagnostics Polish
+
+Free Phase 13 keeps the Phase 12 diagnostics read-only and adds compact
+operator-facing labels:
+
+- `Selection diagnostics: valid` or `Selection diagnostics: invalid`
+- compact `signal_dir` display with full path retained only in safe details /
+  tooltip text
+- compact manifest / summary / trades.csv hash display with full hashes retained
+  only in safe details / tooltip text
+- `Files: manifest OK / summary OK / trades.csv OK`
+- `Safety: research-only OK / no live-paper execution OK`
+- `Fast path: Backtest OK / Replay OK`
+- `LIVE/PAPER: not selectable`
+- `No raw trade rows are displayed`
+- `This panel does not execute commands`
+
+The selected picker item remains `not_selectable_for_live=true` and
+`not_selectable_for_paper=true`. The GUI never generates LIVE or PAPER commands
+from selected precomputed signal tape state.
+
+Phase 13 does not add any run, execute, start, producer, backtest, runner,
+inventory, scheduler, worker, subprocess, `os.system`, `QProcess`, `Popen`,
+`startDetached`, threading, or multiprocessing execution path. Existing
+run/live/paper/order paths do not consume the selected signal tape, diagnostics
+display, command preview, or copy state.
+
+GUI smoke is optional and is limited to visual confirmation of selected
+`signal_dir`, diagnostics, Backtest/Replay command preview, and copy controls.
+GUI smoke does not start LIVE / PAPER / order execution and does not run
+producer / backtest / runner / inventory automatically.
+
 DD display continues to prefer `max_dd_abs / max_dd_pct` and
 `max_dd_display_abs / max_dd_display_pct`. `max_drawdown` remains the signed
 negative legacy field.

@@ -1,4 +1,4 @@
-# BUILD_ID: 2026-05-08_free_precomputed_gui_selection_diagnostics_v1
+# BUILD_ID: 2026-05-08_free_precomputed_gui_diagnostics_polish_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_picker_wiring_v1
 # BUILD_ID: 2026-04-29_free_gui_pipeline_pythonpath_v1
@@ -154,6 +154,8 @@ from app.gui.exchange_registry import (
 from app.gui.chart_dialog import ChartDialog
 from app.gui.logo_loader import LogoAsset, load_logo_asset, render_logo_pixmap
 from app.gui.precomputed_signal_picker import (
+    build_precomputed_signal_diagnostics,
+    build_precomputed_signal_diagnostics_display,
     build_precomputed_signal_copy_state,
     build_precomputed_signal_picker_state,
     default_precomputed_signal_picker_root,
@@ -177,7 +179,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_selection_diagnostics_v1"
+BUILD_ID = "2026-05-08_free_precomputed_gui_diagnostics_polish_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()
@@ -660,6 +662,7 @@ class MainWindow(QWidget):
         self._selected_precomputed_signal_dir: str = ""
         self._selected_precomputed_signal_picker_item: dict[str, Any] = {}
         self._selected_precomputed_signal_diagnostics: dict[str, Any] = {}
+        self._selected_precomputed_signal_diagnostics_display: dict[str, Any] = {}
         self._selected_precomputed_signal_diagnostics_text: str = ""
         self._selected_precomputed_signal_command_preview: dict[str, Any] = {}
         self._selected_precomputed_signal_copy_state: dict[str, Any] = build_precomputed_signal_copy_state({})
@@ -857,6 +860,14 @@ class MainWindow(QWidget):
         row_precomputed_signal.addWidget(self.precomputed_signal_dir, stretch=1)
         row_precomputed_signal.addWidget(self.btn_select_precomputed_signal)
         replay_layout.addLayout(row_precomputed_signal)
+
+        self.precomputed_signal_diagnostics_status = QLabel("Selection diagnostics: invalid")
+        self.precomputed_signal_diagnostics_status.setWordWrap(True)
+        self.precomputed_signal_diagnostics_status.setAccessibleName("Precomputed signal diagnostics status")
+        self.precomputed_signal_diagnostics_status.setAccessibleDescription(
+            "Read-only selection diagnostics status. No raw trade rows are displayed."
+        )
+        replay_layout.addWidget(self.precomputed_signal_diagnostics_status)
 
         self.precomputed_signal_summary = QTextEdit()
         self.precomputed_signal_summary.setReadOnly(True)
@@ -2677,18 +2688,59 @@ class MainWindow(QWidget):
         self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
         self._append(f"[precomputed] copied {kind} command preview text only\n")
 
+    def _build_current_precomputed_signal_diagnostics_display(self) -> dict[str, Any]:
+        diagnostics = self._selected_precomputed_signal_diagnostics
+        if isinstance(diagnostics, dict) and diagnostics:
+            try:
+                return build_precomputed_signal_diagnostics_display(diagnostics)
+            except Exception:
+                pass
+        item = self._selected_precomputed_signal_picker_item
+        if isinstance(item, dict) and item:
+            try:
+                return build_precomputed_signal_diagnostics_display(build_precomputed_signal_diagnostics(item))
+            except Exception:
+                pass
+        return {}
+
+    def _update_precomputed_signal_diagnostics_status_ui(
+        self,
+        diagnostics_display: Mapping[str, Any] | dict[str, Any] | None = None,
+    ) -> None:
+        if not hasattr(self, "precomputed_signal_diagnostics_status"):
+            return
+        display = diagnostics_display if isinstance(diagnostics_display, Mapping) else {}
+        status_text = str(display.get("diagnostics_status_label") or "Selection diagnostics: invalid").strip()
+        tooltip_text = str(
+            display.get("diagnostics_tooltip_text")
+            or display.get("diagnostics_details_text")
+            or status_text
+        ).strip()
+        self.precomputed_signal_diagnostics_status.setText(status_text)
+        self.precomputed_signal_diagnostics_status.setToolTip(tooltip_text)
+        self.precomputed_signal_diagnostics_status.setAccessibleName("Precomputed signal diagnostics status")
+        self.precomputed_signal_diagnostics_status.setAccessibleDescription(
+            f"{status_text}. Read-only. No raw trade rows are displayed. This panel does not execute commands."
+        )
+
     def _refresh_precomputed_signal_picker_display(self) -> None:
         if not hasattr(self, "precomputed_signal_summary"):
             return
+        diagnostics_display: dict[str, Any] = {}
         if self._selected_precomputed_signal_picker_item:
             display_text = format_precomputed_signal_picker_display_text(
                 self._selected_precomputed_signal_picker_item,
                 ui_language=self._ui_language,
             )
+            diagnostics_display = self._build_current_precomputed_signal_diagnostics_display()
         else:
             display_text = format_precomputed_signal_picker_empty_text(ui_language=self._ui_language)
+        self._selected_precomputed_signal_diagnostics_display = dict(diagnostics_display)
         self.precomputed_signal_summary.setPlainText(display_text)
-        self.precomputed_signal_summary.setToolTip(display_text)
+        self.precomputed_signal_summary.setToolTip(
+            str(diagnostics_display.get("diagnostics_tooltip_text") or display_text)
+        )
+        self._update_precomputed_signal_diagnostics_status_ui(diagnostics_display)
         self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
         if hasattr(self, "precomputed_signal_dir"):
             self.precomputed_signal_dir.setText(str(self._selected_precomputed_signal_dir or ""))
@@ -2703,6 +2755,10 @@ class MainWindow(QWidget):
         self._selected_precomputed_signal_picker_item = dict(item or {}) if isinstance(item, dict) else {}
         diagnostics = state.get("diagnostics") if isinstance(state, dict) else {}
         self._selected_precomputed_signal_diagnostics = dict(diagnostics or {}) if isinstance(diagnostics, dict) else {}
+        diagnostics_display = state.get("diagnostics_display") if isinstance(state, dict) else {}
+        self._selected_precomputed_signal_diagnostics_display = (
+            dict(diagnostics_display or {}) if isinstance(diagnostics_display, dict) else {}
+        )
         self._selected_precomputed_signal_diagnostics_text = str(state.get("diagnostics_text") or "").strip()
         command_preview = state.get("command_preview") if isinstance(state, dict) else {}
         copy_state = state.get("copy_state") if isinstance(state, dict) else {}
@@ -2719,7 +2775,10 @@ class MainWindow(QWidget):
         self.precomputed_signal_dir.setToolTip(self._selected_precomputed_signal_dir)
         self.precomputed_signal_dir.setCursorPosition(0)
         self.precomputed_signal_summary.setPlainText(display_text)
-        self.precomputed_signal_summary.setToolTip(display_text)
+        self.precomputed_signal_summary.setToolTip(
+            str(self._selected_precomputed_signal_diagnostics_display.get("diagnostics_tooltip_text") or display_text)
+        )
+        self._update_precomputed_signal_diagnostics_status_ui(self._selected_precomputed_signal_diagnostics_display)
         self._update_precomputed_signal_copy_ui(self._selected_precomputed_signal_copy_state)
         self._append(
             "[precomputed] signal tape selected "

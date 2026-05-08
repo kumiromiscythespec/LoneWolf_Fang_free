@@ -15,7 +15,10 @@ GUI executing it. Phase 10 adds copy UX only so an operator can copy the
 explicit backtest/replay fast-path command text without adding any execution
 path. Phase 12 adds read-only GUI selection diagnostics, and Phase 13 polishes
 those diagnostics for operator-facing compact status, file presence, hash,
-safety, fast-path, and LIVE/PAPER boundary display.
+safety, fast-path, and LIVE/PAPER boundary display. Phase 14 is GUI smoke
+checklist / docs-only hardening; it changes no GUI source, runtime source,
+execution path, APP_VERSION, package, exe, setup, installer, signing, or release
+asset.
 
 ## Scope
 
@@ -778,6 +781,47 @@ timing, exit timing, fee logic, quantity logic, PnL formulas, signal timing, or
 DD calculation.
 
 ## Safety Scope
+
+## Phase 14 GUI Smoke Checklist / Docs-Only Hardening
+
+Free Phase 14 fixes the operator GUI smoke checklist in
+`docs/precomputed_signals_gui_smoke_checklist.md`. The checklist is docs-only
+hardening. It does not change GUI source, runtime source, command execution
+behavior, strategy, indicators, exchange, risk, order runtime logic, signal
+timing, DD calculation, APP_VERSION, package, exe, setup, installer, signing,
+or release assets.
+
+GUI smoke is optional. If performed, it is limited to visual confirmation of
+`Precomputed Signal Tape`, `Selection diagnostics`, valid / invalid diagnostics,
+safe error code, file presence, safety status, fast-path status,
+`LIVE/PAPER: not selectable`, display-only DD labels, command preview, copy UX,
+and disabled execution state. It must not start LIVE, PAPER, order creation,
+order fetch, order submit, balance fetch, MEXC private API, producer, backtest,
+runner, inventory, selection, adapter, subprocess, `QProcess`, scheduler,
+thread, process, launch button, worker, or background worker paths.
+
+Command preview is preview-only. Copy UX is clipboard-only. Operators may copy
+safe preview text and manually run it in an external terminal if needed; the GUI
+does not execute commands and does not auto-run producer/backtest/runner/
+inventory.
+
+The checklist fixes that raw trades rows are never displayed. It allows only
+safe aggregate and metadata fields such as `signal_dir`, `symbol`, `entry_tf`,
+`filter_tf`, `signal_set_id`, `dataset_id`, `trade_count`, `net_total`,
+`final_equity`, `max_dd_display_abs`, `max_dd_display_pct`,
+`max_dd_display_label`, `status`, `safe_error_code`, manifest hash, summary
+hash, `trades.csv` hash from manifest, compact path, and compact hash.
+
+Forbidden display fields remain raw trades rows, `entry_exec`, `exit_exec`,
+`qty`, exact trade id, order id, raw order, balance, API key, secret, token,
+authorization, raw billing, raw market data, raw OHLCV, generated real signal
+tape body, generated diagnostics output, generated smoke output, generated
+command preview output, and generated clipboard output.
+
+Generated real tape body / raw market data excluded remains a hard repository
+and migration zip boundary. `max_drawdown` remains signed negative legacy field.
+GUI display prefers `max_dd_abs / max_dd_pct` and
+`max_dd_display_abs / max_dd_display_pct`.
 
 Every accepted manifest must include this exact safety scope:
 

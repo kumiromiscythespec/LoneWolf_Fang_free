@@ -3,7 +3,8 @@
 Free Phase 8 wires the precomputed signal tape GUI picker as a display-only
 connection. Free Phase 9 keeps that connection display-only and adds
 command preview text for the selected safe `signal_dir`. Free Phase 10 adds
-copy UX only for those preview command strings.
+copy UX only for those preview command strings. Free Phase 14 is GUI smoke
+checklist / docs-only hardening for the same display-only surface.
 
 ## Behavior
 
@@ -327,6 +328,41 @@ The Free product path remains:
 `<root>\free\<symbol_normalized>\<entry_tf>_<filter_tf>\<signal_set_id>`
 
 ## Out Of Scope
+
+## Phase 14 GUI Smoke Checklist Boundary
+
+Phase 14 adds no GUI source change, no runtime source change, no execution path
+change, and no LIVE/PAPER/order connection. The authoritative operator smoke
+checklist is `docs/precomputed_signals_gui_smoke_checklist.md`.
+
+GUI smoke is optional. It is limited to confirming expected labels, warnings,
+disabled states, selection diagnostics, command preview, and copy UX. The GUI
+does not execute commands. It does not auto-run producer/backtest/runner/
+inventory, and it does not launch selection or adapter commands in the
+background. Command preview is preview-only. Copy UX is clipboard-only.
+
+The checklist expects these visible labels: `Precomputed Signal Tape`,
+`Selection diagnostics`, `Selection diagnostics: valid`,
+`Selection diagnostics: invalid`, `Safe error code`,
+`Files: manifest OK / summary OK / trades.csv OK`,
+`Safety: research-only OK / no live-paper execution OK`,
+`Fast path: Backtest OK / Replay OK`, `LIVE/PAPER: not selectable`,
+`Max DD (abs, display)`, `Max DD pct (display)`,
+`No raw trade rows are displayed`, `This panel does not execute commands`,
+`Preview only`, `Execution disabled`, `Copy backtest command`,
+`Copy replay command`, `Copied`, and
+`Run this command manually in a terminal if needed`.
+
+Expected unavailable states remain `live_command_available=false`,
+`paper_command_available=false`, `execution_enabled=false`,
+`not_selectable_for_live=true`, and `not_selectable_for_paper=true`. Invalid
+selection disables command copy. Missing manifest / summary / `trades.csv`
+shows a safe error code only.
+
+Phase 14 does not add `subprocess`, `os.system`, `QProcess`, `Popen`,
+`startDetached`, threading, multiprocessing, scheduler, worker, or background
+worker execution. APP_VERSION unchanged. Package/release not touched. Generated
+real tape body / raw market data excluded.
 
 Phase 8 does not change `APP_VERSION`, strategy, indicators, exchange, risk,
 order runtime logic, entry timing, exit timing, fee logic, quantity logic, PnL

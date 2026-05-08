@@ -8,6 +8,10 @@ read-only boundary while making valid / invalid status, file presence, hash
 metadata, safety flags, fast-path availability, and LIVE/PAPER exclusion easier
 to scan.
 
+Free Phase 14 is GUI smoke checklist / docs-only hardening. It keeps
+diagnostics read-only, adds no GUI source change, adds no runtime source change,
+and fixes the checklist in `precomputed_signals_gui_smoke_checklist.md`.
+
 ## Contract
 
 - Free Phase 12 is a read-only selection diagnostics display.
@@ -143,3 +147,10 @@ generated selection output, generated GUI adapter output, generated command
 preview output, generated clipboard output, generated diagnostics output,
 package zips, executables, installers, runtime dirs, exports dirs, and zip-in-zip
 artifacts must not be committed to the repo or included in migration zips.
+
+Phase 14 GUI smoke is optional. It checks expected labels, warnings, disabled
+states, `Selection diagnostics: valid`, `Selection diagnostics: invalid`,
+`Safe error code`, `LIVE/PAPER: not selectable`, `No raw trade rows are
+displayed`, and `This panel does not execute commands`. It does not execute
+commands, does not auto-run producer/backtest/runner/inventory, does not connect
+to LIVE/PAPER/order, and adds no subprocess / QProcess / background worker path.

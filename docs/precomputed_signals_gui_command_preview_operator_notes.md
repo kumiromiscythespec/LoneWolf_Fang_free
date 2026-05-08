@@ -4,6 +4,11 @@ Free Phase 11 covers copy UX accessibility / layout smoke / operator docs for
 the GUI command preview. GUI command preview is preview-only. GUI does not
 execute commands. GUI does not execute commands from this panel.
 
+Free Phase 14 keeps this as GUI smoke checklist / docs-only hardening. Command
+preview is preview-only, copy UX is clipboard-only, APP_VERSION unchanged, and
+package/release not touched. The GUI still does not auto-run
+producer/backtest/runner/inventory and does not connect to LIVE/PAPER/order.
+
 The precomputed signal tape panel is a read-only operator aid. It can show safe
 backtest and replay preview command text and can copy that text to the
 clipboard. The copy buttons do not start or schedule work.
@@ -68,3 +73,7 @@ Phase 11 does not change `APP_VERSION`, package, exe, setup, installer, signing,
 release assets, strategy, indicators, exchange, risk, order runtime logic,
 entry timing, exit timing, fee logic, quantity logic, PnL formulas, signal
 timing, or DD calculation.
+
+Future execution button is not part of Phase 14. Any future GUI execution phase
+must be explicit, local-only or dry-run first, and separated from LIVE/PAPER/
+order paths.

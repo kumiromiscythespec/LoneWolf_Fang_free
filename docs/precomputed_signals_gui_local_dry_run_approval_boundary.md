@@ -18,6 +18,16 @@ sample docs-tests. Phase 24 is docs/tests-only and adds
 static docs validator test. It does not generate an execution audit record at
 runtime and does not execute anything.
 
+Free Phase 25 extends the boundary as pre-execution handoff / readiness index
+docs-tests. Phase 25 is docs/tests-only and adds
+`docs/precomputed_signals_pre_execution_readiness_index.md`,
+`docs/precomputed_signals_pre_execution_handoff_summary.md`, and a static docs
+validator test. It does not add GUI source change, runtime source change,
+dry-run execution implementation, approval UI, command execution, subprocess /
+QProcess / background worker, LIVE/PAPER/order, MEXC private API,
+approval/audit record runtime generation, APP_VERSION bump, or
+package/release/signing/upload.
+
 Phase 22 does not make local-only dry-run executable. It does not add approval
 UI, confirm controls, execute controls, request generation, approval record
 generation, execution audit record generation, subprocess launch paths, private
@@ -29,9 +39,11 @@ changes.
 - Phase 22 is local-only dry-run execution approval boundary.
 - Phase 23 is approval preflight checklist / approval record static sample docs-tests.
 - Phase 24 is execution audit record schema / static sample docs-tests.
+- Phase 25 is pre-execution handoff / readiness index docs-tests.
 - Phase 22 is docs/tests-only.
 - Phase 23 is docs/tests-only.
 - Phase 24 is docs/tests-only.
+- Phase 25 is docs/tests-only.
 - no GUI source change.
 - no runtime source change.
 - no approval UI implementation.
@@ -42,6 +54,7 @@ changes.
 - no approval record generation at runtime.
 - no execution audit record generation.
 - no execution audit record generation at runtime.
+- no approval/audit record runtime generation.
 - no subprocess / QProcess / background worker.
 - no producer/backtest/runner/inventory auto-run.
 - no request generation.
@@ -51,7 +64,9 @@ changes.
 - no MEXC private API.
 - no private API.
 - APP_VERSION unchanged.
+- no APP_VERSION bump.
 - package/release not touched.
+- no package/release/signing/upload.
 - raw trade rows are never included.
 - generated real tape body / raw market data excluded.
 - generated approval record / generated execution audit record excluded.
@@ -538,3 +553,38 @@ Future execution must not be introduced through command preview, copy UX,
 selection diagnostics, request builder preview, GUI preview adapter, GUI preview
 wiring, manual smoke record, approval checklist docs, execution audit schema
 docs, package/release approval, or APP_VERSION changes.
+
+## Phase 25 Pre-Execution Handoff Boundary
+
+Free Phase 25 is pre-execution handoff / readiness index docs-tests. Phase 25 is
+docs/tests-only and fixes the handoff state before any future runtime execution
+phase can exist.
+
+Phase 25 has no GUI source change, no runtime source change, no dry-run
+execution implementation, no approval UI, no command execution, no subprocess /
+QProcess / background worker, no producer/backtest/runner/inventory auto-run,
+no LIVE/PAPER/order, no MEXC private API, no approval/audit record runtime
+generation, no APP_VERSION bump, and no package/release/signing/upload.
+
+The canonical Phase 25 docs are:
+
+- `docs/precomputed_signals_pre_execution_readiness_index.md`
+- `docs/precomputed_signals_pre_execution_handoff_summary.md`
+
+The approval boundary after Phase 25 remains narrow:
+
+- approval is local_saved_tape_backtest_replay_only.
+- approval is not LIVE/PAPER/order/private API/release/package approval.
+- approval requires explicit operator confirmation.
+- approval must show signal_dir, product, symbol, timeframe, dry_run_mode,
+  output_dir.
+- approval must show no private API / no balance fetch / no order fetch / no
+  order submit.
+- approval must show allowed/forbidden artifacts.
+- approval must fail closed if any required field/check is missing.
+- approval record and execution audit record are separate.
+
+Runtime dry-run execution requires explicit new approval. It is safe to pause
+after Phase 25. Packaging/release remains paused while Pro plan changes are in
+progress. LoneWolf_Fang_Free_Package.zip do not stage unless packaging phase
+approved.

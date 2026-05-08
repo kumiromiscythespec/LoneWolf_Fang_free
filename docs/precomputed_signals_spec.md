@@ -60,6 +60,14 @@ record generation at runtime, no GUI source change, no runtime source change,
 no command execution, no subprocess / QProcess / background worker, no
 LIVE/PAPER/order, and no MEXC private API. The static sample is `not_run`,
 not runtime output, not approval proof, and not order/trading record proof.
+Phase 25 fixes the pre-execution handoff / readiness index as docs/tests-only
+in `docs/precomputed_signals_pre_execution_readiness_index.md` and
+`docs/precomputed_signals_pre_execution_handoff_summary.md`. It adds no GUI
+source change, no runtime source change, no dry-run execution implementation,
+no approval UI, no command execution, no subprocess / QProcess / background
+worker, no LIVE/PAPER/order, no MEXC private API, no approval/audit record
+runtime generation, no APP_VERSION bump, and no package/release/signing/upload.
+Runtime dry-run execution requires explicit new approval.
 
 ## Scope
 
@@ -1653,6 +1661,38 @@ GUI wiring displays preview only. Phase 22 approval boundary defines future
 approval rules. Phase 23 approval static sample/checklist does not execute
 anything. Phase 24 execution audit schema defines future audit only. Future
 execution requires separate explicit approval and implementation phase.
+
+## Phase 25 Pre-Execution Handoff And Readiness Index
+
+Free Phase 25 is pre-execution handoff / readiness index docs-tests and is
+defined by:
+
+- `docs/precomputed_signals_pre_execution_readiness_index.md`
+- `docs/precomputed_signals_pre_execution_handoff_summary.md`
+
+Phase 25 is docs/tests-only. Phase 25 has no GUI source change, no runtime
+source change, no dry-run execution implementation, no approval UI, no command
+execution, no subprocess / QProcess / background worker, no LIVE/PAPER/order,
+no MEXC private API, no approval/audit record runtime generation, no
+APP_VERSION bump, and no package/release/signing/upload.
+
+The Phase 25 readiness index records the Phase 1-24 completed phases table,
+current non-capabilities / not implemented, required pre-execution gates,
+required future approval flow, required future execution flow, required future
+fail-closed list, allowed artifacts summary, forbidden artifacts summary, stop
+/ pause recommendation, and handoff summary.
+
+Future runtime dry-run execution requires explicit new approval. Approval is
+local_saved_tape_backtest_replay_only and is not LIVE/PAPER/order/private
+API/release/package approval. Approval record and execution audit record are
+separate. A future execution phase must validate selection, request, approval
+record, approval_record_hash / request_hash / selection_hash linkage, safe
+output_dir, allowed artifact policy, no LIVE/PAPER/order path, no private API
+path, and no background execution before any local saved-tape fast path runs.
+
+It is safe to pause after Phase 25. Packaging/release remains paused while Pro
+plan changes are in progress. LoneWolf_Fang_Free_Package.zip do not stage
+unless packaging phase approved.
 
 ## DD Schema V2
 

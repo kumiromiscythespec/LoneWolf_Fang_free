@@ -45,6 +45,14 @@ approval record generation at runtime, no execution audit record generation at
 runtime, no GUI source change, no runtime source change, no command execution,
 no subprocess / QProcess / background worker, no LIVE/PAPER/order, and no MEXC
 private API.
+Free Phase 25: pre-execution handoff / readiness index docs-tests fixes the
+readiness index and handoff summary in
+`docs/precomputed_signals_pre_execution_readiness_index.md` and
+`docs/precomputed_signals_pre_execution_handoff_summary.md`. It adds no GUI
+source change, no runtime source change, no dry-run execution implementation,
+no approval UI, no command execution, no subprocess / QProcess / background
+worker, no LIVE/PAPER/order, no MEXC private API, no approval/audit record
+runtime generation, no APP_VERSION bump, and no package/release/signing/upload.
 
 ## Scope
 
@@ -56,10 +64,12 @@ private API.
 - Free Phase 23: approval preflight checklist / approval record static sample
   docs-tests.
 - Free Phase 24: execution audit record schema / static sample docs-tests.
+- Free Phase 25: pre-execution handoff / readiness index docs-tests.
 - docs/tests-only.
 - Phase 22 is docs/tests-only.
 - Phase 23 is docs/tests-only.
 - Phase 24 is docs/tests-only.
+- Phase 25 is docs/tests-only.
 - no approval UI implementation.
 - no dry-run execution implementation.
 - no approval record generation.
@@ -71,10 +81,12 @@ private API.
 - Phase 22 no GUI source change.
 - Phase 23 no GUI source change.
 - Phase 24 no GUI source change.
+- Phase 25 no GUI source change.
 - no runtime source change.
 - Phase 22 no runtime source change.
 - Phase 23 no runtime source change.
 - Phase 24 no runtime source change.
+- Phase 25 no runtime source change.
 - no local dry-run implementation.
 - no dry-run implementation.
 - GUI displays dry-run request preview only.
@@ -107,8 +119,11 @@ private API.
 - no LIVE/PAPER/order.
 - no LIVE/PAPER/order connection.
 - no MEXC private API.
+- no approval/audit record runtime generation.
 - APP_VERSION unchanged.
+- no APP_VERSION bump.
 - package/release not touched.
+- no package/release/signing/upload.
 - generated real tape body / raw market data excluded.
 - raw trade rows are never displayed or recorded.
 - raw trade rows / entry_exec / exit_exec / qty / trade id are not shown.
@@ -476,6 +491,33 @@ execution, no private API, no order/balance path, forbidden fields absent, raw
 trade rows absent, generated artifact policy checked, approval_record_hash
 verified, and request_hash verified. Future execution must be separate explicit
 approval and implementation phase.
+
+## Current Phase 25 Pre-Execution Handoff And Readiness Index
+
+Free Phase 25 is pre-execution handoff / readiness index docs-tests. Phase 25 is
+docs/tests-only and is defined by:
+
+- `docs/precomputed_signals_pre_execution_readiness_index.md`
+- `docs/precomputed_signals_pre_execution_handoff_summary.md`
+
+Phase 25 has no GUI source change, no runtime source change, no dry-run
+execution implementation, no approval UI, no command execution, no subprocess /
+QProcess / background worker, no producer/backtest/runner/inventory auto-run,
+no LIVE/PAPER/order, no MEXC private API, no approval/audit record runtime
+generation, no APP_VERSION bump, and no package/release/signing/upload.
+
+Phase 25 records the Phase 1-24 completed phases table, current
+non-capabilities / not implemented, required pre-execution gates, required
+future approval flow, required future execution flow, required future
+fail-closed list, allowed artifacts summary, forbidden artifacts summary, stop
+/ pause recommendation, and handoff summary. It does not add local-only
+dry-run execution and does not generate approval or execution audit records at
+runtime.
+
+Runtime dry-run execution requires explicit new approval. It is safe to pause
+after Phase 25. Packaging/release remains paused while Pro plan changes are in
+progress. LoneWolf_Fang_Free_Package.zip do not stage unless packaging phase
+approved.
 
 ## Required Future Operator Confirmation
 

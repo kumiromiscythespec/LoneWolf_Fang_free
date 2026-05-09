@@ -1,8 +1,9 @@
 ﻿{
-  "build_id": "2026-04-20_free_installer_native_shortcut_contract_v1",
+  "build_id": "2026-05-09_free_version_bump_1_1_4_v1",
   "product": "LoneWolf_Fang_free",
   "product_code": "free",
   "product_display_name": "LoneWolf Fang Free",
+  "app_version": "1.1.4",
   "install_root_mode": "programfiles",
   "install_root_name": "LoneWolf Fang free",
   "overwrite_mode": "prompt",

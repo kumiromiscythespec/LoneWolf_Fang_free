@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-09_free_version_bump_1_1_4_v1
 # BUILD_ID: 2026-05-09_free_precomputed_local_dry_run_gui_preview_wiring_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_diagnostics_polish_v1
 # BUILD_ID: 2026-05-08_free_precomputed_gui_copy_accessibility_docs_v1
@@ -182,7 +183,7 @@ from app.gui.result_chart import (
 from app.gui.win_titlebar import apply_dark_titlebar
 
 
-BUILD_ID = "2026-05-08_free_precomputed_gui_diagnostics_polish_v1"
+BUILD_ID = "2026-05-09_free_version_bump_1_1_4_v1"
 logger = logging.getLogger(__name__)
 APP_DISPLAY_NAME = str(getattr(C, "APP_DISPLAY_NAME", "") or "LoneWolf Fang Free").strip() or "LoneWolf Fang Free"
 APP_VERSION = str(getattr(C, "APP_VERSION", "") or getattr(C, "VERSION", "") or "").strip()

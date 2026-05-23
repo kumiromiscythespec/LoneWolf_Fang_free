@@ -1,3 +1,6 @@
+# BUILD_ID: 2026-05-08_free_precomputed_runner_replay_fast_path_v1
+# BUILD_ID: 2026-04-27_free_confirmed_bar_no_double_shift_v1
+# BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
 # BUILD_ID: 2026-04-21_free_indicator_audit_rsi_filter_precompute_v1
@@ -67,6 +70,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict
+
+
+def _ensure_embedded_app_import_path() -> None:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    embedded_root = os.path.join(base_dir, "app")
+    if os.path.isdir(os.path.join(embedded_root, "app", "core")) and embedded_root not in sys.path:
+        sys.path.insert(0, embedded_root)
+
+
+_ensure_embedded_app_import_path()
 
 def _bridge_backtest_dataset_from_cli(argv: list[str]) -> None:
     if str(os.getenv("BACKTEST_DATASET") or "").strip():
@@ -193,7 +206,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-04-19_free_paper_preflight_skip_v1"
+BUILD_ID = "2026-05-08_free_precomputed_runner_replay_fast_path_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -203,6 +216,7 @@ CHART_STATE_DIR = Path(_APP_PATHS.chart_state_dir).resolve()
 CHART_STATE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = STATE_DIR / "state.db"
 _FREE_BUILD_LIVE_MESSAGE = "FREE build does not support LIVE mode"
+_PRECOMPUTED_SIGNALS_PRODUCT = "free"
 
 
 def _resolve_runtime_log_path(configured_path: Any, default_name: str) -> str:
@@ -7224,11 +7238,18 @@ def main(
             _summ_reason(summ_hold, "fetch_ohlcv_entry_empty")
             continue
         _trace_index_symbol_bars(str(symbol), e)
-        bar_ts_ms = int(trace_bar_snap["bar_ts_ms"])
-        bar_open = float(trace_bar_snap["bar_open"])
-        bar_high = float(trace_bar_snap["bar_high"])
-        bar_low = float(trace_bar_snap["bar_low"])
-        bar_close = float(trace_bar_snap["bar_close"])
+        try:
+            bar_ts_ms = int(e["timestamp"][-1])
+            bar_open = float(e["open"][-1])
+            bar_high = float(e["high"][-1])
+            bar_low = float(e["low"][-1])
+            bar_close = float(e["close"][-1])
+        except Exception:
+            bar_ts_ms = int(trace_bar_snap["bar_ts_ms"])
+            bar_open = float(trace_bar_snap["bar_open"])
+            bar_high = float(trace_bar_snap["bar_high"])
+            bar_low = float(trace_bar_snap["bar_low"])
+            bar_close = float(trace_bar_snap["bar_close"])
         trace_bar_fields = {
             "bar_ts_ms": int(bar_ts_ms),
             "bar_open": float(bar_open),
@@ -11982,6 +12003,12 @@ def _restore_replay_trade_log_handler(detached_handlers: list[logging.Handler], 
 
 def _resolve_replay_initial_equity(args: argparse.Namespace) -> float:
     try:
+        initial = float(getattr(args, "precomputed_signals_initial_equity", 0.0) or 0.0)
+    except Exception:
+        initial = 0.0
+    if initial > 0.0:
+        return float(initial)
+    try:
         initial = float(getattr(args, "initial_equity", 0.0) or 0.0)
     except Exception:
         initial = 0.0
@@ -12008,6 +12035,109 @@ def _resolve_replay_initial_equity(args: argparse.Namespace) -> float:
     if initial <= 0.0:
         initial = 300000.0
     return float(initial)
+
+
+def _precomputed_signals_expected_symbol_from_args(args: argparse.Namespace) -> str | None:
+    raw = str(getattr(args, "symbol", "") or "").strip() or str(getattr(args, "symbols", "") or "").strip()
+    if not raw:
+        return None
+    return str(raw.split(",", 1)[0]).strip() or None
+
+
+def _enforce_precomputed_signals_cli_scope(args: argparse.Namespace) -> None:
+    if not bool(getattr(args, "use_precomputed_signals", False)):
+        return
+    mode = str(getattr(args, "mode", "") or "").strip().lower()
+    if mode in ("live", "paper") or not bool(getattr(args, "replay", False)):
+        raise SystemExit("[PRECOMPUTED] --use-precomputed-signals is allowed only with replay mode (--mode replay or --replay)")
+    if not str(getattr(args, "precomputed_signals_dir", "") or "").strip():
+        raise SystemExit("[PRECOMPUTED] --precomputed-signals-dir is required with --use-precomputed-signals")
+
+
+def _run_precomputed_signals_replay(args: argparse.Namespace) -> int:
+    try:
+        _enforce_precomputed_signals_cli_scope(args)
+        from fast_backtest_signals import run_fast_backtest, write_fast_backtest_artifacts
+
+        signals_dir = str(getattr(args, "precomputed_signals_dir", "") or "").strip()
+        result = run_fast_backtest(
+            signals_dir,
+            initial_equity=_resolve_replay_initial_equity(args),
+            expected_product=_PRECOMPUTED_SIGNALS_PRODUCT,
+            expected_symbol=_precomputed_signals_expected_symbol_from_args(args),
+            strict=bool(getattr(args, "precomputed_signals_strict", False)),
+        )
+        manifest = dict(result.get("manifest") or {})
+        run_id = str(getattr(args, "run_id", "") or "").strip()
+        if not run_id:
+            run_id = _resolve_export_run_id("")
+            setattr(args, "run_id", run_id)
+        export_dir = _activate_export_context(
+            run_id=run_id,
+            symbol=str(manifest.get("symbol") or _precomputed_signals_expected_symbol_from_args(args) or _default_symbol_for_runtime()),
+            mode="REPLAY",
+        )
+        artifacts = write_fast_backtest_artifacts(
+            export_dir,
+            result,
+            signals_dir=signals_dir,
+            write_report=bool(getattr(args, "precomputed_signals_write_report", False)),
+        )
+    except SystemExit:
+        raise
+    except Exception as exc:
+        logger.error("[PRECOMPUTED][REPLAY] fail closed: %s", exc)
+        return 2
+
+    summary = dict(result.get("summary") or {})
+    replay_results = {
+        "trades": int(summary.get("trade_count", 0) or 0),
+        "net_total": float(summary.get("net_total", 0.0) or 0.0),
+        "final_equity": float(summary.get("final_equity", 0.0) or 0.0),
+        "max_dd": float(summary.get("max_drawdown", 0.0) or 0.0),
+        "max_drawdown": float(summary.get("max_drawdown", 0.0) or 0.0),
+        "max_dd_signed": float(summary.get("max_dd_signed", summary.get("max_drawdown", 0.0)) or 0.0),
+        "max_dd_abs": float(summary.get("max_dd_abs", 0.0) or 0.0),
+        "max_dd_pct": float(summary.get("max_dd_pct", 0.0) or 0.0),
+        "max_dd_display_abs": float(summary.get("max_dd_display_abs", summary.get("max_dd_abs", 0.0)) or 0.0),
+        "max_dd_display_pct": float(summary.get("max_dd_display_pct", summary.get("max_dd_pct", 0.0)) or 0.0),
+        "max_dd_display_label": str(summary.get("max_dd_display_label", "") or ""),
+        "max_drawdown_legacy_note": str(summary.get("max_drawdown_legacy_note", "") or ""),
+        "engine": "precomputed_signals",
+        "research_only": True,
+        "paper_live_order_execution": False,
+    }
+    _stash_replay_report_overall(args, replay_results)
+    logger.info("===== PRECOMPUTED SIGNAL TAPE REPLAY RESULT =====")
+    logger.info("[PRECOMPUTED][REPLAY] product=%s signal_set_id=%s", manifest.get("product"), manifest.get("signal_set_id"))
+    logger.info(
+        "[PRECOMPUTED][REPLAY] trades=%s net_total=%.6f final_equity=%.6f max_dd_abs=%.6f max_dd_pct=%.6f max_drawdown_legacy_signed=%.6f",
+        replay_results["trades"],
+        replay_results["net_total"],
+        replay_results["final_equity"],
+        replay_results["max_dd_display_abs"],
+        replay_results["max_dd_display_pct"],
+        replay_results["max_drawdown"],
+    )
+    logger.info("[PRECOMPUTED][REPLAY] max_drawdown_legacy_note=%s", replay_results["max_drawdown_legacy_note"])
+    logger.info("[PRECOMPUTED][REPLAY] exports=%s", json.dumps(artifacts, ensure_ascii=True, sort_keys=True))
+    _write_last_run_reference(
+        replay_report=str(artifacts.get("fast_summary_json", "")),
+        trade_log=str(artifacts.get("trades_csv", "")),
+        extra={
+            "engine": "precomputed_signals",
+            "signal_set_id": str(manifest.get("signal_set_id", "")),
+            "research_only": True,
+            "paper_live_order_execution": False,
+        },
+    )
+    print(json.dumps({
+        "mode": "REPLAY",
+        "engine": "precomputed_signals",
+        "summary": summary,
+        "exports": artifacts,
+    }, ensure_ascii=True, sort_keys=True))
+    return 0
 
 
 def _count_csv_dict_rows(path: str) -> int:
@@ -12657,6 +12787,7 @@ def _write_replay_report(
 
 def _parse_runner_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(add_help=True)
+    p.add_argument("--mode", type=str, default="", choices=["replay", "live", "paper"], help="Compatibility mode selector. replay maps to --replay.")
     p.add_argument("--run-id", type=str, default="", help="Optional run identifier. If empty, uses LWF_RUN_ID or auto-generated id.")
     p.add_argument("--preset", type=str, default="", help="Opt-in preset name (e.g. SELL_SAFE). CLI takes precedence over BOT_PRESET env.")
     p.add_argument("--log-level", type=str, default="", help="runtime log level override for LIVE/REPLAY: MINIMAL, OPS, DEBUG")
@@ -12665,6 +12796,11 @@ def _parse_runner_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--symbol", type=str, default="", help="Single symbol override. Accepts BTC/JPY or BTCJPY.")
     p.add_argument("--symbols", type=str, default="", help="Comma-separated symbol override. --symbol takes precedence.")
     p.add_argument("--replay", action="store_true", help="pseudo live replay mode (no external API, dry-run forced)")
+    p.add_argument("--use-precomputed-signals", action="store_true", help="Explicitly use a saved signal tape in replay mode only.")
+    p.add_argument("--precomputed-signals-dir", type=str, default="", help="Directory containing manifest.json/trades.csv/summary.json.")
+    p.add_argument("--precomputed-signals-write-report", action="store_true", help="Write fast_summary.json beside replay fast path CSVs.")
+    p.add_argument("--precomputed-signals-initial-equity", type=float, default=0.0, help="Initial equity for precomputed replay accounting. 0=use replay defaults.")
+    p.add_argument("--precomputed-signals-strict", action="store_true", help="Verify manifest file hashes before precomputed replay accounting.")
     p.add_argument("--replay-csv", type=str, default="", help="base dir for backtest CSV dataset dirs (optional)")
     p.add_argument(
         "--replay-trade-log-every",
@@ -12707,7 +12843,13 @@ def _parse_runner_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--ttl-stats-interval-sec", type=float, default=None, help="override TTL_STATS log interval seconds")
     p.add_argument("--serve-log-every", type=int, default=0, help="0=off, >=1 logs [SERVE] heartbeat every N loops")
     p.add_argument("--until", type=str, default="", help="YYYY-MM-DD (UTC) inclusive day; internally treated as next-day exclusive")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    mode = str(getattr(args, "mode", "") or "").strip().lower()
+    if mode == "replay":
+        setattr(args, "replay", True)
+    elif mode in ("live", "paper"):
+        os.environ["LWF_MODE_OVERRIDE"] = mode.upper()
+    return args
 
 
 
@@ -12726,6 +12868,8 @@ def _enforce_cli_live_license_gate(args: argparse.Namespace) -> None:
 
 def _run_replay(args: argparse.Namespace) -> int:
     global _DIFF_TRACE_SOURCE, _DIFF_TRACE_SAMPLE_EVERY_REPLAY, _DIFF_TRACE_SAMPLE_COUNTER_REPLAY, _DIFF_TRACE_SAMPLE_SKIPPED_REPLAY, _REPLAY_SIZING_STATE
+    if bool(getattr(args, "use_precomputed_signals", False)):
+        return _run_precomputed_signals_replay(args)
     _DIFF_TRACE_SOURCE = "replay"
     _REPLAY_SIZING_STATE = {}
     replay_t0 = time.perf_counter()
@@ -13764,6 +13908,7 @@ def _run_replay(args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":
     args = _parse_runner_args()
+    _enforce_precomputed_signals_cli_scope(args)
     _apply_runtime_log_level(str(getattr(args, "log_level", "") or "").strip() or getattr(C, "RUNTIME_LOG_LEVEL", "OPS"))
     if bool(getattr(args, "replay", False)):
         os.environ["LWF_RUNTIME_MODE"] = "REPLAY"
@@ -13779,6 +13924,8 @@ if __name__ == "__main__":
         preset_name = str(os.getenv("BOT_PRESET", "") or "").strip()
     if preset_name:
         C.apply_preset(preset_name)
+    if bool(getattr(args, "replay", False)) and bool(getattr(args, "use_precomputed_signals", False)):
+        raise SystemExit(_run_precomputed_signals_replay(args))
     startup_run_id = str(getattr(args, "run_id", "") or "").strip()
     if bool(getattr(args, "replay", False)):
         replay_symbols_boot, _replay_symbol_source = _resolve_replay_symbols(args)

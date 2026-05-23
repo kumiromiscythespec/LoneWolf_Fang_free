@@ -1,0 +1,98 @@
+{
+  "build_id": "2026-04-29_distribution_release_free_v1_1_3",
+  "repo": "C:\\LoneWolf_Fang_free",
+  "version": "1.1.3",
+  "branch": "publish/pairs-live-api-20260423-free",
+  "source_commit": "126fac7cd3e87e29709fa040e59c20600969fa48",
+  "package_script_used": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\packaging\\build_package.ps1 -NativeArtifactsPolicy error",
+  "files_changed": [
+    "exports/sweeps/distribution_release_free_v1_1_3.json"
+  ],
+  "generated_artifacts": [
+    {
+      "path": "packaging/dist/LoneWolf_Fang_Free_Package.zip",
+      "kind": "dist_release_asset",
+      "size_bytes": 96264874
+    },
+    {
+      "path": "packaging/dist/LoneWolf_Fang_free_20260429_061036.zip",
+      "kind": "timestamped_package",
+      "size_bytes": 96264874
+    }
+  ],
+  "signed_artifacts": [
+    "LoneWolfFangFreeLauncher.exe",
+    "LoneWolf_Fang_Free_Setup.exe",
+    "LoneWolf_Fang_free/LoneWolfFangFreeLauncher.exe",
+    "LoneWolf_Fang_free/LoneWolf_Fang_Free_Setup.exe"
+  ],
+  "signature_status": {
+    "signing_tool": "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\signtool.exe",
+    "repo_top_launcher": {
+      "status": "Valid",
+      "signtool_verify_pa_v": true,
+      "signer_subject": "CN=\\u4f0a\\u85e4 \\u7950\\u559c, O=\\u4f0a\\u85e4 \\u7950\\u559c, L=Semboku-shi, S=Akita Prefecture, C=JP",
+      "timestamp_present": true
+    },
+    "repo_top_setup": {
+      "status": "Valid",
+      "signtool_verify_pa_v": true,
+      "signer_subject": "CN=\\u4f0a\\u85e4 \\u7950\\u559c, O=\\u4f0a\\u85e4 \\u7950\\u559c, L=Semboku-shi, S=Akita Prefecture, C=JP",
+      "timestamp_present": true
+    },
+    "package_launcher": {
+      "status": "Valid",
+      "signtool_verify_pa_v": true,
+      "timestamp_present": true
+    },
+    "package_setup": {
+      "status": "Valid",
+      "signtool_verify_pa_v": true,
+      "timestamp_present": true
+    }
+  },
+  "package_validation": {
+    "manifest_required_missing": 0,
+    "zip_exists": true,
+    "zip_size_nonzero": true,
+    "root_layout": "LoneWolf_Fang_free/",
+    "excluded_runtime_outputs_market_data_git_patched": true,
+    "config_app_version": "1.1.3",
+    "config_app_display_name": "LoneWolf Fang Free",
+    "gui_title_source": "APP_WINDOW_TITLE = _make_app_window_title(APP_DISPLAY_NAME, APP_VERSION)",
+    "free_live_disabled_source": "LoneWolf Fang Free does not include LIVE mode.",
+    "setup_signature_valid": true,
+    "launcher_signature_valid": true,
+    "download_smoke_sha256_match": true
+  },
+  "sha256": {
+    "LoneWolf_Fang_Free_Package.zip": "b5a22a6a77810fef03b5eeb7c47fcb4b1ddb95b348fe247d39f900119d6e6f6f",
+    "LoneWolf_Fang_Free_Setup.exe": "c6b38ee2243ba4421689f36953757134e859aebeaf085cddebe92369d154a9f0",
+    "LoneWolfFangFreeLauncher.exe": "d3ee2a2d75769aac106743579a54e33364a6bf751c41b4c4ef229eae2e2274e9"
+  },
+  "release_repo": "kumiromiscythespec/LoneWolf_Fang_free",
+  "release_tag": "v1.1.3",
+  "release_url": "https://github.com/kumiromiscythespec/LoneWolf_Fang_free/releases/tag/v1.1.3",
+  "uploaded_assets": [
+    {
+      "name": "LoneWolf_Fang_Free_Package.zip",
+      "sha256": "b5a22a6a77810fef03b5eeb7c47fcb4b1ddb95b348fe247d39f900119d6e6f6f"
+    },
+    {
+      "name": "LoneWolf_Fang_Free_Setup.exe",
+      "sha256": "c6b38ee2243ba4421689f36953757134e859aebeaf085cddebe92369d154a9f0"
+    },
+    {
+      "name": "LoneWolfFangFreeLauncher.exe",
+      "sha256": "d3ee2a2d75769aac106743579a54e33364a6bf751c41b4c4ef229eae2e2274e9"
+    }
+  ],
+  "package_rebuild_run": true,
+  "installer_rebuild_run": false,
+  "binary_rebuild_run": false,
+  "strategy_logic_changed": false,
+  "live_paper_order_connected": false,
+  "unrelated_dirty_files_left_untouched": true,
+  "unrelated_dirty_notes": "Pre-existing untracked repo-top LoneWolf_Fang_Free_Package.zip was left unstaged; release upload used packaging/dist/LoneWolf_Fang_Free_Package.zip.",
+  "decision": "released"
+}

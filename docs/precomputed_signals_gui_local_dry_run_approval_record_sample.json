@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "approval_schema_version": "free_precomputed_local_dry_run_approval_record_v1",
+  "record_type": "precomputed_signal_local_dry_run_approval_record",
+  "phase": "free_precomputed_signals_phase23_local_dry_run_approval_record_docs_only",
+  "repo": "LoneWolf_Fang_free",
+  "branch": "static_docs_sample_branch",
+  "head_commit": "0000000000000000000000000000000000000000",
+  "app_version": "1.1.3",
+  "created_at_utc": "2026-05-09T00:00:00Z",
+  "operator": "static_docs_sample_operator",
+  "product": "free",
+  "signal_dir": "%LOCALAPPDATA%\\LoneWolfFang\\data\\precomputed_signals\\free\\BTCUSDT\\5m_1h\\sig_synthetic_example",
+  "symbol": "BTCUSDT",
+  "entry_tf": "5m",
+  "filter_tf": "1h",
+  "signal_set_id": "sig_synthetic_example",
+  "dry_run_mode": "backtest_fast_path_local_only",
+  "output_dir": "%LOCALAPPDATA%\\LoneWolfFang\\data\\precomputed_signals_dry_runs\\free\\sig_synthetic_example",
+  "request_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "selection_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "confirmation_text": "STATIC SAMPLE ONLY: operator did not confirm. Future confirmation text must match the Phase 23 checklist before local saved-tape approval.",
+  "operator_confirmed": false,
+  "approval_scope": "local_saved_tape_backtest_replay_only",
+  "approved_actions": [
+    "approve_backtest_fast_path_local_only",
+    "approve_runner_replay_fast_path_local_only"
+  ],
+  "forbidden_actions": [
+    "live",
+    "paper",
+    "order_submit",
+    "order_fetch",
+    "balance_fetch",
+    "private_api",
+    "producer_auto_run",
+    "inventory_auto_scan",
+    "background_worker",
+    "package_release"
+  ],
+  "preflight_passed": false,
+  "preflight_summary": {
+    "sample_kind": "static_docs_tests_only",
+    "request_type_checked": "not_run",
+    "request_schema_checked": "not_run",
+    "request_hash_present": true,
+    "selection_hash_present": true,
+    "selection_contract_checked": "not_run",
+    "product_free": true,
+    "dry_run_mode_allowed": true,
+    "operator_confirmation_required": true,
+    "operator_confirmed": false,
+    "manifest_checked": "not_run",
+    "summary_checked": "not_run",
+    "trades_csv_checked": "not_run",
+    "output_dir_checked": "not_run",
+    "worktree_status_checked": "not_run",
+    "runtime_launch_paths_absent": true,
+    "private_api_paths_absent": true
+  },
+  "fail_closed_reasons": [
+    "missing_operator_confirmation"
+  ],
+  "allowed_artifacts": [
+    "safe_summary_json",
+    "fast_summary_json",
+    "equity_curve_csv",
+    "local_only_output_manifest",
+    "sanitized_manual_smoke_record"
+  ],
+  "forbidden_artifacts": [
+    "row_level_trade_payloads",
+    "private_or_account_payloads",
+    "package_release_outputs",
+    "screenshots",
+    "generated_runtime_outputs"
+  ],
+  "status": "not_run",
+  "status_reason": "Static docs-tests sample. No approval or local saved-tape execution occurred.",
+  "notes_sanitized": "Static sanitized fixture. No operator approval or execution occurred. Runtime code did not emit this file."
+}

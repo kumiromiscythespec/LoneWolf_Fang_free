@@ -1,4 +1,10 @@
-﻿# BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
+# BUILD_ID: 2026-05-09_free_version_bump_1_1_4_v1
+# BUILD_ID: 2026-04-29_version_bump_free_v1
+# BUILD_ID: 2026-04-28_free_xrp_bnb_pair_presets_v1
+# BUILD_ID: 2026-04-23_free_live_api_pair_config_v1
+# BUILD_ID: 2026-04-27_live_dryrun_env_guard_v1
+# BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
+# BUILD_ID: 2026-04-19_free_config_version_1_1_2_v1
 # BUILD_ID: 2026-04-08_standard_bitbank_okx_spot_exchange_v1
 # BUILD_ID: 2026-04-02_config_standard_continuity_hardening_v1
 # BUILD_ID: 2026-03-31_config_btcusdt_stable_preset_finalize_v1
@@ -17,16 +23,41 @@ import importlib.util
 import os
 import logging
 import re
+import sys
 from typing import Any
+
+
+def _ensure_embedded_app_import_path() -> None:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    embedded_root = os.path.join(base_dir, "app")
+    if os.path.isdir(os.path.join(embedded_root, "app", "core")) and embedded_root not in sys.path:
+        sys.path.insert(0, embedded_root)
+
+
+_ensure_embedded_app_import_path()
+
 from app.core.paths import get_paths
 from app.core.instrument_registry import default_symbol_for_exchange
+from app.core.instrument_registry import list_instruments
 from app.core.instrument_registry import symbols_for_exchange as registry_symbols_for_exchange
 
-BUILD_ID = "2026-04-19_free_config_version_1_1_2_v1"
+BUILD_ID = "2026-05-09_free_version_bump_1_1_4_v1"
 APP_DISPLAY_NAME = "LoneWolf Fang Free"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.4"
 STANDARD_RELEASE_REPO = "kumiromiscythespec/LoneWolf_Fang_standard_releases"
 STANDARD_RELEASE_LATEST_URL = "https://github.com/kumiromiscythespec/LoneWolf_Fang_standard_releases/releases/latest"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+LIVE_DRYRUN = _env_bool("LIVE_DRYRUN", _env_bool("LWF_LIVE_DRYRUN", False))
 
 _RUNTIME_LAYOUT_PATHS = get_paths()
 _CANONICAL_CONFIGS_DIR = str(
@@ -126,6 +157,12 @@ _SYMBOL_PRESET_DEFAULT_SYMBOLS = {
     "BTCJPY": "BTC/JPY",
     "BTCUSDT": "BTC/USDT",
     "BTCUSDC": "BTC/USDC",
+    "XRPJPY": "XRP/JPY",
+    "XRPUSDT": "XRP/USDT",
+    "XRPUSDC": "XRP/USDC",
+    "BNBJPY": "BNB/JPY",
+    "BNBUSDT": "BNB/USDT",
+    "BNBUSDC": "BNB/USDC",
     "ETHUSDT": "ETH/USDT",
     "ETHUSDC": "ETH/USDC",
     "ETHJPY": "ETH/JPY",
@@ -134,9 +171,15 @@ _SYMBOL_PRESET_DEFAULT_EXCHANGE_IDS = {
     "BTCJPY": "coincheck",
     "BTCUSDT": "mexc",
     "BTCUSDC": "mexc",
+    "XRPJPY": "bitbank",
+    "XRPUSDT": "mexc",
+    "XRPUSDC": "mexc",
+    "BNBJPY": "bitbank",
+    "BNBUSDT": "mexc",
+    "BNBUSDC": "mexc",
     "ETHUSDT": "binance",
     "ETHUSDC": "mexc",
-    "ETHJPY": "coincheck",
+    "ETHJPY": "bitbank",
 }
 _symbol_preset_env_symbol = _first_symbol_from_raw(_symbol_preset_env_raw)
 _symbol_preset_env_key = _symbol_to_prefix(_symbol_preset_env_symbol)
@@ -171,22 +214,46 @@ _SYMBOL_PRESET_SEARCH_DIRS = (
     _SYMBOL_PRESET_LOCAL_DIR,
     _SYMBOL_PRESET_CANONICAL_DIR,
 )
+_SYMBOL_PRESET_USDC_TO_USDT_ALIASES = {
+    "BTCUSDC": "BTCUSDT",
+    "ETHUSDC": "ETHUSDT",
+    "XRPUSDC": "XRPUSDT",
+    "BNBUSDC": "BNBUSDT",
+}
 
 
 def _symbol_preset_filename_key(symbol: str) -> str:
     return _symbol_to_prefix(_first_symbol_from_raw(symbol))
 
 
-def _resolve_standard_symbol_preset_path(symbol: str) -> str:
-    key = _symbol_preset_filename_key(symbol)
-    if not key:
-        return ""
+def _find_standard_symbol_preset_path(key: str) -> str:
     preset_filename = f"config_standard_{key}.py"
     for preset_root in _SYMBOL_PRESET_SEARCH_DIRS:
         preset_path = os.path.join(preset_root, preset_filename)
         if os.path.isfile(preset_path):
             return preset_path
     return ""
+
+
+def _resolve_standard_symbol_preset(symbol: str) -> tuple[str, str, str]:
+    key = _symbol_preset_filename_key(symbol)
+    if not key:
+        return "", "", ""
+    preset_path = _find_standard_symbol_preset_path(key)
+    if preset_path:
+        return preset_path, "", ""
+    alias_key = _SYMBOL_PRESET_USDC_TO_USDT_ALIASES.get(key, "")
+    if not alias_key:
+        return "", "", ""
+    alias_path = _find_standard_symbol_preset_path(alias_key)
+    if not alias_path:
+        return "", "", ""
+    return alias_path, key, alias_key
+
+
+def _resolve_standard_symbol_preset_path(symbol: str) -> str:
+    preset_path, _, _ = _resolve_standard_symbol_preset(symbol)
+    return preset_path
 
 
 # Resolve the preset selector before falling back to SYMBOLS[0].
@@ -204,15 +271,27 @@ def _resolve_symbol_preset_selector_symbol() -> str:
 
 
 _ACTIVE_SYMBOL_PRESET_KEY = _symbol_preset_filename_key(_resolve_symbol_preset_selector_symbol())
-_ACTIVE_SYMBOL_PRESET = _resolve_standard_symbol_preset_path(_ACTIVE_SYMBOL_PRESET_KEY)
+(
+    _ACTIVE_SYMBOL_PRESET,
+    _ACTIVE_SYMBOL_PRESET_ALIAS_FROM,
+    _ACTIVE_SYMBOL_PRESET_ALIAS_TO,
+) = _resolve_standard_symbol_preset(_ACTIVE_SYMBOL_PRESET_KEY)
+_ACTIVE_SYMBOL_PRESET_ALIAS_REASON = (
+    "usdc_uses_usdt_preset" if _ACTIVE_SYMBOL_PRESET_ALIAS_TO else ""
+)
 # Only these names may be overridden by symbol presets.
 _SYMBOL_PRESET_ALLOWED_NAMES = {
+    # Pair-confirmed Free preset fields ported from standard.
+    "TRADE_RANGE",
+    "TRADE_TREND",
     "RANGE_ATR_TP_MULT",
     "RANGE_ATR_SL_MULT",
     "RANGE_ENTRY_MIN_ATR_BPS",
     "RANGE_RSI_BUY_MAX",
     "RANGE_ENTRY_MAX_EMA21_DIST_BPS",
     "RANGE_TIMEOUT_BARS",
+    "RANGE_TIMEOUT_MIN_PROFIT_BPS",
+    "RANGE_EARLY_EXIT_LOSS_ATR_MULT",
     "RANGE_TRAIL_START_R",
     "RANGE_TRAIL_BPS_FROM_HIGH",
     "RANGE_UNFAV_EXIT_COOLDOWN_BARS",
@@ -223,6 +302,8 @@ _SYMBOL_PRESET_ALLOWED_NAMES = {
     "SIZE_CAP_RAMP_ENABLED",
     "SIZE_CAP_RAMP_K",
     "SIZE_CAP_RAMP_MAX_PCT",
+    "FIXED_NOTIONAL_CEILING_ENABLED",
+    "FIXED_NOTIONAL_CEILING_BY_SYMBOL",
 }
 
 
@@ -252,100 +333,50 @@ def _apply_symbol_preset(preset_path: str) -> None:
             continue
         globals()[name] = value
 
-PAIR_REGISTRY = {
-    "coincheck:BTC/JPY": {
-        "exchange_id": "coincheck",
-        "symbol": "BTC/JPY",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": True,
-    },
-    "coincheck:ETH/JPY": {
-        "exchange_id": "coincheck",
-        "symbol": "ETH/JPY",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": False,
-        "experimental": True,
-    },
-    "bitbank:BTC/JPY": {
-        "exchange_id": "bitbank",
-        "symbol": "BTC/JPY",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "JPY",
-        "account_ccy": "JPY",
-        "settlement_ccy": "JPY",
-        "visible": True,
-    },
-    "mexc:BTC/USDT": {
-        "exchange_id": "mexc",
-        "symbol": "BTC/USDT",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "mexc:BTC/USDC": {
-        "exchange_id": "mexc",
-        "symbol": "BTC/USDC",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": False,
-        "experimental": True,
-    },
-    "mexc:ETH/USDT": {
-        "exchange_id": "mexc",
-        "symbol": "ETH/USDT",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "mexc:ETH/USDC": {
-        "exchange_id": "mexc",
-        "symbol": "ETH/USDC",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDC",
-        "account_ccy": "USDC",
-        "settlement_ccy": "USDC",
-        "visible": True,
-    },
-    "okx:BTC/USDT": {
-        "exchange_id": "okx",
-        "symbol": "BTC/USDT",
-        "market_type": "spot",
-        "base_ccy": "BTC",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-    "okx:ETH/USDT": {
-        "exchange_id": "okx",
-        "symbol": "ETH/USDT",
-        "market_type": "spot",
-        "base_ccy": "ETH",
-        "quote_ccy": "USDT",
-        "account_ccy": "USDT",
-        "settlement_ccy": "USDT",
-        "visible": True,
-    },
-}
+
+def _apply_usdc_preset_aliases() -> None:
+    if not (_ACTIVE_SYMBOL_PRESET_ALIAS_FROM and _ACTIVE_SYMBOL_PRESET_ALIAS_TO):
+        return
+    by_symbol = globals().get("FIXED_NOTIONAL_CEILING_BY_SYMBOL", {})
+    if not isinstance(by_symbol, dict):
+        return
+    from_symbol = _SYMBOL_PRESET_DEFAULT_SYMBOLS.get(_ACTIVE_SYMBOL_PRESET_ALIAS_FROM, "")
+    to_symbol = _SYMBOL_PRESET_DEFAULT_SYMBOLS.get(_ACTIVE_SYMBOL_PRESET_ALIAS_TO, "")
+    if not (from_symbol and to_symbol):
+        return
+    if to_symbol not in by_symbol or from_symbol in by_symbol:
+        return
+    aliased = dict(by_symbol)
+    aliased[from_symbol] = by_symbol[to_symbol]
+    globals()["FIXED_NOTIONAL_CEILING_BY_SYMBOL"] = aliased
+
+def _build_pair_registry() -> dict[str, dict[str, Any]]:
+    registry: dict[str, dict[str, Any]] = {}
+    for item in list_instruments(include_hidden=True):
+        key = f"{item.exchange_id}:{item.symbol}"
+        entry: dict[str, Any] = {
+            "exchange_id": item.exchange_id,
+            "symbol": item.symbol,
+            "market_type": item.market_type,
+            "base_ccy": item.base_ccy,
+            "quote_ccy": item.quote_ccy,
+            "account_ccy": item.account_ccy,
+            "settlement_ccy": item.settlement_ccy,
+            "dataset_prefix": item.dataset_prefix,
+            "visible": bool(item.visible),
+        }
+        if bool(item.experimental):
+            entry["experimental"] = True
+        registry[key] = entry
+    coincheck_eth = registry.get("coincheck:ETH/JPY")
+    if isinstance(coincheck_eth, dict):
+        coincheck_eth["unsupported_reason"] = (
+            "hidden after 2026-04-23 live ccxt coincheck load_markets() audit did not expose ETH/JPY as an active spot market"
+        )
+    return registry
+
+
+PAIR_REGISTRY = _build_pair_registry()
 
 MEXC_MIN_COST_BY_QUOTE = {
     "USDT": 1.0,
@@ -609,6 +640,9 @@ POSITION_SIZING_MODE = "LEGACY_COMPOUND"  # Compatibility default.
 BASE_RISK_PCT = 0.01
 MAX_POSITION_PCT_OF_EQUITY = 0.12
 MAX_POSITION_NOTIONAL_PCT = MAX_POSITION_PCT_OF_EQUITY
+FIXED_NOTIONAL_CEILING_ENABLED = False
+FIXED_NOTIONAL_CEILING = 0.0
+FIXED_NOTIONAL_CEILING_BY_SYMBOL: dict[str, float] = {}
 DD_DELEVER_THRESHOLD = 0.02
 DD_DELEVER_MIN_MULT = 0.25
 DD_DELEVER_SMOOTH_ENABLED = False
@@ -939,6 +973,7 @@ RANGE_NEAR_LOW_ATR_MULT = 7.5
 RANGE_ENTRY_MIN_EMA9_GAP_BPS = 0.0
 
 _apply_symbol_preset(_ACTIVE_SYMBOL_PRESET)
+_apply_usdc_preset_aliases()
 
 # ----------------------------------------------------------------------
 # BTC/USDT stable preset operational notes

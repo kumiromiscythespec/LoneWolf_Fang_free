@@ -1,9 +1,10 @@
 ﻿{
-  "build_id": "2026-04-02_free_package_manifest_user_scope_installer_v1",
+  "build_id": "2026-05-09_free_version_bump_1_1_4_v1",
   "manifest_version": 3,
   "product": "LoneWolf_Fang_free",
   "package_root_name": "LoneWolf_Fang_free",
   "packaging_stage": "zip_ready_local_installer",
+  "app_version": "1.1.4",
   "source_of_truth": "codex_snapshots_and_local_working_tree",
   "scope": {
     "tier": "free",

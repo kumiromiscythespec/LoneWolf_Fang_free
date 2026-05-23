@@ -1,0 +1,326 @@
+{
+  "blocked_pairs": [],
+  "build_id": "2026-04-28_usdc_preset_alias_fallback_v1",
+  "checked_pairs": [
+    "BTCUSDC",
+    "ETHUSDC",
+    "XRPUSDC",
+    "BNBUSDC"
+  ],
+  "common_env": {
+    "BOT_SYMBOL": "deleted",
+    "BOT_SYMBOLS": "deleted",
+    "LWF_EXCHANGE_ID": "mexc",
+    "LWF_TRADE_STYLE": "deleted"
+  },
+  "decision": "ready",
+  "failed_pairs": [],
+  "files_changed": [
+    "exports/sweeps/usdc_uses_usdt_preset_alias_final_validation_v1.json"
+  ],
+  "mode": "standard",
+  "pairs": {
+    "BNBUSDC": {
+      "active_preset_points_to_usdt": true,
+      "alias_from": "BNBUSDC",
+      "alias_reason": "usdc_uses_usdt_preset",
+      "alias_to": "BNBUSDT",
+      "decision": "ready",
+      "exchange_id": "mexc",
+      "exchange_stayed_mexc": true,
+      "fixed_ceiling_result": {
+        "config_usdc": 1000.0,
+        "config_usdt": 1000.0,
+        "expected_usdc_ceiling": 1000.0,
+        "source_usdt": 1000.0,
+        "source_usdt_key_present": true,
+        "status": "applied",
+        "usdc_key_present": true,
+        "usdc_symbol": "BNB/USDC",
+        "usdt_key_present": true,
+        "usdt_symbol": "BNB/USDT"
+      },
+      "source_fields_checked": {
+        "FIXED_NOTIONAL_CEILING_ENABLED": {
+          "matches_source": true,
+          "runtime": true,
+          "source": true
+        },
+        "RANGE_ATR_SL_MULT": {
+          "matches_source": true,
+          "runtime": 0.035,
+          "source": 0.035
+        },
+        "RANGE_ATR_TP_MULT": {
+          "matches_source": true,
+          "runtime": 0.75,
+          "source": 0.75
+        },
+        "RANGE_ENTRY_MAX_EMA21_DIST_BPS": {
+          "matches_source": true,
+          "runtime": 865.0,
+          "source": 865.0
+        },
+        "RANGE_ENTRY_MIN_ATR_BPS": {
+          "matches_source": true,
+          "runtime": 20.0,
+          "source": 20.0
+        },
+        "RANGE_RSI_BUY_MAX": {
+          "matches_source": true,
+          "runtime": 94.0,
+          "source": 94.0
+        },
+        "RANGE_TIMEOUT_BARS": {
+          "matches_source": true,
+          "runtime": 24.0,
+          "source": 24.0
+        },
+        "TRADE_RANGE": {
+          "matches_source": true,
+          "runtime": 1.0,
+          "source": 1.0
+        },
+        "TRADE_TREND": {
+          "matches_source": true,
+          "runtime": 0.0,
+          "source": 0.0
+        }
+      },
+      "source_fields_match_runtime": true,
+      "source_preset_build_id": "2026-04-28_config_free_bnbusdt_range_fixed_ceiling_v1",
+      "source_preset_exists": true,
+      "source_usdt_preset_path": "configs/config_standard_BNBUSDT.py",
+      "symbols": [
+        "BNB/USDC"
+      ],
+      "symbols_stayed_usdc": true
+    },
+    "BTCUSDC": {
+      "active_preset_points_to_usdt": true,
+      "alias_from": "BTCUSDC",
+      "alias_reason": "usdc_uses_usdt_preset",
+      "alias_to": "BTCUSDT",
+      "decision": "ready",
+      "exchange_id": "mexc",
+      "exchange_stayed_mexc": true,
+      "fixed_ceiling_result": {
+        "config_usdc": null,
+        "config_usdt": null,
+        "source_usdt": null,
+        "source_usdt_key_present": false,
+        "status": "source_has_no_fixed_ceiling",
+        "usdc_key_present": false,
+        "usdc_symbol": "BTC/USDC",
+        "usdt_key_present": false,
+        "usdt_symbol": "BTC/USDT"
+      },
+      "source_fields_checked": {
+        "MAX_POSITION_NOTIONAL_PCT": {
+          "matches_source": true,
+          "runtime": 0.15,
+          "source": 0.15
+        },
+        "MAX_POSITION_PCT_OF_EQUITY": {
+          "matches_source": true,
+          "runtime": 0.15,
+          "source": 0.15
+        },
+        "RANGE_ATR_SL_MULT": {
+          "matches_source": true,
+          "runtime": 0.045,
+          "source": 0.045
+        },
+        "RANGE_ATR_TP_MULT": {
+          "matches_source": true,
+          "runtime": 0.9,
+          "source": 0.9
+        },
+        "RANGE_ENTRY_MAX_EMA21_DIST_BPS": {
+          "matches_source": true,
+          "runtime": 865.0,
+          "source": 865.0
+        },
+        "RANGE_ENTRY_MIN_ATR_BPS": {
+          "matches_source": true,
+          "runtime": 28.0,
+          "source": 28.0
+        },
+        "RANGE_RSI_BUY_MAX": {
+          "matches_source": true,
+          "runtime": 98.0,
+          "source": 98.0
+        },
+        "RANGE_TIMEOUT_BARS": {
+          "matches_source": true,
+          "runtime": 24,
+          "source": 24
+        }
+      },
+      "source_fields_match_runtime": true,
+      "source_preset_build_id": "2026-04-01_configs_canonical_btcusdt_standard_preset_v2",
+      "source_preset_exists": true,
+      "source_usdt_preset_path": "configs/config_standard_BTCUSDT.py",
+      "symbols": [
+        "BTC/USDC"
+      ],
+      "symbols_stayed_usdc": true
+    },
+    "ETHUSDC": {
+      "active_preset_points_to_usdt": true,
+      "alias_from": "ETHUSDC",
+      "alias_reason": "usdc_uses_usdt_preset",
+      "alias_to": "ETHUSDT",
+      "decision": "ready",
+      "exchange_id": "mexc",
+      "exchange_stayed_mexc": true,
+      "fixed_ceiling_result": {
+        "config_usdc": null,
+        "config_usdt": null,
+        "source_usdt": null,
+        "source_usdt_key_present": false,
+        "status": "source_has_no_fixed_ceiling",
+        "usdc_key_present": false,
+        "usdc_symbol": "ETH/USDC",
+        "usdt_key_present": false,
+        "usdt_symbol": "ETH/USDT"
+      },
+      "source_fields_checked": {
+        "RANGE_ATR_SL_MULT": {
+          "matches_source": true,
+          "runtime": 0.00625,
+          "source": 0.00625
+        },
+        "RANGE_ATR_TP_MULT": {
+          "matches_source": true,
+          "runtime": 0.835,
+          "source": 0.835
+        },
+        "RANGE_ENTRY_MAX_EMA21_DIST_BPS": {
+          "matches_source": true,
+          "runtime": 625.0,
+          "source": 625.0
+        },
+        "RANGE_ENTRY_MIN_ATR_BPS": {
+          "matches_source": true,
+          "runtime": 11.0,
+          "source": 11.0
+        },
+        "RANGE_RSI_BUY_MAX": {
+          "matches_source": true,
+          "runtime": 92.0,
+          "source": 92.0
+        },
+        "RANGE_TIMEOUT_BARS": {
+          "matches_source": true,
+          "runtime": 24.0,
+          "source": 24.0
+        },
+        "TRADE_RANGE": {
+          "matches_source": true,
+          "runtime": 1.0,
+          "source": 1.0
+        },
+        "TRADE_TREND": {
+          "matches_source": true,
+          "runtime": 0.0,
+          "source": 0.0
+        }
+      },
+      "source_fields_match_runtime": true,
+      "source_preset_build_id": "2026-03-31_config_standard_ethusdc_final_preset_v1",
+      "source_preset_exists": true,
+      "source_usdt_preset_path": "configs/config_standard_ETHUSDT.py",
+      "symbols": [
+        "ETH/USDC"
+      ],
+      "symbols_stayed_usdc": true
+    },
+    "XRPUSDC": {
+      "active_preset_points_to_usdt": true,
+      "alias_from": "XRPUSDC",
+      "alias_reason": "usdc_uses_usdt_preset",
+      "alias_to": "XRPUSDT",
+      "decision": "ready",
+      "exchange_id": "mexc",
+      "exchange_stayed_mexc": true,
+      "fixed_ceiling_result": {
+        "config_usdc": 500.0,
+        "config_usdt": 500.0,
+        "expected_usdc_ceiling": 500.0,
+        "source_usdt": 500.0,
+        "source_usdt_key_present": true,
+        "status": "applied",
+        "usdc_key_present": true,
+        "usdc_symbol": "XRP/USDC",
+        "usdt_key_present": true,
+        "usdt_symbol": "XRP/USDT"
+      },
+      "source_fields_checked": {
+        "FIXED_NOTIONAL_CEILING_ENABLED": {
+          "matches_source": true,
+          "runtime": true,
+          "source": true
+        },
+        "RANGE_ATR_SL_MULT": {
+          "matches_source": true,
+          "runtime": 0.035,
+          "source": 0.035
+        },
+        "RANGE_ATR_TP_MULT": {
+          "matches_source": true,
+          "runtime": 0.75,
+          "source": 0.75
+        },
+        "RANGE_ENTRY_MAX_EMA21_DIST_BPS": {
+          "matches_source": true,
+          "runtime": 865.0,
+          "source": 865.0
+        },
+        "RANGE_ENTRY_MIN_ATR_BPS": {
+          "matches_source": true,
+          "runtime": 20.0,
+          "source": 20.0
+        },
+        "RANGE_RSI_BUY_MAX": {
+          "matches_source": true,
+          "runtime": 98.0,
+          "source": 98.0
+        },
+        "RANGE_TIMEOUT_BARS": {
+          "matches_source": true,
+          "runtime": 24.0,
+          "source": 24.0
+        },
+        "TRADE_RANGE": {
+          "matches_source": true,
+          "runtime": 1.0,
+          "source": 1.0
+        },
+        "TRADE_TREND": {
+          "matches_source": true,
+          "runtime": 0.0,
+          "source": 0.0
+        }
+      },
+      "source_fields_match_runtime": true,
+      "source_preset_build_id": "2026-04-28_config_free_xrpusdt_range_fixed_ceiling_v1",
+      "source_preset_exists": true,
+      "source_usdt_preset_path": "configs/config_standard_XRPUSDT.py",
+      "symbols": [
+        "XRP/USDC"
+      ],
+      "symbols_stayed_usdc": true
+    }
+  },
+  "repo": "C:\\LoneWolf_Fang_free",
+  "repo_name": "LoneWolf_Fang_free",
+  "runtime_smoke": {
+    "reason": "import_validation_only; no USDC candle data was downloaded; live/paper/order paths were not invoked",
+    "status": "not_run"
+  },
+  "usdc_preset_files_created": false,
+  "usdc_preset_files_in_active_search_roots": [],
+  "usdt_preset_files_copied": false,
+  "validation_id": "usdc_uses_usdt_preset_alias_final_validation_v1"
+}

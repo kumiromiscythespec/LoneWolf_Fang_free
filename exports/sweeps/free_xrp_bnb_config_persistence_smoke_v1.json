@@ -1,0 +1,40 @@
+{
+  "build_id": "2026-04-28_free_xrp_bnb_pair_presets_v1",
+  "active_preset_paths": {
+    "XRPUSDT": "C:/LoneWolf_Fang_free/configs/config_standard_XRPUSDT.py",
+    "BNBUSDT": "C:/LoneWolf_Fang_free/configs/config_standard_BNBUSDT.py"
+  },
+  "resolver_results": {
+    "XRPUSDT": {
+      "symbol": "XRP/USDT",
+      "resolver_available": false,
+      "resolver_error": "ModuleNotFoundError: No module named 'app.core.sizing_contract'",
+      "direct_by_symbol_notional": 500.0
+    },
+    "BNBUSDT": {
+      "symbol": "BNB/USDT",
+      "resolver_available": false,
+      "resolver_error": "ModuleNotFoundError: No module named 'app.core.sizing_contract'",
+      "direct_by_symbol_notional": 1000.0
+    }
+  },
+  "smoke_mode_keys": [
+    "DIFF_TRACE_ENABLED",
+    "PRECOMPUTED_INDICATORS_ENABLED",
+    "SLIPPAGE_BPS"
+  ],
+  "forbidden_production_keys_absent_from_smoke_modes": true,
+  "cap_check_results": {
+    "XRPUSDT": {
+      "runtime_cap_check_run": false,
+      "configured_direct_ceiling": 500.0
+    },
+    "BNBUSDT": {
+      "runtime_cap_check_run": false,
+      "configured_direct_ceiling": 1000.0
+    }
+  },
+  "smoke_result_rows": [],
+  "decision": "blocked",
+  "blocked_reason": "Free sweep.py cannot start because sweep_presets.py is absent, and Free has no app.core.sizing_contract fixed-ceiling resolver/runtime surface. Import validation passed; runtime cap smoke was not supported without porting non-config logic."
+}

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lonewolffang.local/schema/backtest_offline_market_rules.schema.json",
+  "title": "Backtest Offline Market Rules",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "markets"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "markets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["symbol", "min_cost"],
+        "anyOf": [
+          {"required": ["amount_precision"]},
+          {"required": ["amount_step"]}
+        ],
+        "anyOf": [
+          {"required": ["price_precision"]},
+          {"required": ["price_step"]},
+          {"required": ["tick_size"]}
+        ],
+        "allOf": [
+          {
+            "anyOf": [
+              {"required": ["min_amount"]},
+              {"required": ["min_qty"]}
+            ]
+          }
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "amount_precision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount_step": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "price_precision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "price_step": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "tick_size": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "min_amount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "min_qty": {
+            "type": "number",
+            "minimum": 0
+          },
+          "min_cost": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "not": {
+          "anyOf": [
+            {"required": ["api_key"]},
+            {"required": ["apiSecret"]},
+            {"required": ["secret"]},
+            {"required": ["authorization"]},
+            {"required": ["order_id"]},
+            {"required": ["balance"]},
+            {"required": ["raw_order"]}
+          ]
+        }
+      }
+    }
+  }
+}

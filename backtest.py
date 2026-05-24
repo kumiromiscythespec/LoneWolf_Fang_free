@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-25_free_backtest_offline_market_rules_v1
 # BUILD_ID: 2026-05-08_free_precomputed_backtest_fast_path_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
@@ -25,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging, csv, argparse, heapq, glob, os, re, sys
 from dataclasses import dataclass
@@ -36,8 +38,12 @@ from indicators import ema, rsi, atr, adx
 # Backtest consumes the historical ADX seed contract v1 from indicators.py.
 # Do not change the 2p seed here as an incidental fix; canonical 2p-1 belongs
 # only in an explicit ADX_IMPL_VERSION=2 migration.
-from exchange import ExchangeClient
 from risk import calc_qty_from_risk
+from helper.backtest_offline_market_rules import (
+    OfflineMarketRulesError,
+    OfflineMarketRulesProvider,
+    load_offline_market_rules,
+)
 from helper.risk_notional_contract import effective_max_notional as _risk_notional_cap
 from strategy import (
     detect_regime_1h,
@@ -113,7 +119,6 @@ _bridge_lwf_symbol_preset_from_cli(sys.argv[1:])
 
 import numpy as np
 import config as C
-import runner as R
 import math
 from trace_bar_policy import attach_bar_snapshot as _trace_attach_bar_snapshot
 from app.core.data_pipeline import auto_prepare_runtime_data, resolve_prepare_month_window
@@ -138,7 +143,11 @@ from app.core.export_paths import (
     write_last_run_json,
 )
 
-BUILD_ID = "2026-05-08_free_precomputed_backtest_fast_path_v1"
+BUILD_ID = "2026-05-25_free_backtest_offline_market_rules_v1"
+OFFLINE_MARKET_RULES_BUILD_ID = "2026-05-25_free_backtest_offline_market_rules_v1"
+
+ExchangeClient: Any = None
+R: Any = None
 
 OPEN_COST_DIAG_LIMIT_DEFAULT = 8
 _CURRENT_EXPORT_DIR = ""
@@ -147,6 +156,21 @@ _CURRENT_EXPORT_SYMBOL = ""
 _PRECOMPUTED_SIGNALS_PRODUCT = "free"
 _PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
 _AUTO_PREPARE_REQUESTS: set[str] = set()
+
+
+def _get_exchange_client_class() -> Any:
+    global ExchangeClient
+    if ExchangeClient is None:
+        module = importlib.import_module("exchange")
+        ExchangeClient = getattr(module, "ExchangeClient")
+    return ExchangeClient
+
+
+def _get_runner_module() -> Any:
+    global R
+    if R is None:
+        R = importlib.import_module("runner")
+    return R
 
 
 def _resolve_backtest_symbols(raw_symbols: str) -> tuple[list[str], str]:
@@ -496,7 +520,7 @@ def _build_synthetic_backtest_market_meta(exchange_id: str, symbol: str) -> tupl
             min_cost = 0.0
 
     try:
-        rules = ExchangeClient(ex).get_market_rules(resolved_symbol)
+        rules = _get_exchange_client_class()(ex).get_market_rules(resolved_symbol)
         min_qty = float(rules.get("min_qty") or 0.0)
         min_cost = max(float(min_cost), float(rules.get("min_cost") or 0.0))
         tick_size = float(rules.get("tick_size") or 0.0)
@@ -523,7 +547,39 @@ def _build_synthetic_backtest_market_meta(exchange_id: str, symbol: str) -> tupl
     )
 
 
-def _load_backtest_market_meta(exchange_id: str, symbol: str) -> tuple[object | None, str, str]:
+def _build_offline_backtest_market_meta(
+    exchange_id: str,
+    symbol: str,
+    offline_market_rules: OfflineMarketRulesProvider,
+) -> MarketMeta:
+    rules = offline_market_rules.get_market_rules(symbol)
+    resolved_symbol = str(rules.get("symbol") or symbol).strip() or symbol
+    maker_fee_rate, taker_fee_rate = resolve_paper_fees(exchange_id)
+    spread_bps, _spread_env_override = _resolve_backtest_spread_bps()
+    return MarketMeta(
+        exchange_id=str(exchange_id or "").strip().lower() or "offline",
+        symbol=resolved_symbol,
+        quote_ccy=str(resolve_quote_ccy(resolved_symbol) or "").strip().upper(),
+        maker_fee_rate=float(maker_fee_rate),
+        taker_fee_rate=float(taker_fee_rate),
+        spread_bps=float(spread_bps),
+        min_qty=float(rules.get("min_qty") or 0.0),
+        min_cost=float(rules.get("min_cost") or 0.0),
+        tick_size=float(rules.get("tick_size") or 0.0),
+        amount_precision=int(rules.get("amount_precision") or 0),
+        updated_at=0.0,
+    )
+
+
+def _load_backtest_market_meta(
+    exchange_id: str,
+    symbol: str,
+    offline_market_rules: OfflineMarketRulesProvider | None = None,
+) -> tuple[object | None, str, str]:
+    if offline_market_rules is not None:
+        meta = _build_offline_backtest_market_meta(exchange_id, symbol, offline_market_rules)
+        return meta, "offline_market_rules", str(getattr(offline_market_rules, "source_path", "") or "")
+
     paths = ensure_runtime_dirs()
     cache_path = market_meta_cache_path(paths.state_dir, exchange_id, symbol)
     refresh = str(os.getenv("MARKET_META_REFRESH", "") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -533,7 +589,7 @@ def _load_backtest_market_meta(exchange_id: str, symbol: str) -> tuple[object | 
         except Exception:
             ttl_raw = 3600.0
         try:
-            ex = ExchangeClient(exchange_id)
+            ex = _get_exchange_client_class()(exchange_id)
             meta, source, cache_path = maybe_refresh_market_meta(
                 ex,
                 exchange_id=exchange_id,
@@ -563,6 +619,542 @@ def _market_meta_source_kind(source: object) -> str:
     if "cache" in src:
         return "cache"
     return src or "unknown"
+
+
+def _backtest_paper_fee_pair() -> tuple[float, float]:
+    exchange_id = (os.getenv("LWF_EXCHANGE_ID") or getattr(C, "EXCHANGE_ID", "mexc")).strip().lower() or "mexc"
+    maker, taker = resolve_paper_fees(exchange_id)
+    maker = float(maker)
+    taker = float(taker)
+    if exchange_id == "coincheck":
+        if taker < 0.0:
+            taker = 0.0
+        if maker < 0.0:
+            maker = taker
+        return maker, taker
+    if taker <= 0.0:
+        taker = 0.0002
+    if maker <= 0.0:
+        maker = taker
+    return maker, taker
+
+
+def _diag_float_or_none(v: Any) -> float | None:
+    try:
+        x = float(v)
+    except Exception:
+        return None
+    return float(x) if math.isfinite(x) else None
+
+
+def _kept_pct_of_mfe(mfe_bps: Any, giveback_to_close_bps: Any) -> float:
+    try:
+        mfe = float(mfe_bps)
+        giveback = float(giveback_to_close_bps)
+    except Exception:
+        return 0.0
+    if (not math.isfinite(mfe)) or (not math.isfinite(giveback)) or mfe <= 0.0:
+        return 0.0
+    kept_bps = max(0.0, float(mfe) - float(giveback))
+    return float(kept_bps / max(float(mfe), 1e-12))
+
+
+def _stop_move_source(stop_kind: Any) -> str:
+    kind = str(stop_kind or "").strip().lower()
+    if kind in ("", "init", "raw"):
+        return "raw"
+    if kind == "be":
+        return "be"
+    if kind == "trail":
+        return "trail"
+    return "unknown"
+
+
+class _BacktestOfflineRunnerCompat:
+    """Pure subset of runner helpers needed by offline market-rules mode."""
+
+    @staticmethod
+    def _cfg_snapshot(keys=None) -> dict:
+        if keys is None:
+            keys = [
+                "MODE",
+                "TRADE_TREND",
+                "TRADE_RANGE",
+                "TRADE_ONLY_TREND",
+                "TREND_ENTRY_MODE",
+                "RANGE_ENTRY_MODE",
+                "TF_ENTRY",
+                "TF_FILTER",
+                "MIN_TP_BPS",
+                "MIN_RR_AFTER_ADJUST_TREND_LONG",
+            ]
+        snap = {}
+        for key in keys:
+            if not hasattr(C, key):
+                continue
+            value = getattr(C, key)
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                snap[key] = value
+            elif isinstance(value, (list, tuple)):
+                snap[key] = list(value)
+            else:
+                snap[key] = str(value)
+        return snap
+
+    @staticmethod
+    def _filters_for_regime(regime: str) -> dict:
+        if str(regime or "").lower() == "range":
+            return dict(getattr(C, "FILTERS_RANGE", {}))
+        return dict(getattr(C, "FILTERS_TREND", {}))
+
+    @staticmethod
+    def _expectancy_filter(entry: float, stop_price: float, tp_price: float, spread_bps: float | None) -> tuple[bool, str]:
+        min_tp_bps = float(getattr(C, "MIN_TP_BPS", 6.0))
+        need_mult = float(getattr(C, "EXPECTANCY_NEED_MULT", 1.4))
+        sp = float(spread_bps) if spread_bps is not None else 0.0
+        tp_bps = (tp_price - entry) / entry * 10000.0
+        _, taker_fee_rate = _backtest_paper_fee_pair()
+        fee_bps = 2.0 * float(taker_fee_rate) * 10000.0
+        fee_mult = float(getattr(C, "EXPECTANCY_FEE_MULT", 1.2))
+        need = max(min_tp_bps, sp * need_mult, fee_bps * fee_mult)
+        eps_bps = float(getattr(C, "EXPECTANCY_EPS_BPS", 0.05))
+        if (tp_bps + eps_bps) < need:
+            return False, f"Expectancy too low (tp_bps={tp_bps:.2f} < need={need:.2f})"
+        return True, f"OK(tp_bps={tp_bps:.2f} need={need:.2f})"
+
+    @staticmethod
+    def _adjust_tp_sl(
+        symbol: str,
+        entry: float,
+        stop_price: float,
+        tp_price: float,
+        spread_bps: float | None,
+        high: list[float],
+        low: list[float],
+        close: list[float],
+        regime: str | None = None,
+        direction: str | None = None,
+    ) -> tuple[bool, float, float, str]:
+        is_range = str(regime).lower() == "range"
+        min_rr_default = float(getattr(C, "MIN_RR_AFTER_ADJUST", 1.30))
+        reg = str(regime).lower()
+        dir_ = str(direction).lower()
+        min_rr = min_rr_default
+        cfg_path = getattr(C, "__file__", None)
+
+        if reg == "trend":
+            if dir_ == "long":
+                min_rr = float(getattr(C, "MIN_RR_AFTER_ADJUST_TREND_LONG", min_rr_default))
+            elif dir_ == "none":
+                min_rr = float(getattr(C, "MIN_RR_AFTER_ADJUST_TREND_NONE", min_rr_default))
+            elif dir_ == "short":
+                min_rr = float(getattr(C, "MIN_RR_AFTER_ADJUST_TREND_SHORT", min_rr_default))
+
+        min_tp_bps = float(getattr(C, "MIN_TP_BPS", 6.0))
+        min_stop_bps = float(getattr(C, "MIN_STOP_BPS", 1.5))
+        target_stop_bps = float(getattr(C, "TARGET_STOP_BPS", 4.0))
+        tp_sp_mult = float(getattr(C, "TP_SPREAD_MULT", 2.0))
+        sl_sp_mult = float(getattr(C, "SL_SPREAD_MULT", 1.0))
+        use_atr = bool(getattr(C, "USE_ATR_FOR_TP_SL", True))
+        atr_period = int(getattr(C, "ATR_PERIOD_ENTRY", 14))
+        atr_tp_mult = float(getattr(C, "ATR_TP_MULT", 1.2))
+        atr_sl_mult = float(getattr(C, "ATR_SL_MULT", 1.0))
+
+        reg_l = str(regime).lower()
+        dir_l = str(direction).lower()
+        if reg_l == "trend" and dir_l == "long":
+            atr_tp_mult = float(getattr(C, "ATR_TP_MULT_TREND_LONG", atr_tp_mult))
+            atr_sl_mult = float(getattr(C, "ATR_SL_MULT_TREND_LONG", atr_sl_mult))
+
+        if is_range:
+            min_rr = float(getattr(C, "RANGE_MIN_RR_AFTER_ADJUST", min_rr))
+            min_tp_bps = float(getattr(C, "RANGE_MIN_TP_BPS", min_tp_bps))
+            min_stop_bps = float(getattr(C, "RANGE_MIN_STOP_BPS", min_stop_bps))
+            target_stop_bps = float(getattr(C, "RANGE_TARGET_STOP_BPS", target_stop_bps))
+            tp_sp_mult = float(getattr(C, "RANGE_TP_SPREAD_MULT", tp_sp_mult))
+            sl_sp_mult = float(getattr(C, "RANGE_SL_SPREAD_MULT", sl_sp_mult))
+            use_atr = bool(getattr(C, "RANGE_USE_ATR_FOR_TP_SL", use_atr))
+            atr_period = int(getattr(C, "RANGE_ATR_PERIOD_ENTRY", atr_period))
+            atr_tp_mult = float(getattr(C, "RANGE_ATR_TP_MULT", atr_tp_mult))
+            atr_sl_mult = float(getattr(C, "RANGE_ATR_SL_MULT", atr_sl_mult))
+
+        sp = float(spread_bps) if spread_bps is not None else 0.0
+        _, taker_fee_rate = _backtest_paper_fee_pair()
+        fee_bps_round = 2.0 * float(taker_fee_rate) * 10000.0
+        slip_bps = float(getattr(C, "SLIPPAGE_BPS", 0.0))
+        entry_eff = entry * (1.0 + max(0.0, slip_bps) / 10000.0)
+        slip_bps_round = 2.0 * max(0.0, slip_bps)
+        cost_bps_round = fee_bps_round + slip_bps_round + sp
+        tp_cost_mult = float(getattr(C, "MIN_TP_COST_MULT", 2.0))
+        sl_cost_mult = float(getattr(C, "MIN_STOP_COST_MULT", 0.8))
+
+        min_tp_bps = max(min_tp_bps, cost_bps_round * tp_cost_mult)
+        min_stop_bps = max(min_stop_bps, cost_bps_round * sl_cost_mult)
+        min_stop_bps = max(min_stop_bps, target_stop_bps)
+        stop_price = min(stop_price, entry * (1.0 - min_stop_bps / 10000.0))
+        tp_price = max(tp_price, entry * (1.0 + min_tp_bps / 10000.0))
+        tp_price = max(tp_price, entry_eff * (1.0 + (sp * tp_sp_mult) / 10000.0))
+        stop_price = min(stop_price, entry_eff * (1.0 - (sp * sl_sp_mult) / 10000.0))
+
+        if use_atr:
+            a = atr(high, low, close, period=atr_period)
+            try:
+                a_last = float(a[-1]) if hasattr(a, "__len__") else float(a)
+            except Exception:
+                a_last = None
+            if a_last and a_last > 0:
+                tp_price = max(tp_price, entry + a_last * atr_tp_mult)
+                stop_price = min(stop_price, entry - a_last * atr_sl_mult)
+
+        if is_range:
+            tp_cap_bps = float(getattr(C, "RANGE_TP_CAP_BPS", 0.0))
+            if tp_cap_bps and tp_cap_bps > 0:
+                tp_price = min(tp_price, entry * (1.0 + tp_cap_bps / 10000.0))
+
+        max_stop_bps = float(getattr(C, "MAX_STOP_BPS", 0.0))
+        if is_range:
+            max_stop_bps = float(getattr(C, "RANGE_MAX_STOP_BPS", max_stop_bps))
+        if max_stop_bps and max_stop_bps > 0:
+            sl_bps = (entry - stop_price) / entry * 10000.0
+            if sl_bps - 1e-9 > max_stop_bps:
+                if is_range:
+                    stop_price = max(stop_price, entry * (1.0 - max_stop_bps / 10000.0))
+                else:
+                    return False, stop_price, tp_price, (
+                        f"adjust_tp_sl(stop_too_wide sl_bps={sl_bps:.2f} > {max_stop_bps:.2f} "
+                        f"reg={reg} dir={dir_} cfg={cfg_path})"
+                    )
+
+        risk = entry - stop_price
+        reward = tp_price - entry
+        if risk <= 0 or reward <= 0:
+            return False, stop_price, tp_price, "Bad TP/SL after adjust"
+        rr = reward / risk
+        if rr + 1e-9 < min_rr:
+            return False, stop_price, tp_price, (
+                f"RR below min after adjust (rr={rr:.2f} < {min_rr:.2f}) "
+                f"reg={reg} dir={dir_} min_rr_default={min_rr_default:.2f} min_rr_final={min_rr:.2f} cfg={cfg_path}"
+            )
+        tp_bps = (tp_price - entry) / entry * 10000.0
+        sl_bps = (entry - stop_price) / entry * 10000.0
+        return True, stop_price, tp_price, (
+            f"ADJ_OK(rr={rr:.2f}, tp_bps={tp_bps:.2f}, sl_bps={sl_bps:.2f}, "
+            f"min_tp_bps={min_tp_bps:.2f}, min_stop_bps={min_stop_bps:.2f}, sp={sp:.2f}, "
+            f"cost={cost_bps_round:.2f}, tp_mult={tp_cost_mult:.2f}, sl_mult={sl_cost_mult:.2f})"
+        )
+
+    @staticmethod
+    def _calc_be_offset_bps(
+        spread_bps: float | None,
+        atr_bps: float | None = None,
+        static_off_bps: float | None = None,
+    ) -> float:
+        static_off = float(static_off_bps) if static_off_bps is not None else float(getattr(C, "BE_OFFSET_BPS", 1.5))
+        sp = float(spread_bps) if spread_bps is not None else 0.0
+        atr_now_bps = float(atr_bps) if atr_bps is not None else 0.0
+        if not bool(getattr(C, "BE_USE_DYNAMIC_OFFSET", False)):
+            off_bps = static_off
+        else:
+            _, taker_fee_rate = _backtest_paper_fee_pair()
+            fee_bps_round = 2.0 * float(taker_fee_rate) * 10000.0
+            slip_bps = float(getattr(C, "SLIPPAGE_BPS", 0.0))
+            fee_mult = float(getattr(C, "BE_DYNAMIC_FEE_MULT", 1.1))
+            sp_mult = float(getattr(C, "BE_DYNAMIC_SPREAD_MULT", 1.0))
+            slip_mult = float(getattr(C, "BE_DYNAMIC_SLIP_MULT", 1.0))
+            dyn = (fee_bps_round * fee_mult) + (sp * sp_mult) + (slip_bps * slip_mult)
+            off_bps = max(static_off, dyn)
+        min_off_bps = max(60.0, 3.0 * sp, 0.35 * atr_now_bps)
+        return max(float(off_bps), float(min_off_bps))
+
+    @staticmethod
+    def _be_params(regime: str) -> tuple[float, float]:
+        if str(regime or "").lower() == "range":
+            tr = float(getattr(C, "RANGE_BE_TRIGGER_R", getattr(C, "BE_TRIGGER_R", 0.7)))
+            off = float(getattr(C, "RANGE_BE_OFFSET_BPS", getattr(C, "BE_OFFSET_BPS", 1.5)))
+            return tr, off
+        return float(getattr(C, "BE_TRIGGER_R", 0.7)), float(getattr(C, "BE_OFFSET_BPS", 1.5))
+
+    @staticmethod
+    def _be_effective_enabled(regime: str, *, force_disable_be: bool = False) -> bool:
+        if bool(force_disable_be) or not bool(getattr(C, "BE_ENABLED", True)):
+            return False
+        try:
+            trigger_r, _ = _BacktestOfflineRunnerCompat._be_params(regime)
+            return bool(math.isfinite(float(trigger_r)) and float(trigger_r) > 0.0)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _tp1_range_effective_params(*, require_flag: bool) -> tuple[bool, float, float]:
+        trig_r = float(getattr(C, "RANGE_TP1_TRIGGER_R", getattr(C, "TP1_TRIGGER_R", 0.0)) or 0.0)
+        qty_pct = float(getattr(C, "RANGE_TP1_QTY_PCT", getattr(C, "TP1_QTY_PCT", 0.0)) or 0.0)
+        enabled = bool(trig_r > 0.0 and qty_pct > 0.0)
+        if bool(require_flag):
+            enabled = bool(enabled and bool(getattr(C, "RANGE_TP1_ENABLED", False)))
+        return bool(enabled), float(trig_r), float(qty_pct)
+
+    @staticmethod
+    def _trail_params(regime: str) -> tuple[float, float, float]:
+        if str(regime or "").lower() == "range":
+            start_r = float(getattr(C, "RANGE_TRAIL_START_R", getattr(C, "TRAIL_START_R", 0.8)))
+            atr_mult = float(getattr(C, "RANGE_TRAIL_ATR_MULT", getattr(C, "TRAIL_ATR_MULT", 1.2)))
+            bps = float(getattr(C, "RANGE_TRAIL_BPS_FROM_HIGH", getattr(C, "TRAIL_BPS_FROM_HIGH", 18.0)))
+            return start_r, atr_mult, bps
+        return (
+            float(getattr(C, "TRAIL_START_R", 0.8)),
+            float(getattr(C, "TRAIL_ATR_MULT", 1.2)),
+            float(getattr(C, "TRAIL_BPS_FROM_HIGH", 18.0)),
+        )
+
+    @staticmethod
+    def _trail_diag_defaults(regime: str, *, init_stop: Any, entry_exec: Any = None) -> dict[str, Any]:
+        start_r, _, bps_from_high = _BacktestOfflineRunnerCompat._trail_params(str(regime))
+        out = {
+            "init_stop": float(init_stop),
+            "trail_triggered": False,
+            "trail_start_r": float(start_r),
+            "trail_bps_from_high": float(bps_from_high),
+            "start_price": None,
+            "trail_eval_count": 0,
+            "trail_candidate_stop_last": None,
+            "trail_candidate_stop_max": None,
+            "trail_candidate_minus_current_stop": None,
+            "trail_candidate_minus_current_stop_max": None,
+            "trail_candidate_from_atr_last": None,
+            "trail_candidate_from_bps_last": None,
+            "trail_eligible_count": 0,
+            "trail_update_count": 0,
+            "trail_block_reason_last": "",
+            "trail_block_reason_max": "",
+            "trail_start_price_last": None,
+            "trail_start_price_max_context": None,
+            "trail_bar_high_last": None,
+            "trail_bar_high_max": None,
+            "trail_pos_stop_before_last": None,
+            "trail_pos_stop_before_max_context": None,
+            "trail_risk_per_unit_last": None,
+            "trail_mode_last": "none",
+            "be_triggered": False,
+            "be_trigger_r": None,
+            "be_offset_bps": None,
+            "be_stop_set": None,
+        }
+        try:
+            if entry_exec is not None:
+                out["entry_exec"] = float(entry_exec)
+        except Exception:
+            pass
+        return out
+
+    @staticmethod
+    def _trail_diag_update(
+        meta: dict[str, Any],
+        *,
+        block_reason: Any,
+        candidate_stop: Any,
+        candidate_from_atr: Any,
+        candidate_from_bps: Any,
+        pos_stop_before: Any,
+        start_price: Any,
+        bar_high: Any,
+        risk_per_unit: Any,
+        mode: Any,
+    ) -> float | None:
+        cand_stop_f = _diag_float_or_none(candidate_stop)
+        cand_atr_f = _diag_float_or_none(candidate_from_atr)
+        cand_bps_f = _diag_float_or_none(candidate_from_bps)
+        pos_stop_before_f = _diag_float_or_none(pos_stop_before)
+        start_price_f = _diag_float_or_none(start_price)
+        bar_high_f = _diag_float_or_none(bar_high)
+        risk_per_unit_f = _diag_float_or_none(risk_per_unit)
+        cand_delta_f = (
+            float(cand_stop_f) - float(pos_stop_before_f)
+            if (cand_stop_f is not None and pos_stop_before_f is not None)
+            else None
+        )
+        try:
+            meta["trail_eval_count"] = max(0, int(meta.get("trail_eval_count", 0) or 0)) + 1
+        except Exception:
+            meta["trail_eval_count"] = 1
+        meta["trail_candidate_stop_last"] = cand_stop_f
+        meta["trail_candidate_minus_current_stop"] = cand_delta_f
+        meta["trail_candidate_from_atr_last"] = cand_atr_f
+        meta["trail_candidate_from_bps_last"] = cand_bps_f
+        meta["trail_block_reason_last"] = str(block_reason or "")
+        meta["trail_start_price_last"] = start_price_f
+        meta["trail_bar_high_last"] = bar_high_f
+        meta["trail_pos_stop_before_last"] = pos_stop_before_f
+        meta["trail_risk_per_unit_last"] = risk_per_unit_f
+        meta["trail_mode_last"] = str(mode or "none")
+        if start_price_f is not None:
+            meta["start_price"] = start_price_f
+        cur_max = _diag_float_or_none(meta.get("trail_candidate_minus_current_stop_max"))
+        if cand_delta_f is not None and (cur_max is None or float(cand_delta_f) > float(cur_max)):
+            meta["trail_candidate_minus_current_stop_max"] = cand_delta_f
+            meta["trail_candidate_stop_max"] = cand_stop_f
+            meta["trail_block_reason_max"] = str(block_reason or "")
+            meta["trail_start_price_max_context"] = start_price_f
+            meta["trail_bar_high_max"] = bar_high_f
+            meta["trail_pos_stop_before_max_context"] = pos_stop_before_f
+        elif cur_max is None and str(block_reason or "") and (not str(meta.get("trail_block_reason_max") or "")):
+            meta["trail_block_reason_max"] = str(block_reason or "")
+            meta["trail_start_price_max_context"] = start_price_f
+            meta["trail_bar_high_max"] = bar_high_f
+            meta["trail_pos_stop_before_max_context"] = pos_stop_before_f
+        return cand_delta_f
+
+    @staticmethod
+    def _build_stop_diag_fields(
+        *,
+        stop_kind: Any,
+        init_stop: Any,
+        final_stop: Any,
+        entry_exec: Any,
+        trail_eval_count: Any = 0,
+        trail_candidate_stop_last: Any = None,
+        trail_candidate_stop_max: Any = None,
+        trail_candidate_minus_current_stop: Any = None,
+        trail_candidate_minus_current_stop_max: Any = None,
+        trail_candidate_from_atr_last: Any = None,
+        trail_candidate_from_bps_last: Any = None,
+        trail_eligible_count: Any = 0,
+        trail_update_count: Any = 0,
+        trail_block_reason_last: Any = "",
+        trail_block_reason_max: Any = "",
+        start_price: Any = None,
+        trail_start_price_last: Any = None,
+        trail_start_price_max_context: Any = None,
+        trail_bar_high_last: Any = None,
+        trail_bar_high_max: Any = None,
+        trail_pos_stop_before_last: Any = None,
+        trail_pos_stop_before_max_context: Any = None,
+        trail_risk_per_unit_last: Any = None,
+        trail_mode_last: Any = None,
+        mfe_bps: Any = 0.0,
+        giveback_to_close_bps: Any = 0.0,
+    ) -> dict[str, Any]:
+        init_stop_f = _diag_float_or_none(init_stop)
+        final_stop_f = _diag_float_or_none(final_stop)
+        entry_exec_f = _diag_float_or_none(entry_exec)
+        start_price_f = _diag_float_or_none(start_price)
+        cand_stop_f = _diag_float_or_none(trail_candidate_stop_last)
+        cand_stop_max_f = _diag_float_or_none(trail_candidate_stop_max)
+        cand_delta_f = _diag_float_or_none(trail_candidate_minus_current_stop)
+        cand_delta_max_f = _diag_float_or_none(trail_candidate_minus_current_stop_max)
+        cand_from_atr_f = _diag_float_or_none(trail_candidate_from_atr_last)
+        cand_from_bps_f = _diag_float_or_none(trail_candidate_from_bps_last)
+        start_price_last_f = _diag_float_or_none(trail_start_price_last)
+        start_price_max_f = _diag_float_or_none(trail_start_price_max_context)
+        bar_high_last_f = _diag_float_or_none(trail_bar_high_last)
+        bar_high_max_f = _diag_float_or_none(trail_bar_high_max)
+        pos_stop_before_last_f = _diag_float_or_none(trail_pos_stop_before_last)
+        pos_stop_before_max_f = _diag_float_or_none(trail_pos_stop_before_max_context)
+        risk_per_unit_last_f = _diag_float_or_none(trail_risk_per_unit_last)
+        try:
+            eval_count = max(0, int(trail_eval_count or 0))
+        except Exception:
+            eval_count = 0
+        try:
+            eligible_count = max(0, int(trail_eligible_count or 0))
+        except Exception:
+            eligible_count = 0
+        try:
+            update_count = max(0, int(trail_update_count or 0))
+        except Exception:
+            update_count = 0
+        return {
+            "stop_move_source": _stop_move_source(stop_kind),
+            "final_stop": final_stop_f,
+            "final_stop_minus_init_stop": (
+                float(final_stop_f) - float(init_stop_f)
+                if (final_stop_f is not None and init_stop_f is not None)
+                else None
+            ),
+            "final_stop_minus_entry": (
+                float(final_stop_f) - float(entry_exec_f)
+                if (final_stop_f is not None and entry_exec_f is not None)
+                else None
+            ),
+            "kept_pct_of_mfe": float(_kept_pct_of_mfe(mfe_bps, giveback_to_close_bps)),
+            "trail_eval_count": int(eval_count),
+            "trail_candidate_stop_last": cand_stop_f,
+            "trail_candidate_stop_max": cand_stop_max_f,
+            "trail_candidate_minus_current_stop": cand_delta_f,
+            "trail_candidate_minus_current_stop_last": cand_delta_f,
+            "trail_candidate_minus_current_stop_max": cand_delta_max_f,
+            "trail_candidate_from_atr_last": cand_from_atr_f,
+            "trail_candidate_from_bps_last": cand_from_bps_f,
+            "trail_eligible_count": int(eligible_count),
+            "trail_update_count": int(update_count),
+            "trail_block_reason_last": str(trail_block_reason_last or ""),
+            "trail_block_reason_max": str(trail_block_reason_max or ""),
+            "start_price": start_price_f,
+            "trail_start_price_last": start_price_last_f if start_price_last_f is not None else start_price_f,
+            "trail_start_price_max_context": start_price_max_f,
+            "trail_bar_high_last": bar_high_last_f,
+            "trail_bar_high_max": bar_high_max_f,
+            "trail_pos_stop_before_last": pos_stop_before_last_f,
+            "trail_pos_stop_before_max_context": pos_stop_before_max_f,
+            "trail_risk_per_unit_last": risk_per_unit_last_f,
+            "trail_mode_last": str(trail_mode_last or "none"),
+        }
+
+    @staticmethod
+    def _effective_range_config_snapshot(*, force_disable_be: bool = False, tp1_requires_flag: bool = False) -> dict[str, Any]:
+        trade_range = bool(getattr(C, "TRADE_RANGE", True))
+        try:
+            trade_trend = float(getattr(C, "TRADE_TREND", 0.0) or 0.0)
+        except Exception:
+            trade_trend = 0.0
+        be_trigger_r, be_offset_bps = _BacktestOfflineRunnerCompat._be_params("range")
+        be_enabled = _BacktestOfflineRunnerCompat._be_effective_enabled("range", force_disable_be=bool(force_disable_be))
+        tp1_enabled, tp1_trigger_r, tp1_qty_pct = _BacktestOfflineRunnerCompat._tp1_range_effective_params(
+            require_flag=bool(tp1_requires_flag)
+        )
+        trail_start_r, _, trail_bps_from_high = _BacktestOfflineRunnerCompat._trail_params("range")
+        return {
+            "TRADE_RANGE": bool(trade_range),
+            "TRADE_TREND": float(trade_trend),
+            "BE_ENABLED": bool(getattr(C, "BE_ENABLED", True)),
+            "BE_EFFECTIVE_ENABLED": bool(be_enabled),
+            "BE_FORCE_DISABLED": bool(force_disable_be),
+            "BE_USE_DYNAMIC_OFFSET": bool(be_enabled and bool(getattr(C, "BE_USE_DYNAMIC_OFFSET", False))),
+            "BE_TRIGGER_R": float(be_trigger_r),
+            "BE_OFFSET_BPS": float(be_offset_bps),
+            "RANGE_TP1_TRIGGER_R": float(tp1_trigger_r),
+            "RANGE_TP1_QTY_PCT": float(tp1_qty_pct),
+            "TP1_EFFECTIVE_ENABLED": bool(tp1_enabled),
+            "RANGE_TRAIL_START_R": float(trail_start_r),
+            "RANGE_TRAIL_BPS_FROM_HIGH": float(trail_bps_from_high),
+            "RANGE_ATR_SL_MULT": float(getattr(C, "RANGE_ATR_SL_MULT", 0.0) or 0.0),
+            "RANGE_ATR_TP_MULT": float(getattr(C, "RANGE_ATR_TP_MULT", 0.0) or 0.0),
+            "RANGE_EXIT_ON_EMA21_BREAK": bool(getattr(C, "RANGE_EXIT_ON_EMA21_BREAK", False)),
+            "RANGE_EXIT_ON_EMA9_CROSS": bool(getattr(C, "RANGE_EXIT_ON_EMA9_CROSS", False)),
+            "RANGE_EARLY_EXIT_LOSS_ATR_MULT": float(getattr(C, "RANGE_EARLY_EXIT_LOSS_ATR_MULT", 0.0) or 0.0),
+        }
+
+    @staticmethod
+    def _log_effective_range_config(
+        logger_obj: logging.Logger,
+        *,
+        label: str,
+        force_disable_be: bool = False,
+        tp1_requires_flag: bool = False,
+    ) -> None:
+        snap = _BacktestOfflineRunnerCompat._effective_range_config_snapshot(
+            force_disable_be=bool(force_disable_be),
+            tp1_requires_flag=bool(tp1_requires_flag),
+        )
+        logger_obj.info("[%s][CFG_EFFECTIVE][RANGE] %s", str(label), json.dumps(snap, ensure_ascii=False))
+
+
+_OFFLINE_RUNNER_COMPAT = _BacktestOfflineRunnerCompat()
+
+
+def _runner_ops(*, offline_market_rules: bool) -> Any:
+    if bool(offline_market_rules):
+        return _OFFLINE_RUNNER_COMPAT
+    return _get_runner_module()
 
 
 def _is_ethusdc_symbol(symbol: object, *, exchange_id: str) -> bool:
@@ -713,13 +1305,10 @@ def iso_utc(ms: int) -> str:
 
 
 def _parse_yyyy_mm_dd_to_ms(s: str, end_of_day_exclusive: bool = False) -> int:
-    try:
-        return int(R._parse_ymd_to_ms_utc(s, end_of_day_exclusive=bool(end_of_day_exclusive)))
-    except Exception:
-        dt = datetime.strptime(str(s).strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        if end_of_day_exclusive:
-            dt = dt + timedelta(days=1)
-        return int(dt.timestamp() * 1000)
+    dt = datetime.strptime(str(s).strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if end_of_day_exclusive:
+        dt = dt + timedelta(days=1)
+    return int(dt.timestamp() * 1000)
 
 def _apply_year_preset(year: int) -> None:
     """Apply year-based config overrides in backtest.py only.
@@ -1303,6 +1892,15 @@ def _resolve_size_cap_pct_eff(
 
 
 def _infer_amount_step(ex: Any, symbol: str) -> float:
+    if bool(getattr(ex, "offline_market_rules_provider", False)):
+        try:
+            rules = ex.get_market_rules(symbol)
+            step = float(rules.get("amount_step") or 0.0)
+            if math.isfinite(step) and step > 0.0:
+                return float(step)
+        except Exception:
+            return 0.0
+
     # Replay helper (runner replay exchange shape)
     try:
         dmap = getattr(ex, "_replay_amount_decimals_map", None)
@@ -1425,7 +2023,7 @@ def _find_filter_index(filter_ts: List[int], t: int) -> int:
 
 
 def _fetch_ohlcv_paginated(
-    ex: ExchangeClient,
+    ex: Any,
     symbol: str,
     timeframe: str,
     since_ms: Optional[int],
@@ -3062,6 +3660,7 @@ def run_backtest(
     run_id: Optional[str] = None,
     export_dir: Optional[str] = None,
     perf_debug: bool = False,
+    offline_market_rules: OfflineMarketRulesProvider | None = None,
 ) -> Dict[str, Any]:
     global _CURRENT_EXPORT_DIR
     # --- startup identity log (once per run) ---
@@ -3188,8 +3787,13 @@ def run_backtest(
     size_sizing_diag_printed = 0
     state_kv: Dict[str, Dict[str, Any]] = {}
     exchange_id = (os.getenv("LWF_EXCHANGE_ID") or getattr(C, "EXCHANGE_ID", "mexc")).strip().lower() or "mexc"
+    runner_ops = _runner_ops(offline_market_rules=offline_market_rules is not None)
     meta_symbol = str(symbols[0] if symbols else getattr(C, "BACKTEST_CSV_SYMBOL", "ETH/USDT") or "ETH/USDT").strip()
-    market_meta, market_meta_source, market_meta_cache_path = _load_backtest_market_meta(exchange_id, meta_symbol)
+    market_meta, market_meta_source, market_meta_cache_path = _load_backtest_market_meta(
+        exchange_id,
+        meta_symbol,
+        offline_market_rules=offline_market_rules,
+    )
     market_meta_source_kind = _market_meta_source_kind(market_meta_source)
     if market_meta is not None:
         try:
@@ -3295,7 +3899,7 @@ def run_backtest(
     force_disable_be = bool(
         getattr(C, "BACKTEST_FORCE_DISABLE_BE", getattr(C, "BACKTEST_DISABLE_BE", False))
     )
-    R._log_effective_range_config(
+    runner_ops._log_effective_range_config(
         logger,
         label="BACKTEST",
         force_disable_be=bool(force_disable_be),
@@ -3599,13 +4203,16 @@ def run_backtest(
         logger.info("BACKTEST START: since_ms=None (no slicing)")
 
 
-    ex = ExchangeClient()
+    if offline_market_rules is not None:
+        ex = offline_market_rules
+    else:
+        ex = _get_exchange_client_class()()
 
-    # Ensure markets loaded
-    try:
-        ex.ex.load_markets()
-    except Exception:
-        pass
+        # Ensure markets loaded
+        try:
+            ex.ex.load_markets()
+        except Exception:
+            pass
 
     fee_rate = float(fee_taker_rate)
     max_pos_pct = float(getattr(C, "MAX_POSITION_NOTIONAL_PCT", 0.10))
@@ -4649,10 +5256,10 @@ def run_backtest(
 
         # === BE BEGIN =====================================================
         # Skip BE management entirely when force_disable_be is active.
-        if R._be_effective_enabled(p.regime, force_disable_be=bool(force_disable_be)):
+        if runner_ops._be_effective_enabled(p.regime, force_disable_be=bool(force_disable_be)):
             min_risk_bps = float(getattr(C, "BE_MIN_INIT_RISK_BPS", 0.0))
             if init_risk_bps >= min_risk_bps:
-                tr_r, be_static_off = R._be_params(p.regime)
+                tr_r, be_static_off = runner_ops._be_params(p.regime)
                 r_now = (p.max_fav - float(entry_px)) / init_risk
                 if r_now >= float(tr_r):
                     spread_bps = float(spread_bps_est)
@@ -4664,7 +5271,7 @@ def run_backtest(
                     except Exception:
                         atr_bps = 0.0
 
-                    off_bps = R._calc_be_offset_bps(
+                    off_bps = runner_ops._calc_be_offset_bps(
                         spread_bps,
                         atr_bps,
                         static_off_bps=be_static_off,
@@ -4699,7 +5306,7 @@ def run_backtest(
         else:
             min_risk_bps = float(getattr(C, "TRAIL_MIN_INIT_RISK_BPS", 0.0))
             if init_risk_bps >= min_risk_bps:
-                start_r, atr_mult, bps_from_high = R._trail_params(p.regime)
+                start_r, atr_mult, bps_from_high = runner_ops._trail_params(p.regime)
                 r_now = (p.max_fav - float(entry_px)) / init_risk
                 start_price = None
                 current_stop_before = float(p.stop)
@@ -4771,7 +5378,7 @@ def run_backtest(
                 else:
                     trail_block_reason = "not_reached_start_price"
 
-                cand_delta = R._trail_diag_update(
+                cand_delta = runner_ops._trail_diag_update(
                     p.__dict__,
                     block_reason=trail_block_reason,
                     candidate_stop=new_stop,
@@ -5142,7 +5749,7 @@ def run_backtest(
                 and (not bool(getattr(p, "tp1_done", False)))
                 and str(getattr(p, "regime", "")).lower() == "range"
             ):
-                tp1_enabled, trig_r, qty_pct = R._tp1_range_effective_params(require_flag=False)
+                tp1_enabled, trig_r, qty_pct = runner_ops._tp1_range_effective_params(require_flag=False)
                 if tp1_enabled and float(init_risk) > 0.0:
                     tp1_px = float(entry_px) + float(init_risk) * float(trig_r)
                     if bar_high >= tp1_px:
@@ -5661,7 +6268,7 @@ def run_backtest(
                     }
                 )
                 trades[-1].update(
-                    R._build_stop_diag_fields(
+                    runner_ops._build_stop_diag_fields(
                         stop_kind=str(getattr(p, "stop_kind", "")),
                         init_stop=float(getattr(p, "init_stop", 0.0) or 0.0),
                         final_stop=float(getattr(p, "stop", 0.0) or 0.0),
@@ -6167,7 +6774,7 @@ def run_backtest(
 
                 spread_bps = float(spread_bps_est)
 
-                fcfg = R._filters_for_regime(str(regime))
+                fcfg = runner_ops._filters_for_regime(str(regime))
 
                 do_adj = bool(fcfg.get("ADJUST_TP_SL", True))
                 do_exp = bool(fcfg.get("EXPECTANCY", True))
@@ -6222,7 +6829,7 @@ def run_backtest(
                         e_low  = e["low"][e0 : i + 1]
                         e_close= e["close"][e0 : i + 1]
 
-                        ok_adj, stop_raw, tp_raw, _reason = R._adjust_tp_sl(
+                        ok_adj, stop_raw, tp_raw, _reason = runner_ops._adjust_tp_sl(
                             symbol=sym,
                             entry=entry_raw,
                             stop_price=stop_raw,
@@ -6251,7 +6858,7 @@ def run_backtest(
                         continue
                 if (not fast_bt) or (not fast_skip_exp):
                     if do_exp:
-                        ok_exp, _reason2 = R._expectancy_filter(entry_raw, stop_raw, tp_raw, spread_bps)
+                        ok_exp, _reason2 = runner_ops._expectancy_filter(entry_raw, stop_raw, tp_raw, spread_bps)
                         if not ok_exp:
                             _buy_reject(f'expectancy({_reason2})')
                             continue
@@ -6565,7 +7172,7 @@ def run_backtest(
                     ema9_break_age = None
 
                 t_confirmed = int(t)
-                trail_diag_defaults = R._trail_diag_defaults(
+                trail_diag_defaults = runner_ops._trail_diag_defaults(
                     str(regime),
                     init_stop=float(stop_raw),
                     entry_exec=float(entry_exec),
@@ -6934,7 +7541,7 @@ def run_backtest(
                     }
                 )
                 trades[-1].update(
-                    R._build_stop_diag_fields(
+                    runner_ops._build_stop_diag_fields(
                         stop_kind=str(getattr(p, "stop_kind", "")),
                         init_stop=float(getattr(p, "init_stop", 0.0) or 0.0),
                         final_stop=float(getattr(p, "stop", 0.0) or 0.0),
@@ -7248,7 +7855,7 @@ def run_backtest(
                 "build_id": str(BUILD_ID),
                 # Keep the cfg snapshot aligned with runner.py for trace comparison.
                 "cfg": (
-                    R._cfg_snapshot(
+                    runner_ops._cfg_snapshot(
                         keys=[
                             "TRADE_TREND",
                             "TRADE_RANGE",
@@ -7881,6 +8488,12 @@ def main() -> int:
     parser.add_argument("--precomputed-signals-strict", action="store_true", help="Verify manifest file hashes before fast accounting.")
     parser.add_argument("--precomputed-signals-write-report", action="store_true", help="Write fast_summary.json beside exported fast path CSVs.")
     parser.add_argument("--precomputed-signals-initial-equity", type=float, default=0.0, help="Initial equity override for signal tape accounting.")
+    parser.add_argument(
+        "--offline-market-rules",
+        type=str,
+        default="",
+        help="Backtest-only local JSON market rules file. Required to avoid exchange.py/ccxt market rules in offline mode.",
+    )
 
     parser.add_argument("--warmup", type=int, default=int(getattr(C, "BACKTEST_WARMUP_BARS", 300)))
     parser.add_argument("--initial", type=float, default=float(getattr(C, "BACKTEST_INITIAL_EQUITY", 300000.0)))
@@ -7919,6 +8532,15 @@ def main() -> int:
         logger.error("No symbols. Set config.SYMBOLS or pass --symbols.")
         return 1
 
+    offline_market_rules = None
+    offline_market_rules_path = str(getattr(args, "offline_market_rules", "") or "").strip()
+    if offline_market_rules_path:
+        try:
+            offline_market_rules = load_offline_market_rules(offline_market_rules_path, required_symbols=symbols)
+        except OfflineMarketRulesError as exc:
+            logger.error("[OFFLINE_MARKET_RULES] fail closed: %s", exc)
+            return 2
+
     since_ms: Optional[int] = getattr(C, "SINCE_MS", None)
     until_ms: Optional[int] = None
     if args.since.strip():
@@ -7932,7 +8554,7 @@ def main() -> int:
     recent_entry = int(args.recent_entry) if int(args.recent_entry) > 0 else None
     recent_filter = int(args.recent_filter) if int(args.recent_filter) > 0 else None
 
-    res = run_backtest(
+    run_kwargs = dict(
         symbols=symbols,
         since_ms=since_ms,
         until_ms=until_ms,
@@ -7949,6 +8571,9 @@ def main() -> int:
         perf_debug=bool(getattr(args, "perf", False)),
         **kwargs,
     )
+    if offline_market_rules is not None:
+        run_kwargs["offline_market_rules"] = offline_market_rules
+    res = run_backtest(**run_kwargs)
 
     if res is None:
         logger.error("run_backtest returned None (unexpected). Check previous logs for the root cause.")

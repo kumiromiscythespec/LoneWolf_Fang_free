@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lonewolffang.local/schema/fixed_notional_ceiling_contract.schema.json",
+  "title": "Fixed Notional Ceiling Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "generated_for",
+    "phase",
+    "helper_module",
+    "semantics",
+    "helper_inputs",
+    "safety_flags",
+    "future_approval_required"
+  ],
+  "properties": {
+    "version": {
+      "const": "fixed_notional_ceiling_contract_v1"
+    },
+    "generated_for": {
+      "const": "fixed_notional_ceiling_contract_helper"
+    },
+    "phase": {
+      "const": "docs_schema_tests_pure_helper_only"
+    },
+    "helper_module": {
+      "const": "helper/risk_notional_contract.py"
+    },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition",
+        "not_wallet_balance",
+        "not_initial_paper_live_size",
+        "not_guaranteed_liquidity",
+        "applies_after_risk_sizing",
+        "non_positive_base_cap_returns_zero"
+      ],
+      "properties": {
+        "definition": {
+          "const": "maximum_allowed_order_or_position_notional_cap"
+        },
+        "not_wallet_balance": {
+          "const": true
+        },
+        "not_initial_paper_live_size": {
+          "const": true
+        },
+        "not_guaranteed_liquidity": {
+          "const": true
+        },
+        "applies_after_risk_sizing": {
+          "const": true
+        },
+        "non_positive_base_cap_returns_zero": {
+          "const": true
+        }
+      }
+    },
+    "helper_inputs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "equity_quote",
+          "cap_pct",
+          "fixed_ceiling_enabled",
+          "global_fixed_notional_ceiling",
+          "per_symbol_fixed_notional_ceiling",
+          "symbol"
+        ]
+      }
+    },
+    "safety_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pure_helper_only",
+        "runtime_wiring_allowed",
+        "backtest_wiring_allowed",
+        "paper_live_behavior_changed",
+        "order_sizing_behavior_changed",
+        "private_api_allowed",
+        "fetch_balance_allowed",
+        "deploy_allowed",
+        "owner_approval_required_before_wiring"
+      ],
+      "properties": {
+        "pure_helper_only": {
+          "const": true
+        },
+        "runtime_wiring_allowed": {
+          "const": false
+        },
+        "backtest_wiring_allowed": {
+          "const": false
+        },
+        "paper_live_behavior_changed": {
+          "const": false
+        },
+        "order_sizing_behavior_changed": {
+          "const": false
+        },
+        "private_api_allowed": {
+          "const": false
+        },
+        "fetch_balance_allowed": {
+          "const": false
+        },
+        "deploy_allowed": {
+          "const": false
+        },
+        "owner_approval_required_before_wiring": {
+          "const": true
+        }
+      }
+    },
+    "future_approval_required": {
+      "type": "array",
+      "uniqueItems": true,
+      "contains": {
+        "const": "runtime_or_backtest_wiring"
+      },
+      "items": {
+        "enum": [
+          "runtime_or_backtest_wiring",
+          "paper_live_behavior_change",
+          "order_sizing_behavior_change",
+          "private_api_or_balance_access",
+          "deployment_or_production_mutation"
+        ]
+      }
+    }
+  }
+}

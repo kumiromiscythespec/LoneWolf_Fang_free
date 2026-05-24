@@ -4685,6 +4685,11 @@ def run_backtest(
         # === TRAIL BEGIN ==================================================
         trail_block_reason = ""
         trail_enabled = bool(getattr(C, "TRAIL_ENABLED", False))
+        trail_atr_diag_fields = {
+            "trail_atr_value": None,
+            "trail_atr_index_used": None,
+            "trail_atr_ts_used": None,
+        }
         if not trail_enabled:
             trail_block_reason = "trail_disabled"
         else:

@@ -38,6 +38,7 @@ from indicators import ema, rsi, atr, adx
 # only in an explicit ADX_IMPL_VERSION=2 migration.
 from exchange import ExchangeClient
 from risk import calc_qty_from_risk
+from helper.risk_notional_contract import effective_max_notional as _risk_notional_cap
 from strategy import (
     detect_regime_1h,
     signal_entry,
@@ -3608,6 +3609,9 @@ def run_backtest(
 
     fee_rate = float(fee_taker_rate)
     max_pos_pct = float(getattr(C, "MAX_POSITION_NOTIONAL_PCT", 0.10))
+    fixed_notional_ceiling_enabled = bool(getattr(C, "FIXED_NOTIONAL_CEILING_ENABLED", False))
+    global_fixed_notional_ceiling = getattr(C, "FIXED_NOTIONAL_CEILING", None)
+    per_symbol_fixed_notional_ceiling = getattr(C, "FIXED_NOTIONAL_CEILING_BY_SYMBOL", None)
     max_open_positions = int(getattr(C, "MAX_OPEN_POSITIONS", 1))
 
     per_call_limit = int(getattr(C, "BACKTEST_FETCH_LIMIT", 1000))
@@ -6292,6 +6296,15 @@ def run_backtest(
                 if not size_ab_enabled:
                     qty_legacy = float(calc_qty_from_risk(equity, entry_raw, stop_raw))
                     max_notional = float(equity) * float(max_pos_pct)
+                    if fixed_notional_ceiling_enabled:
+                        max_notional = _risk_notional_cap(
+                            equity_quote=equity,
+                            cap_pct=max_pos_pct,
+                            fixed_ceiling_enabled=fixed_notional_ceiling_enabled,
+                            global_fixed_notional_ceiling=global_fixed_notional_ceiling,
+                            per_symbol_fixed_notional_ceiling=per_symbol_fixed_notional_ceiling,
+                            symbol=sym,
+                        )
                     if entry_raw > 0 and max_notional > 0:
                         qty_legacy = min(qty_legacy, max_notional / entry_raw)
 
@@ -6452,6 +6465,15 @@ def run_backtest(
                         risk_mult_cap=float(risk_mult_cap),
                     )
                     max_notional = float(equity) * float(cap_pct_eff)
+                    if fixed_notional_ceiling_enabled:
+                        max_notional = _risk_notional_cap(
+                            equity_quote=equity,
+                            cap_pct=cap_pct_eff,
+                            fixed_ceiling_enabled=fixed_notional_ceiling_enabled,
+                            global_fixed_notional_ceiling=global_fixed_notional_ceiling,
+                            per_symbol_fixed_notional_ceiling=per_symbol_fixed_notional_ceiling,
+                            symbol=sym,
+                        )
                     if entry_raw > 0 and max_notional > 0.0:
                         qty_cap = float(max_notional) / float(entry_raw)
                     else:

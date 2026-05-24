@@ -1,4 +1,5 @@
 # BUILD_ID: 2026-05-08_free_precomputed_runner_replay_fast_path_v1
+# BUILD_ID: 2026-05-19_free_aggressive_trial_simulation_only_v1
 # BUILD_ID: 2026-04-27_free_confirmed_bar_no_double_shift_v1
 # BUILD_ID: 2026-04-27_free_embedded_app_import_guard_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
@@ -206,7 +207,7 @@ from app.core.state_context import (
 logger = logging.getLogger("runner")
 trade_logger = logging.getLogger("trade")
 error_logger = logging.getLogger("error")
-BUILD_ID = "2026-05-08_free_precomputed_runner_replay_fast_path_v1"
+BUILD_ID = "2026-05-19_free_aggressive_trial_simulation_only_v1"
 BASE_DIR = Path(__file__).resolve().parent
 _APP_PATHS = ensure_runtime_dirs()
 RUNTIME_ROOT = Path(_APP_PATHS.runtime_dir).resolve()
@@ -7634,6 +7635,29 @@ def main(
                 trail_block_reason = ""
                 trail_enabled = bool(getattr(C, "TRAIL_ENABLED", True))
                 trail_use_bps_fallback = bool(getattr(C, "TRAIL_USE_BPS_FALLBACK", True))
+                trail_atr_trace_fields = (
+                    {
+                        "trail_atr_source": "",
+                        "trail_atr_value": None,
+                        "trail_atr_lookup_ts": None,
+                        "trail_atr_pre_index_used": None,
+                        "trail_atr_pre_ts_used": None,
+                        "trail_atr_pre_map_present": False,
+                        "trail_atr_pre_sym_present": False,
+                        "trail_atr_pre_ts_len": 0,
+                        "trail_atr_pre_atr_len": 0,
+                        "trail_atr_pre_index_candidate": None,
+                        "trail_atr_pre_value_raw": None,
+                        "trail_atr_pre_sym_type": "",
+                        "trail_atr_pre_sym_keys_preview": [],
+                        "trail_atr_pre_ts_type": "",
+                        "trail_atr_pre_atr_type": "",
+                        "trail_atr_exception_text": "",
+                        "trail_atr_fallback_reason": "",
+                    }
+                    if is_replay
+                    else {}
+                )
                 if not trail_enabled:
                     trail_block_reason = "trail_disabled"
                 else:

@@ -1,3 +1,4 @@
+# BUILD_ID: 2026-05-19_free_aggressive_trial_pullback_ab_v1
 # BUILD_ID: 2026-03-21_strategy_comment_cleanup_v1
 # BUILD_ID: 2026-03-07_runner_range_direction_forward_v1
 # NOTE:
@@ -10,7 +11,7 @@ import logging
 import numpy as np
 import config as C
 
-BUILD_ID = "2026-03-21_strategy_comment_cleanup_v1"
+BUILD_ID = "2026-05-19_free_aggressive_trial_pullback_ab_v1"
 
 logger = logging.getLogger(__name__)
 logging.getLogger(__name__).info(

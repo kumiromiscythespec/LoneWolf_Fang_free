@@ -38,6 +38,21 @@ def _valid_payload() -> dict[str, Any]:
     }
 
 
+def _load_schema_without_duplicate_keys() -> dict[str, Any]:
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise AssertionError(f"duplicate schema key: {key}")
+            out[key] = value
+        return out
+
+    return json.loads(
+        (REPO_ROOT / "schema" / "backtest_offline_market_rules.schema.json").read_text(encoding="utf-8"),
+        object_pairs_hook=reject_duplicate_keys,
+    )
+
+
 def _write_rules(tmp_path: Path, payload: dict[str, Any] | None = None) -> Path:
     path = tmp_path / "offline_market_rules.json"
     path.write_text(json.dumps(payload if payload is not None else _valid_payload(), ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -139,6 +154,21 @@ def test_forbidden_private_fields_fail_closed(tmp_path: Path) -> None:
         load_offline_market_rules(_write_rules(tmp_path, payload), required_symbols=["BTC/USDT"])
 
 
+def test_schema_preserves_amount_price_and_minimum_requirement_groups() -> None:
+    schema = _load_schema_without_duplicate_keys()
+    market_schema = schema["properties"]["markets"]["items"]
+
+    requirement_groups = [
+        {tuple(option.get("required", ())) for option in group.get("anyOf", [])}
+        for group in market_schema.get("allOf", [])
+    ]
+
+    assert "anyOf" not in market_schema
+    assert {("amount_precision",), ("amount_step",)} in requirement_groups
+    assert {("price_precision",), ("price_step",), ("tick_size",)} in requirement_groups
+    assert {("min_amount",), ("min_qty",)} in requirement_groups
+
+
 def test_btc_slash_and_compact_aliases_work(tmp_path: Path) -> None:
     provider = load_offline_market_rules(_write_rules(tmp_path), required_symbols=["BTCUSDT"])
 
@@ -237,7 +267,7 @@ def test_backtest_cli_without_offline_flag_does_not_pass_adapter(monkeypatch: py
 
 
 def test_schema_and_docs_state_phase3b_requires_separate_approval() -> None:
-    schema = json.loads((REPO_ROOT / "schema" / "backtest_offline_market_rules.schema.json").read_text(encoding="utf-8"))
+    schema = _load_schema_without_duplicate_keys()
     doc = (REPO_ROOT / "docs" / "offline_backtest_market_rules.md").read_text(encoding="utf-8")
 
     assert schema["properties"]["schema_version"]["const"] == 1

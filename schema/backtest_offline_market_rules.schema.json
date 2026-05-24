@@ -16,16 +16,20 @@
         "type": "object",
         "additionalProperties": true,
         "required": ["symbol", "min_cost"],
-        "anyOf": [
-          {"required": ["amount_precision"]},
-          {"required": ["amount_step"]}
-        ],
-        "anyOf": [
-          {"required": ["price_precision"]},
-          {"required": ["price_step"]},
-          {"required": ["tick_size"]}
-        ],
         "allOf": [
+          {
+            "anyOf": [
+              {"required": ["amount_precision"]},
+              {"required": ["amount_step"]}
+            ]
+          },
+          {
+            "anyOf": [
+              {"required": ["price_precision"]},
+              {"required": ["price_step"]},
+              {"required": ["tick_size"]}
+            ]
+          },
           {
             "anyOf": [
               {"required": ["min_amount"]},

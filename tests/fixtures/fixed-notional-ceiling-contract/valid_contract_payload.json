@@ -1,0 +1,40 @@
+{
+  "version": "fixed_notional_ceiling_contract_v1",
+  "generated_for": "fixed_notional_ceiling_contract_helper",
+  "phase": "docs_schema_tests_pure_helper_only",
+  "helper_module": "helper/risk_notional_contract.py",
+  "semantics": {
+    "definition": "maximum_allowed_order_or_position_notional_cap",
+    "not_wallet_balance": true,
+    "not_initial_paper_live_size": true,
+    "not_guaranteed_liquidity": true,
+    "applies_after_risk_sizing": true,
+    "non_positive_base_cap_returns_zero": true
+  },
+  "helper_inputs": [
+    "equity_quote",
+    "cap_pct",
+    "fixed_ceiling_enabled",
+    "global_fixed_notional_ceiling",
+    "per_symbol_fixed_notional_ceiling",
+    "symbol"
+  ],
+  "safety_flags": {
+    "pure_helper_only": true,
+    "runtime_wiring_allowed": false,
+    "backtest_wiring_allowed": false,
+    "paper_live_behavior_changed": false,
+    "order_sizing_behavior_changed": false,
+    "private_api_allowed": false,
+    "fetch_balance_allowed": false,
+    "deploy_allowed": false,
+    "owner_approval_required_before_wiring": true
+  },
+  "future_approval_required": [
+    "runtime_or_backtest_wiring",
+    "paper_live_behavior_change",
+    "order_sizing_behavior_change",
+    "private_api_or_balance_access",
+    "deployment_or_production_mutation"
+  ]
+}

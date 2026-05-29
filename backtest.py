@@ -1,3 +1,7 @@
+# BUILD_ID: 2026-05-29_ethusdt_zero_trade_status_metadata_improvement_patch_v1
+# BUILD_ID: 2026-05-29_ethusdt_zero_trade_report_behavior_patch_v1
+# BUILD_ID: 2026-05-28_ethusdt_fee_spread_slippage_parameterization_v1
+# BUILD_ID: 2026-05-28_ethusdt_f001_f002_timing_fix_v1
 # BUILD_ID: 2026-05-08_free_precomputed_backtest_fast_path_v1
 # BUILD_ID: 2026-04-21_free_adx_impl_version_v1_contract_lock
 # BUILD_ID: 2026-04-21_free_adx_filter_contract_v1
@@ -25,6 +29,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging, csv, argparse, heapq, glob, os, re, sys
 from dataclasses import dataclass
@@ -36,7 +41,6 @@ from indicators import ema, rsi, atr, adx
 # Backtest consumes the historical ADX seed contract v1 from indicators.py.
 # Do not change the 2p seed here as an incidental fix; canonical 2p-1 belongs
 # only in an explicit ADX_IMPL_VERSION=2 migration.
-from exchange import ExchangeClient
 from risk import calc_qty_from_risk
 from strategy import (
     detect_regime_1h,
@@ -112,7 +116,6 @@ _bridge_lwf_symbol_preset_from_cli(sys.argv[1:])
 
 import numpy as np
 import config as C
-import runner as R
 import math
 from trace_bar_policy import attach_bar_snapshot as _trace_attach_bar_snapshot
 from app.core.data_pipeline import auto_prepare_runtime_data, resolve_prepare_month_window
@@ -137,7 +140,13 @@ from app.core.export_paths import (
     write_last_run_json,
 )
 
-BUILD_ID = "2026-05-08_free_precomputed_backtest_fast_path_v1"
+BUILD_ID = "2026-05-29_ethusdt_zero_trade_report_behavior_patch_v1"
+TIMING_SEMANTICS_VERSION = "confirmed_bar_signal_next_bar_open_exec_v1"
+ENTRY_EXEC_PRICE_SOURCE = "next_bar_open"
+INTRABAR_ORDER_POLICY = "conservative_stop_first"
+
+ExchangeClient: Any = None
+_RUNNER_MODULE: Any = None
 
 OPEN_COST_DIAG_LIMIT_DEFAULT = 8
 _CURRENT_EXPORT_DIR = ""
@@ -146,6 +155,29 @@ _CURRENT_EXPORT_SYMBOL = ""
 _PRECOMPUTED_SIGNALS_PRODUCT = "free"
 _PRECOMPUTED_SOURCE_LOGGED: set[tuple[str, str, str, str, str]] = set()
 _AUTO_PREPARE_REQUESTS: set[str] = set()
+
+
+def _get_exchange_client_class() -> Any:
+    global ExchangeClient
+    if ExchangeClient is None:
+        module = importlib.import_module("exchange")
+        ExchangeClient = getattr(module, "ExchangeClient")
+    return ExchangeClient
+
+
+def _get_runner_module() -> Any:
+    global _RUNNER_MODULE
+    if _RUNNER_MODULE is None:
+        _RUNNER_MODULE = importlib.import_module("runner")
+    return _RUNNER_MODULE
+
+
+class _LazyRunnerModule:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_get_runner_module(), name)
+
+
+R: Any = _LazyRunnerModule()
 
 
 def _resolve_backtest_symbols(raw_symbols: str) -> tuple[list[str], str]:
@@ -408,6 +440,211 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 logger = logging.getLogger("backtest")
+
+
+@dataclass(frozen=True)
+class _BacktestEffectiveCosts:
+    maker_fee: float
+    taker_fee: float
+    spread_bps: float
+    slippage_bps: float
+    maker_fee_source: str
+    taker_fee_source: str
+    spread_bps_source: str
+    slippage_bps_source: str
+    override_source: str
+
+    @property
+    def sources(self) -> dict[str, str]:
+        return {
+            "maker_fee_rate": str(self.maker_fee_source),
+            "taker_fee_rate": str(self.taker_fee_source),
+            "spread_bps": str(self.spread_bps_source),
+            "slippage_bps": str(self.slippage_bps_source),
+        }
+
+
+def _parse_nonnegative_finite_float(raw: Any, label: str) -> float:
+    text = str(raw).strip()
+    if text == "":
+        raise ValueError(f"{label} must be a finite number >= 0")
+    try:
+        value = float(text)
+    except Exception as exc:
+        raise ValueError(f"{label} must be a finite number >= 0") from exc
+    if (not math.isfinite(value)) or value < 0.0:
+        raise ValueError(f"{label} must be a finite number >= 0")
+    return float(value)
+
+
+def _resolve_nonnegative_cost_value(
+    *,
+    cli_value: Any,
+    env_name: str,
+    default_value: Any,
+    label: str,
+    default_source: str,
+) -> tuple[float, str]:
+    if cli_value is not None:
+        return _parse_nonnegative_finite_float(cli_value, label), "cli"
+    env_raw = os.getenv(str(env_name))
+    if env_raw is not None and str(env_raw).strip() != "":
+        return _parse_nonnegative_finite_float(env_raw, env_name), "env"
+    return _parse_nonnegative_finite_float(default_value, label), str(default_source or "config")
+
+
+def _overall_cost_override_source(sources: dict[str, str]) -> str:
+    values = set(str(v) for v in (sources or {}).values())
+    if "cli" in values:
+        return "cli"
+    if "env" in values:
+        return "env"
+    return "default"
+
+
+def _resolve_effective_backtest_costs(
+    *,
+    default_maker_fee: Any,
+    default_taker_fee: Any,
+    default_spread_bps: Any,
+    default_slippage_bps: Any,
+    default_sources: dict[str, str] | None = None,
+    maker_fee_cli: Any = None,
+    taker_fee_cli: Any = None,
+    spread_bps_cli: Any = None,
+    slippage_bps_cli: Any = None,
+) -> _BacktestEffectiveCosts:
+    sources = dict(default_sources or {})
+    maker_fee, maker_src = _resolve_nonnegative_cost_value(
+        cli_value=maker_fee_cli,
+        env_name="BACKTEST_MAKER_FEE",
+        default_value=default_maker_fee,
+        label="maker fee",
+        default_source=sources.get("maker_fee_rate", "config"),
+    )
+    taker_fee, taker_src = _resolve_nonnegative_cost_value(
+        cli_value=taker_fee_cli,
+        env_name="BACKTEST_TAKER_FEE",
+        default_value=default_taker_fee,
+        label="taker fee",
+        default_source=sources.get("taker_fee_rate", "config"),
+    )
+    spread_bps, spread_src = _resolve_nonnegative_cost_value(
+        cli_value=spread_bps_cli,
+        env_name="BACKTEST_SPREAD_BPS",
+        default_value=default_spread_bps,
+        label="spread bps",
+        default_source=sources.get("spread_bps", "config"),
+    )
+    slippage_bps, slippage_src = _resolve_nonnegative_cost_value(
+        cli_value=slippage_bps_cli,
+        env_name="BACKTEST_SLIPPAGE_BPS",
+        default_value=default_slippage_bps,
+        label="slippage bps",
+        default_source=sources.get("slippage_bps", "config"),
+    )
+    resolved_sources = {
+        "maker_fee_rate": maker_src,
+        "taker_fee_rate": taker_src,
+        "spread_bps": spread_src,
+        "slippage_bps": slippage_src,
+    }
+    return _BacktestEffectiveCosts(
+        maker_fee=float(maker_fee),
+        taker_fee=float(taker_fee),
+        spread_bps=float(spread_bps),
+        slippage_bps=float(slippage_bps),
+        maker_fee_source=str(maker_src),
+        taker_fee_source=str(taker_src),
+        spread_bps_source=str(spread_src),
+        slippage_bps_source=str(slippage_src),
+        override_source=_overall_cost_override_source(resolved_sources),
+    )
+
+
+def _build_effective_cost_assumptions(
+    costs: _BacktestEffectiveCosts,
+    *,
+    mixed_exchange_basis_warning: bool,
+) -> dict[str, Any]:
+    return {
+        "effective_maker_fee": float(costs.maker_fee),
+        "effective_taker_fee": float(costs.taker_fee),
+        "fee_rate_units": "decimal_rate",
+        "effective_spread_bps": float(costs.spread_bps),
+        "effective_spread_bps_semantics": "total_spread_bps",
+        "spread_bps_units": "bps_total_bid_ask_scalar_estimate",
+        "spread_bps_semantics": "total_bid_ask_scalar_estimate_not_fill_simulator",
+        "spread_input_basis": "total_bps",
+        "effective_slippage_bps": float(costs.slippage_bps),
+        "effective_slippage_bps_semantics": "one_way_per_side_entry_plus_exit_minus",
+        "slippage_bps_units": "bps_one_way_per_side",
+        "slippage_bps_semantics": "one_way_per_side_entry_plus_exit_minus",
+        "override_source": str(costs.override_source),
+        "override_sources": costs.sources,
+        "research_only": True,
+        "mixed_exchange_basis_warning": bool(mixed_exchange_basis_warning),
+        "final_validation": False,
+        "public_claim": False,
+        "final_validation_approval": False,
+        "public_performance_claim": False,
+    }
+
+
+def _is_cost_override_source(source: str) -> bool:
+    return str(source or "") in ("cli", "env")
+
+
+def _apply_backtest_fee_process_overrides(exchange_id: str, maker_fee: float, taker_fee: float) -> None:
+    ex = str(exchange_id or "").strip().lower()
+    if ex == "binance":
+        setattr(C, "BINANCE_PAPER_FEE_RATE_MAKER", float(maker_fee))
+        setattr(C, "BINANCE_PAPER_FEE_RATE_TAKER", float(taker_fee))
+    elif ex == "coincheck":
+        setattr(C, "COINCHECK_FEE_RATE_MAKER", float(maker_fee))
+        setattr(C, "COINCHECK_FEE_RATE_TAKER", float(taker_fee))
+    else:
+        setattr(C, "PAPER_FEE_RATE_MAKER", float(maker_fee))
+        setattr(C, "PAPER_FEE_RATE_TAKER", float(taker_fee))
+
+
+def _apply_backtest_cost_process_state(exchange_id: str, costs: _BacktestEffectiveCosts) -> None:
+    if _is_cost_override_source(costs.maker_fee_source) or _is_cost_override_source(costs.taker_fee_source):
+        _apply_backtest_fee_process_overrides(exchange_id, float(costs.maker_fee), float(costs.taker_fee))
+    if str(costs.spread_bps_source) == "cli":
+        setattr(C, "BACKTEST_SPREAD_BPS", float(costs.spread_bps))
+    if _is_cost_override_source(costs.slippage_bps_source):
+        setattr(C, "SLIPPAGE_BPS", float(costs.slippage_bps))
+
+
+def _validate_backtest_cost_inputs(args: argparse.Namespace) -> None:
+    _resolve_effective_backtest_costs(
+        default_maker_fee=0.0,
+        default_taker_fee=0.0,
+        default_spread_bps=0.0,
+        default_slippage_bps=0.0,
+        maker_fee_cli=getattr(args, "maker_fee", None),
+        taker_fee_cli=getattr(args, "taker_fee", None),
+        spread_bps_cli=getattr(args, "spread_bps", None),
+        slippage_bps_cli=getattr(args, "slippage_bps", None),
+    )
+
+
+def _infer_mixed_exchange_basis_warning(symbols: list[str], exchange_id: str) -> bool:
+    try:
+        for symbol in list(symbols or []):
+            norm = normalize_runtime_symbol(
+                str(symbol or "").strip(),
+                exchange_id=str(exchange_id or "").strip().lower(),
+                fallback=str(symbol or "").strip(),
+            )
+            if str(norm or "").strip().upper() == "ETH/USDT":
+                return True
+    except Exception:
+        pass
+    return False
+
+
 # --- CONFIG CHECK (debug) ---
 # CFG CHECK logging can be silenced for long replays / CI:
 # - env BACKTEST_CFG_CHECK=0 (or RUNNER_CFG_CHECK=0) disables these logs
@@ -429,21 +666,26 @@ def _cfg_check_enabled() -> bool:
         return bool(cfg)
 
 
-def _resolve_backtest_spread_bps() -> tuple[float, bool]:
+def _default_backtest_spread_bps() -> float:
     try:
-        base = float(getattr(C, "BACKTEST_SPREAD_BPS", getattr(C, "SLIPPAGE_BPS", 0.0)) or 0.0)
+        return float(getattr(C, "BACKTEST_SPREAD_BPS", getattr(C, "SLIPPAGE_BPS", 0.0)) or 0.0)
     except Exception:
         try:
-            base = float(getattr(C, "SLIPPAGE_BPS", 0.0) or 0.0)
+            return float(getattr(C, "SLIPPAGE_BPS", 0.0) or 0.0)
         except Exception:
-            base = 0.0
+            return 0.0
 
+
+def _resolve_backtest_spread_bps(*, fail_closed: bool = True) -> tuple[float, bool]:
+    base = _default_backtest_spread_bps()
     env_raw = os.getenv("BACKTEST_SPREAD_BPS")
     if env_raw is None or str(env_raw).strip() == "":
         return base, False
     try:
-        return float(str(env_raw).strip()), True
-    except Exception:
+        return _parse_nonnegative_finite_float(env_raw, "BACKTEST_SPREAD_BPS"), True
+    except ValueError:
+        if bool(fail_closed):
+            raise
         return base, False
 
 
@@ -495,7 +737,7 @@ def _build_synthetic_backtest_market_meta(exchange_id: str, symbol: str) -> tupl
             min_cost = 0.0
 
     try:
-        rules = ExchangeClient(ex).get_market_rules(resolved_symbol)
+        rules = _get_exchange_client_class()(ex).get_market_rules(resolved_symbol)
         min_qty = float(rules.get("min_qty") or 0.0)
         min_cost = max(float(min_cost), float(rules.get("min_cost") or 0.0))
         tick_size = float(rules.get("tick_size") or 0.0)
@@ -532,7 +774,7 @@ def _load_backtest_market_meta(exchange_id: str, symbol: str) -> tuple[object | 
         except Exception:
             ttl_raw = 3600.0
         try:
-            ex = ExchangeClient(exchange_id)
+            ex = _get_exchange_client_class()(exchange_id)
             meta, source, cache_path = maybe_refresh_market_meta(
                 ex,
                 exchange_id=exchange_id,
@@ -591,7 +833,7 @@ if _cfg_check_enabled():
         getattr(C, "RANGE_NEAR_LOW_ATR", None),
     )
 
-_cfg_spread_bps, _cfg_spread_env_override = _resolve_backtest_spread_bps()
+_cfg_spread_bps, _cfg_spread_env_override = _resolve_backtest_spread_bps(fail_closed=False)
 log.info(
     "CFG CHECK "
     f"TRADE_ONLY_TREND={getattr(C,'TRADE_ONLY_TREND',None)} "
@@ -748,6 +990,194 @@ def _apply_year_preset(year: int) -> None:
 
     # since_ms (UTC year start)
     setattr(C, "SINCE_MS", _parse_yyyy_mm_dd_to_ms(f"{dataset}-01-01"))
+
+
+def _report_input_status() -> Dict[str, Any]:
+    eq_path = _export_path("equity_curve.csv")
+    tr_path = _export_path("trades.csv")
+    if (not os.path.exists(eq_path)) or (not os.path.exists(tr_path)):
+        legacy_eq_path = os.path.join("exports", "equity_curve.csv")
+        legacy_tr_path = os.path.join("exports", "trades.csv")
+        if os.path.exists(legacy_eq_path) and os.path.exists(legacy_tr_path):
+            eq_path = legacy_eq_path
+            tr_path = legacy_tr_path
+    missing: list[str] = []
+    if not os.path.exists(eq_path):
+        missing.append("equity_curve.csv")
+    if not os.path.exists(tr_path):
+        missing.append("trades.csv")
+    return {
+        "equity_curve_csv": str(eq_path),
+        "trades_csv": str(tr_path),
+        "missing": missing,
+    }
+
+
+def _optional_finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if str(value).strip() == "":
+        return None
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(out):
+        return None
+    return float(out)
+
+
+def _first_result_symbol(result: Dict[str, Any]) -> str | None:
+    symbols = result.get("symbols")
+    if isinstance(symbols, (list, tuple)) and symbols:
+        return str(symbols[0])
+    if symbols:
+        return str(symbols)
+    return None
+
+
+def _zero_trade_skipped_report_reason(result: Dict[str, Any]) -> str:
+    inputs = _report_input_status()
+    missing = list(inputs.get("missing") or [])
+    if missing:
+        return "zero_trades_missing_report_inputs: " + ",".join(str(x) for x in missing)
+    try:
+        if int(result.get("trades", 0) or 0) == 0:
+            return "zero_trades_kill_gate_non_comparable"
+    except Exception:
+        pass
+    return "normal_report_generation_skipped"
+
+
+def _infer_zero_trade_scenario_label_from_run_id(run_id: str) -> str | None:
+    run_id_l = str(run_id or "").strip().lower()
+    if run_id_l.startswith("ethsens_comboh_optionb_") or run_id_l.startswith("ethsens_comboh_status_"):
+        return "combined_heavy"
+    return None
+
+
+def _zero_trade_scenario_metadata(
+    *,
+    preset_name: str,
+    result: Dict[str, Any],
+    run_id: str,
+) -> Dict[str, str]:
+    preset_label = str(preset_name or "").strip()
+    if preset_label:
+        return {"scenario_label": preset_label, "scenario_source": "preset"}
+
+    explicit_label = str(result.get("scenario_label") or result.get("scenario") or "").strip()
+    if explicit_label:
+        return {"scenario_label": explicit_label, "scenario_source": "explicit_arg"}
+
+    inferred_label = _infer_zero_trade_scenario_label_from_run_id(run_id)
+    if inferred_label:
+        return {"scenario_label": str(inferred_label), "scenario_source": "run_id_inferred"}
+
+    return {"scenario_label": "unknown", "scenario_source": "unknown"}
+
+
+def _normal_report_path_status_metadata(normal_report_path: str) -> Dict[str, Any]:
+    raw_path = str(normal_report_path)
+    if os.path.isabs(raw_path):
+        return {
+            "normal_report_path_is_relative": False,
+            "normal_report_path_base": None,
+            "normal_report_path_resolved": raw_path,
+        }
+
+    base = os.path.abspath(os.getcwd())
+    return {
+        "normal_report_path_is_relative": True,
+        "normal_report_path_base": str(base),
+        "normal_report_path_resolved": os.path.abspath(raw_path),
+    }
+
+
+def _write_zero_trade_report_status_artifacts(
+    *,
+    out_dir: str,
+    report_out: str,
+    result: Dict[str, Any],
+    preset_name: str,
+    normal_report_skipped_reason: str,
+) -> Dict[str, str]:
+    status_json = os.path.join(str(out_dir), "scenario_status.json")
+    status_md = os.path.join(str(out_dir), "scenario_status.md")
+    os.makedirs(str(out_dir), exist_ok=True)
+
+    inputs = _report_input_status()
+    effective_costs = dict(result.get("effective_cost_assumptions") or {})
+    try:
+        trades_count: int | None = int(result.get("trades", 0) or 0)
+    except Exception:
+        trades_count = None
+    run_id = str(result.get("run_id") or _CURRENT_RUN_ID or "")
+    scenario_metadata = _zero_trade_scenario_metadata(
+        preset_name=str(preset_name or ""),
+        result=result,
+        run_id=str(run_id),
+    )
+    normal_report_path_metadata = _normal_report_path_status_metadata(str(report_out))
+
+    payload = {
+        "schema_version": 1,
+        "artifact_type": "zero_trade_status",
+        "status": "zero_trade",
+        "classification": "kill_gate_zero_trade_non_comparable",
+        "comparable_metrics_available": False,
+        "report_generated": False,
+        "normal_report_skipped_reason": str(normal_report_skipped_reason),
+        "missing_report_inputs": list(inputs.get("missing") or []),
+        "trades_count": trades_count,
+        "run_id": str(run_id),
+        "symbol": _first_result_symbol(result),
+        "scenario": str(preset_name) if str(preset_name or "").strip() else None,
+        **scenario_metadata,
+        "maker_fee": _optional_finite_float(result.get("effective_maker_fee", effective_costs.get("effective_maker_fee"))),
+        "taker_fee": _optional_finite_float(result.get("effective_taker_fee", effective_costs.get("effective_taker_fee"))),
+        "spread_bps": _optional_finite_float(result.get("effective_spread_bps", effective_costs.get("effective_spread_bps", result.get("spread_bps_est")))),
+        "slippage_bps": _optional_finite_float(result.get("effective_slippage_bps", effective_costs.get("effective_slippage_bps"))),
+        "research_only": True,
+        "mixed_exchange_basis_warning": bool(result.get("mixed_exchange_basis_warning", effective_costs.get("mixed_exchange_basis_warning", False))),
+        "final_validation_approved": False,
+        "public_performance_claim_approved": False,
+        "paper_live_order_allowed": False,
+        "paper_live_order_readiness": "not_ready_not_approved",
+        "normal_report_path": str(report_out),
+        **normal_report_path_metadata,
+        "equity_curve_csv": str(inputs.get("equity_curve_csv") or ""),
+        "trades_csv": str(inputs.get("trades_csv") or ""),
+    }
+
+    with open(status_json, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True, indent=2, sort_keys=True)
+        f.write("\n")
+
+    lines = [
+        "# Scenario Status",
+        "",
+        "Zero-trade / kill-gate occurred.",
+        "",
+        f"- classification: {payload['classification']}",
+        f"- status: {payload['status']}",
+        "- normal report produced: false",
+        f"- normal report skipped reason: {payload['normal_report_skipped_reason']}",
+        "- metrics comparable: false",
+        "- research only: true",
+        "- final validation approved: false",
+        "- public performance claim approved: false",
+        "- PAPER/LIVE/order readiness: false",
+        "",
+        "This scenario is not a completed profitable result, not a completed losing result, and not a metrics-comparable result.",
+        "It does not approve final validation, public performance claims, PAPER trading, LIVE trading, orders, cancels, balance fetches, or private API use.",
+        "",
+    ]
+    with open(status_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    logger.info("[REPORT] zero-trade status wrote: %s / %s", str(status_json), str(status_md))
+    return {"scenario_status_json": str(status_json), "scenario_status_md": str(status_md)}
 
 
 def _write_yearly_report_from_csv(
@@ -1380,6 +1810,82 @@ def _amount_to_precision_deterministic(ex: Any, symbol: str, qty: float) -> floa
         return float(_floor_to_step(q, step))
     scale = 100_000_000.0
     return float(math.floor((q + 1e-15) * scale) / scale)
+
+def _entry_signal_exec_indices(entry_ptr_value: int, n_entry_bars: int) -> tuple[int, int] | None:
+    exec_i = int(entry_ptr_value)
+    signal_i = exec_i - 1
+    if signal_i < 0:
+        return None
+    if exec_i >= int(n_entry_bars):
+        return None
+    if exec_i <= signal_i:
+        return None
+    return int(signal_i), int(exec_i)
+
+
+def _is_strict_next_entry_bar(signal_ts: int, exec_ts: int, entry_bar_ms: int) -> bool:
+    try:
+        signal_ms = int(normalize_timestamp_to_ms(signal_ts))
+        exec_ms = int(normalize_timestamp_to_ms(exec_ts))
+        bar_ms_f = int(entry_bar_ms)
+    except Exception:
+        return False
+    return bool(bar_ms_f > 0 and exec_ms > signal_ms and (exec_ms - signal_ms) == bar_ms_f)
+
+
+def _translate_signal_rr_to_exec_basis(
+    signal_entry: float,
+    signal_stop: float,
+    signal_tp: float,
+    exec_entry: float,
+    direction: str = "long",
+) -> tuple[float, float]:
+    side = _normalize_position_direction(direction)
+    sig_entry = float(signal_entry)
+    sig_stop = float(signal_stop)
+    sig_tp = float(signal_tp)
+    exec_entry_f = float(exec_entry)
+    if side == "short":
+        risk_distance = sig_stop - sig_entry
+        reward_distance = sig_entry - sig_tp
+        if risk_distance <= 0.0 or reward_distance <= 0.0:
+            raise ValueError("invalid_short_signal_rr")
+        return (
+            float(exec_entry_f + risk_distance),
+            float(exec_entry_f - reward_distance),
+        )
+
+    risk_distance = sig_entry - sig_stop
+    reward_distance = sig_tp - sig_entry
+    if risk_distance <= 0.0 or reward_distance <= 0.0:
+        raise ValueError("invalid_long_signal_rr")
+    return (
+        float(exec_entry_f - risk_distance),
+        float(exec_entry_f + reward_distance),
+    )
+
+
+def _resolve_tp_sl_same_bar(
+    side: str,
+    bar_open: float,
+    bar_high: float,
+    bar_low: float,
+    bar_close: float,
+    tp: float,
+    sl: float,
+) -> str | None:
+    side_l = _normalize_position_direction(side)
+    hit_tp_local = (side_l == "long" and float(bar_high) >= float(tp)) or (side_l == "short" and float(bar_low) <= float(tp))
+    hit_sl_local = (side_l == "long" and float(bar_low) <= float(sl)) or (side_l == "short" and float(bar_high) >= float(sl))
+    if hit_tp_local and not hit_sl_local:
+        return "TP_HIT"
+    if hit_sl_local and not hit_tp_local:
+        return "STOP_HIT"
+    if not hit_tp_local and not hit_sl_local:
+        return None
+    # OHLC-only research validation has no reliable intrabar path, so both-hit bars are conservative.
+    return "STOP_HIT"
+
 
 def _advance_filter_ptr(filter_ts: List[int], j: int, t: int) -> int:
     """
@@ -2934,6 +3440,15 @@ class Position:
     entry_ts: int = 0
     entry_filter_j: int = 0
     entry_diag: dict | None = None
+    signal_i: int = 0
+    signal_ts: int = 0
+    exec_i: int = 0
+    exec_ts: int = 0
+    signal_entry_raw: float = 0.0
+    signal_stop_raw: float = 0.0
+    signal_tp_raw: float = 0.0
+    timing_semantics_version: str = TIMING_SEMANTICS_VERSION
+    entry_exec_price_source: str = ENTRY_EXEC_PRICE_SOURCE
     _trail_trace_reason_last: str = ""
     _trail_check_emitted: bool = False
 
@@ -3061,11 +3576,26 @@ def run_backtest(
     run_id: Optional[str] = None,
     export_dir: Optional[str] = None,
     perf_debug: bool = False,
+    maker_fee_override: Any = None,
+    taker_fee_override: Any = None,
+    spread_bps_override: Any = None,
+    slippage_bps_override: Any = None,
 ) -> Dict[str, Any]:
     global _CURRENT_EXPORT_DIR
     # --- startup identity log (once per run) ---
     precomputed_debug_enabled = bool(perf_debug or _is_truthy_env_flag("LWF_PRECOMPUTED_DEBUG"))
     spread_bps_est, _spread_bps_env_override = _resolve_backtest_spread_bps()
+    cost_input_probe = _resolve_effective_backtest_costs(
+        default_maker_fee=0.0,
+        default_taker_fee=0.0,
+        default_spread_bps=float(spread_bps_est),
+        default_slippage_bps=float(getattr(C, "SLIPPAGE_BPS", 0.0) or 0.0),
+        maker_fee_cli=maker_fee_override,
+        taker_fee_cli=taker_fee_override,
+        spread_bps_cli=spread_bps_override,
+        slippage_bps_cli=slippage_bps_override,
+    )
+    spread_override_requested = _is_cost_override_source(cost_input_probe.spread_bps_source)
     try:
         logging.getLogger(__name__).info(
             f"[BUILD] backtest.py loaded: file={__file__} BUILD_ID={BUILD_ID}"
@@ -3188,12 +3718,18 @@ def run_backtest(
     state_kv: Dict[str, Dict[str, Any]] = {}
     exchange_id = (os.getenv("LWF_EXCHANGE_ID") or getattr(C, "EXCHANGE_ID", "mexc")).strip().lower() or "mexc"
     meta_symbol = str(symbols[0] if symbols else getattr(C, "BACKTEST_CSV_SYMBOL", "ETH/USDT") or "ETH/USDT").strip()
+    spread_bps_source = "env" if _spread_bps_env_override else "config"
+    fee_maker_source = "config"
+    fee_taker_source = "config"
+    slippage_bps_source = "config"
     market_meta, market_meta_source, market_meta_cache_path = _load_backtest_market_meta(exchange_id, meta_symbol)
     market_meta_source_kind = _market_meta_source_kind(market_meta_source)
     if market_meta is not None:
         try:
-            spread_bps_est = float(getattr(market_meta, "spread_bps", spread_bps_est) or spread_bps_est)
-            if os.getenv("BACKTEST_SPREAD_BPS") in (None, ""):
+            if not bool(spread_override_requested):
+                spread_bps_est = float(getattr(market_meta, "spread_bps", spread_bps_est) or spread_bps_est)
+                spread_bps_source = "market_meta"
+            if (not bool(spread_override_requested)) and os.getenv("BACKTEST_SPREAD_BPS") in (None, ""):
                 setattr(C, "BACKTEST_SPREAD_BPS", float(spread_bps_est))
             logger.info(
                 "[MARKET_META] mode=backtest exchange_id=%s symbol=%s quote=%s maker=%.6f taker=%.6f spread_bps=%.4f source_kind=%s source=%s cache=%s",
@@ -3223,6 +3759,8 @@ def run_backtest(
         try:
             fee_maker_rate = float(getattr(market_meta, "maker_fee_rate", fee_maker_rate) or fee_maker_rate)
             fee_taker_rate = float(getattr(market_meta, "taker_fee_rate", fee_taker_rate) or fee_taker_rate)
+            fee_maker_source = "market_meta"
+            fee_taker_source = "market_meta"
         except Exception:
             pass
     fee_maker_rate = float(fee_maker_rate)
@@ -3236,6 +3774,41 @@ def run_backtest(
         fee_taker_rate = 0.0002
     if exchange_id != "coincheck" and fee_maker_rate <= 0.0:
         fee_maker_rate = fee_taker_rate
+
+    effective_costs = _resolve_effective_backtest_costs(
+        default_maker_fee=float(fee_maker_rate),
+        default_taker_fee=float(fee_taker_rate),
+        default_spread_bps=float(spread_bps_est),
+        default_slippage_bps=float(getattr(C, "SLIPPAGE_BPS", 0.0) or 0.0),
+        default_sources={
+            "maker_fee_rate": str(fee_maker_source),
+            "taker_fee_rate": str(fee_taker_source),
+            "spread_bps": str(spread_bps_source),
+            "slippage_bps": str(slippage_bps_source),
+        },
+        maker_fee_cli=maker_fee_override,
+        taker_fee_cli=taker_fee_override,
+        spread_bps_cli=spread_bps_override,
+        slippage_bps_cli=slippage_bps_override,
+    )
+    fee_maker_rate = float(effective_costs.maker_fee)
+    fee_taker_rate = float(effective_costs.taker_fee)
+    spread_bps_est = float(effective_costs.spread_bps)
+    _apply_backtest_cost_process_state(exchange_id, effective_costs)
+    mixed_exchange_basis_warning = _infer_mixed_exchange_basis_warning(list(symbols or []), exchange_id)
+    effective_cost_assumptions = _build_effective_cost_assumptions(
+        effective_costs,
+        mixed_exchange_basis_warning=bool(mixed_exchange_basis_warning),
+    )
+    logger.info(
+        "[BACKTEST_COST] maker=%.8f taker=%.8f spread_bps=%.4f slippage_bps=%.4f override_source=%s sources=%s",
+        float(effective_costs.maker_fee),
+        float(effective_costs.taker_fee),
+        float(effective_costs.spread_bps),
+        float(effective_costs.slippage_bps),
+        str(effective_costs.override_source),
+        json.dumps(effective_costs.sources, ensure_ascii=True, sort_keys=True),
+    )
 
     # --- Live expectancy (using realized exits so far) ---
     # We use this to gate entries (BUY_REJECT) with the same exit reasons we summarize at the end.
@@ -3598,7 +4171,7 @@ def run_backtest(
         logger.info("BACKTEST START: since_ms=None (no slicing)")
 
 
-    ex = ExchangeClient()
+    ex = _get_exchange_client_class()()
 
     # Ensure markets loaded
     try:
@@ -4592,29 +5165,6 @@ def run_backtest(
     entry_bar_ms = bar_ms  # alias for clarity / backward compatibility
     filter_bar_ms = int(_tf_to_ms(str(filter_tf)))
 
-    def _resolve_tp_sl_same_bar(
-        side: str,
-        bar_open: float,
-        bar_high: float,
-        bar_low: float,
-        bar_close: float,
-        tp: float,
-        sl: float,
-    ) -> str | None:
-        side_l = str(side or "long").lower()
-        hit_tp_local = (side_l == "long" and float(bar_high) >= float(tp)) or (side_l == "short" and float(bar_low) <= float(tp))
-        hit_sl_local = (side_l == "long" and float(bar_low) <= float(sl)) or (side_l == "short" and float(bar_high) >= float(sl))
-        if hit_tp_local and not hit_sl_local:
-            return "TP_HIT"
-        if hit_sl_local and not hit_tp_local:
-            return "STOP_HIT"
-        if not hit_tp_local and not hit_sl_local:
-            return None
-        bullish = float(bar_close) >= float(bar_open)
-        if side_l == "long":
-            return "TP_HIT" if bullish else "STOP_HIT"
-        return "STOP_HIT" if bullish else "TP_HIT"
-
     def _update_be_trail(
         p: "Position",
         bar_high: float,
@@ -5592,6 +6142,20 @@ def run_backtest(
                         "exit_diag": exit_diag,
                         "regime": str(p.regime),
                         "direction": str(p.direction),
+                        "timing_semantics_version": str(getattr(p, "timing_semantics_version", TIMING_SEMANTICS_VERSION)),
+                        "entry_exec_price_source": str(getattr(p, "entry_exec_price_source", ENTRY_EXEC_PRICE_SOURCE)),
+                        "same_signal_bar_open_fill_allowed": False,
+                        "signal_bar_index": int(getattr(p, "signal_i", getattr(p, "entry_i", 0)) or 0),
+                        "signal_ts_ms": int(getattr(p, "signal_ts", 0) or 0),
+                        "entry_exec_bar_index": int(getattr(p, "exec_i", getattr(p, "entry_i", 0)) or 0),
+                        "entry_exec_ts_ms": int(getattr(p, "exec_ts", getattr(p, "opened_ts", 0)) or 0),
+                        "signal_entry_raw": float(getattr(p, "signal_entry_raw", 0.0) or 0.0),
+                        "signal_stop_raw": float(getattr(p, "signal_stop_raw", 0.0) or 0.0),
+                        "signal_tp_raw": float(getattr(p, "signal_tp_raw", 0.0) or 0.0),
+                        "intrabar_order_policy": INTRABAR_ORDER_POLICY,
+                        "intrabar_both_tp_sl_touched": bool(hit_tp and hit_sl),
+                        "intrabar_order_ambiguous": bool(hit_tp and hit_sl),
+                        "intrabar_path_source": "ohlc_only",
                         "entry_raw": float(p.entry_raw),
                         "stop_raw": float(p.stop_raw),
                         "tp_raw": float(p.tp_raw),
@@ -5716,6 +6280,17 @@ def run_backtest(
                     "be_stop_set": float(getattr(p, "be_stop_set", 0.0) or 0.0) if getattr(p, "be_stop_set", None) is not None else None,
                     "candle_ts_run": int(ts_ms),
                     "candle_ts_entry": int(p.entry_ts),
+                    "timing_semantics_version": str(getattr(p, "timing_semantics_version", TIMING_SEMANTICS_VERSION)),
+                    "entry_exec_price_source": str(getattr(p, "entry_exec_price_source", ENTRY_EXEC_PRICE_SOURCE)),
+                    "same_signal_bar_open_fill_allowed": False,
+                    "signal_bar_index": int(getattr(p, "signal_i", getattr(p, "entry_i", 0)) or 0),
+                    "signal_ts_ms": int(getattr(p, "signal_ts", 0) or 0),
+                    "entry_exec_bar_index": int(getattr(p, "exec_i", getattr(p, "entry_i", 0)) or 0),
+                    "entry_exec_ts_ms": int(getattr(p, "exec_ts", getattr(p, "opened_ts", 0)) or 0),
+                    "intrabar_order_policy": INTRABAR_ORDER_POLICY,
+                    "intrabar_both_tp_sl_touched": bool(hit_tp and hit_sl),
+                    "intrabar_order_ambiguous": bool(hit_tp and hit_sl),
+                    "intrabar_path_source": "ohlc_only",
                     "direction": str(getattr(p, "direction", "none")),
                     "regime": getattr(p, "regime", None),
                     "open_reason": "",
@@ -5784,8 +6359,17 @@ def run_backtest(
                     continue
 
                 i_raw = entry_ptr[sym]
-                i = i_raw - 1  # confirmed-bar-only: exclude the current bar at t
-                if i < 0:
+                e = entry_data[sym]
+                signal_exec = _entry_signal_exec_indices(i_raw, len(e["ts"]))
+                if signal_exec is None:
+                    continue
+                # F001 timing semantics: completed bar N creates the signal;
+                # execution is no earlier than next bar open N+1.
+                i, exec_i = signal_exec
+                signal_ts_ms = int(e["ts"][i])
+                exec_ts_ms = int(e["ts"][exec_i])
+                if not _is_strict_next_entry_bar(signal_ts_ms, exec_ts_ms, entry_bar_ms):
+                    _hold("entry_next_bar_missing_or_non_future")
                     continue
 
                 # Preload-history mode: do not allow entries before trade_since_ms.
@@ -5797,7 +6381,6 @@ def run_backtest(
                     _hold('warmup')
                     continue
 
-                e = entry_data[sym]
                 f = filter_data[sym]
 
                 # advance filter pointer (no binary search)
@@ -6145,9 +6728,22 @@ def run_backtest(
                     buy_reject[str(reason)] += 1
                     _hold(str(reason))
 
-                entry_raw = float(sig["entry"])
-                stop_raw = float(sig["stop"])
-                tp_raw = float(sig["take_profit"])
+                signal_entry_raw = float(sig["entry"])
+                signal_stop_raw = float(sig["stop"])
+                signal_tp_raw = float(sig["take_profit"])
+                entry_exec_src = float(e["open"][exec_i])
+                try:
+                    stop_raw, tp_raw = _translate_signal_rr_to_exec_basis(
+                        signal_entry=signal_entry_raw,
+                        signal_stop=signal_stop_raw,
+                        signal_tp=signal_tp_raw,
+                        exec_entry=entry_exec_src,
+                        direction=str(direction),
+                    )
+                except ValueError as exc:
+                    _buy_reject(f"entry_rr_translate({exc})")
+                    continue
+                entry_raw = float(entry_exec_src)
                 stop_raw_pre = float(stop_raw)
                 tp_raw_pre = float(tp_raw)
                 rr0 = None
@@ -6519,7 +7115,6 @@ def run_backtest(
                             bool(cap_ramp_applied),
                         )
 
-                entry_exec_src = float(e["open"][i])
                 entry_exec = float(entry_exec_src) * _side_slip_mult("entry_long")
 
                 # --- entry-time EMA9 break recent context (for conditional TIMEOUT) ---
@@ -6537,7 +7132,7 @@ def run_backtest(
                     ema9_break_recent = False
                     ema9_break_age = None
 
-                t_confirmed = int(t)
+                t_confirmed = int(exec_ts_ms)
                 trail_diag_defaults = R._trail_diag_defaults(
                     str(regime),
                     init_stop=float(stop_raw),
@@ -6554,10 +7149,17 @@ def run_backtest(
                     stop_raw=float(stop_raw_pre),
                     tp_raw=float(tp_raw_pre),
                     opened_ts=int(t_confirmed),
-                    entry_i=int(i),
+                    entry_i=int(exec_i),
                     entry_ts=int(t_confirmed),
                     entry_filter_j=int(j),
-                    entry_diag=_diag_snapshot_basic(int(t), float(entry_raw), float(ei["ema9"][i]), float(ei["ema21"][i]), float(ei["atr14"][i]), float(ei["rsi14"][i]), label="entry"),
+                    entry_diag=_diag_snapshot_basic(int(signal_ts_ms), float(signal_entry_raw), float(ei["ema9"][i]), float(ei["ema21"][i]), float(ei["atr14"][i]), float(ei["rsi14"][i]), label="entry_signal"),
+                    signal_i=int(i),
+                    signal_ts=int(signal_ts_ms),
+                    exec_i=int(exec_i),
+                    exec_ts=int(exec_ts_ms),
+                    signal_entry_raw=float(signal_entry_raw),
+                    signal_stop_raw=float(signal_stop_raw),
+                    signal_tp_raw=float(signal_tp_raw),
                     regime=str(regime),
                     direction=_normalize_position_direction(direction),
                     rr0=rr0,
@@ -6660,23 +7262,37 @@ def run_backtest(
                 _diff_trace_write(sym, {
                     "event": "OPEN",
                     "ts_ms": ts_ms_run,
-                    # OHLC of the *current 5m bar* that produced this OPEN decision.
+                    # OHLC of the completed signal bar; execution is next bar open.
                     "bar_open": float(e["open"][i]),
                     "bar_high": float(e["high"][i]),
                     "bar_low": float(e["low"][i]),
                     "bar_close": float(e["close"][i]),
+                    "exec_bar_open": float(e["open"][exec_i]),
+                    "exec_bar_high": float(e["high"][exec_i]),
+                    "exec_bar_low": float(e["low"][exec_i]),
+                    "exec_bar_close": float(e["close"][exec_i]),
                     "symbol": sym,
                     "mode": "BACKTEST",
                     "tf_entry": entry_tf,
                     "tf_filter": filter_tf,
                     "candle_ts_run": int(ts_ms_run),
                     "candle_ts_entry": int(ts_ms),
+                    "timing_semantics_version": TIMING_SEMANTICS_VERSION,
+                    "entry_exec_price_source": ENTRY_EXEC_PRICE_SOURCE,
+                    "same_signal_bar_open_fill_allowed": False,
+                    "signal_bar_index": int(i),
+                    "signal_ts_ms": int(signal_ts_ms),
+                    "entry_exec_bar_index": int(exec_i),
+                    "entry_exec_ts_ms": int(exec_ts_ms),
                     "direction": str(direction if direction is not None else "none"),
                     "regime": (str(regime).lower() if regime is not None else None),
                     "open_reason": "PAPER_OPEN",
                     "qty": qty,
                     "entry_exec": entry_exec,
                     "entry_raw": entry_raw,
+                    "signal_entry_raw": signal_entry_raw,
+                    "signal_stop_raw": signal_stop_raw,
+                    "signal_tp_raw": signal_tp_raw,
                     "stop_raw": stop_raw,
                     "tp_raw": tp_raw,
                     "rr0": rr0,
@@ -6856,6 +7472,20 @@ def run_backtest(
                         "reason": "force_close_eod",
                         "regime": str(p.regime),
                         "direction": str(p.direction),
+                        "timing_semantics_version": str(getattr(p, "timing_semantics_version", TIMING_SEMANTICS_VERSION)),
+                        "entry_exec_price_source": str(getattr(p, "entry_exec_price_source", ENTRY_EXEC_PRICE_SOURCE)),
+                        "same_signal_bar_open_fill_allowed": False,
+                        "signal_bar_index": int(getattr(p, "signal_i", getattr(p, "entry_i", 0)) or 0),
+                        "signal_ts_ms": int(getattr(p, "signal_ts", 0) or 0),
+                        "entry_exec_bar_index": int(getattr(p, "exec_i", getattr(p, "entry_i", 0)) or 0),
+                        "entry_exec_ts_ms": int(getattr(p, "exec_ts", getattr(p, "opened_ts", 0)) or 0),
+                        "signal_entry_raw": float(getattr(p, "signal_entry_raw", 0.0) or 0.0),
+                        "signal_stop_raw": float(getattr(p, "signal_stop_raw", 0.0) or 0.0),
+                        "signal_tp_raw": float(getattr(p, "signal_tp_raw", 0.0) or 0.0),
+                        "intrabar_order_policy": INTRABAR_ORDER_POLICY,
+                        "intrabar_both_tp_sl_touched": False,
+                        "intrabar_order_ambiguous": False,
+                        "intrabar_path_source": "ohlc_only",
                         "entry_raw": float(p.entry_raw),
                         "stop_raw": float(p.stop_raw),
                         "tp_raw": float(p.tp_raw),
@@ -7121,8 +7751,26 @@ def run_backtest(
         "since_ms": int(since_ms) if since_ms is not None else None,
         "entry_tf": str(entry_tf),
         "filter_tf": str(filter_tf),
+        "timing_semantics_version": TIMING_SEMANTICS_VERSION,
+        "entry_signal_source": "completed_5m_bar",
+        "entry_exec_source": ENTRY_EXEC_PRICE_SOURCE,
+        "same_signal_bar_open_fill_allowed": False,
+        "intrabar_order_policy": INTRABAR_ORDER_POLICY,
         "warmup_bars": int(warmup_bars),
         "spread_bps_est": float(spread_bps_est),
+        "effective_cost_assumptions": dict(effective_cost_assumptions),
+        "effective_maker_fee": float(effective_cost_assumptions["effective_maker_fee"]),
+        "effective_taker_fee": float(effective_cost_assumptions["effective_taker_fee"]),
+        "effective_spread_bps": float(effective_cost_assumptions["effective_spread_bps"]),
+        "effective_spread_bps_semantics": str(effective_cost_assumptions["effective_spread_bps_semantics"]),
+        "effective_slippage_bps": float(effective_cost_assumptions["effective_slippage_bps"]),
+        "effective_slippage_bps_semantics": str(effective_cost_assumptions["effective_slippage_bps_semantics"]),
+        "override_source": str(effective_cost_assumptions["override_source"]),
+        "override_sources": dict(effective_cost_assumptions["override_sources"]),
+        "research_only": True,
+        "mixed_exchange_basis_warning": bool(effective_cost_assumptions["mixed_exchange_basis_warning"]),
+        "final_validation": False,
+        "public_claim": False,
         "recent_bars_entry": int(recent_bars_entry) if recent_bars_entry else None,
         "recent_bars_filter": int(recent_bars_filter) if recent_bars_filter else None,
         # debug: trade==0 diagnosis
@@ -7854,6 +8502,30 @@ def main() -> int:
     parser.add_argument("--precomputed-signals-strict", action="store_true", help="Verify manifest file hashes before fast accounting.")
     parser.add_argument("--precomputed-signals-write-report", action="store_true", help="Write fast_summary.json beside exported fast path CSVs.")
     parser.add_argument("--precomputed-signals-initial-equity", type=float, default=0.0, help="Initial equity override for signal tape accounting.")
+    parser.add_argument(
+        "--maker-fee",
+        type=str,
+        default=None,
+        help="Backtest-only maker fee decimal-rate override. Precedence: CLI > BACKTEST_MAKER_FEE > existing default.",
+    )
+    parser.add_argument(
+        "--taker-fee",
+        type=str,
+        default=None,
+        help="Backtest-only taker fee decimal-rate override. Precedence: CLI > BACKTEST_TAKER_FEE > existing default.",
+    )
+    parser.add_argument(
+        "--spread-bps",
+        type=str,
+        default=None,
+        help="Backtest-only total spread bps override. Per-side 1/3/5 bps means pass total 2/6/10.",
+    )
+    parser.add_argument(
+        "--slippage-bps",
+        type=str,
+        default=None,
+        help="Backtest-only one-way per-side slippage bps override.",
+    )
 
     parser.add_argument("--warmup", type=int, default=int(getattr(C, "BACKTEST_WARMUP_BARS", 300)))
     parser.add_argument("--initial", type=float, default=float(getattr(C, "BACKTEST_INITIAL_EQUITY", 300000.0)))
@@ -7871,6 +8543,11 @@ def main() -> int:
         help="Use only latest N filter bars (0 disables).",
     )
     args = parser.parse_args()
+    try:
+        _validate_backtest_cost_inputs(args)
+    except ValueError as exc:
+        logger.error("[BACKTEST_COST] fail closed: %s", exc)
+        return 2
 
     if int(getattr(args, "year", 0) or 0) > 0:
         _apply_year_preset(int(args.year))
@@ -7920,6 +8597,10 @@ def main() -> int:
         recent_bars_filter=recent_filter,
         run_id=str(getattr(args, "run_id", "") or ""),
         perf_debug=bool(getattr(args, "perf", False)),
+        maker_fee_override=getattr(args, "maker_fee", None),
+        taker_fee_override=getattr(args, "taker_fee", None),
+        spread_bps_override=getattr(args, "spread_bps", None),
+        slippage_bps_override=getattr(args, "slippage_bps", None),
         **kwargs,
     )
 
@@ -8033,19 +8714,49 @@ def main() -> int:
             "fav_adv_ratio_p90": float(res.get("fav_adv_ratio_p90", 0.0) or 0.0),
             "fav_adv_ratio_p99": float(res.get("fav_adv_ratio_p99", 0.0) or 0.0),
             "exit_hint": str(res.get("exit_hint", "") or ""),
+            "effective_cost_assumptions": dict(res.get("effective_cost_assumptions") or {}),
+            "research_only": True,
+            "mixed_exchange_basis_warning": bool(res.get("mixed_exchange_basis_warning", False)),
+            "final_validation": False,
+            "public_claim": False,
         }
-        _write_yearly_report_from_csv(
-            out_path=report_out,
-            build_id=str(BUILD_ID),
-            preset_name=str(preset_name or ""),
-            year=int(args.year) if int(getattr(args, "year", 0) or 0) > 0 else None,
-            mode="BACKTEST",
-            overall=overall_report,
-            include_yearly=bool(include_yearly),
-            include_monthly=bool(include_monthly),
-            risk_free_rate=float(risk_free_rate),
-        )
-        _write_last_run_reference(mode="BACKTEST", replay_report=str(report_out), extra={"report_written": True})
+        report_out_dir = os.path.dirname(str(report_out)) or str(res.get("export_dir") or _current_export_dir())
+        if int(res.get("trades", 0) or 0) == 0:
+            normal_report_skipped_reason = _zero_trade_skipped_report_reason(res)
+            status_paths = _write_zero_trade_report_status_artifacts(
+                out_dir=report_out_dir,
+                report_out=str(report_out),
+                result=res,
+                preset_name=str(preset_name or ""),
+                normal_report_skipped_reason=str(normal_report_skipped_reason),
+            )
+            _write_last_run_reference(
+                mode="BACKTEST",
+                replay_report="",
+                extra={
+                    "report_written": False,
+                    "report_generated": False,
+                    "normal_report_skipped_reason": str(normal_report_skipped_reason),
+                    **status_paths,
+                },
+            )
+        else:
+            report_written = _write_yearly_report_from_csv(
+                out_path=report_out,
+                build_id=str(BUILD_ID),
+                preset_name=str(preset_name or ""),
+                year=int(args.year) if int(getattr(args, "year", 0) or 0) > 0 else None,
+                mode="BACKTEST",
+                overall=overall_report,
+                include_yearly=bool(include_yearly),
+                include_monthly=bool(include_monthly),
+                risk_free_rate=float(risk_free_rate),
+            )
+            _write_last_run_reference(
+                mode="BACKTEST",
+                replay_report=str(report_out) if bool(report_written) else "",
+                extra={"report_written": bool(report_written), "report_generated": bool(report_written)},
+            )
     return 0
     
 if __name__ == "__main__":
